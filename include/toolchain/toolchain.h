@@ -13,14 +13,6 @@
 // #defines for comparison with LLVM_VERSION_INTEGER
 #define LLVM_VERSION_CODE(major, minor, point) ((10000 * major) + (100 * minor) + point)
 
-// From LLVM 4.0.0 the clEnumValEnd sentinel is no longer needed.
-// We define a macro to adapt to the CommandLine syntax based on LLVM version.
-#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(4, 0, 0)
-#define CL_ENUM_VAL_SENTINEL , clEnumValEnd
-#else
-#define CL_ENUM_VAL_SENTINEL
-#endif
-
 namespace llvm { namespace cl { class OptionCategory; } }
 
 namespace codegen {
@@ -82,9 +74,7 @@ extern PipelineCompilationModeOptions PipelineCompilationMode;
 #ifdef ENABLE_PAPI
 extern std::string PapiCounterOptions;
 #endif
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 7, 0)
 extern std::string ShowASMOption;
-#endif
 extern const char * ObjectCacheDir;
 extern unsigned CacheDaysLimit;  // set from command line
 extern int FreeCallBisectLimit;  // set from command line

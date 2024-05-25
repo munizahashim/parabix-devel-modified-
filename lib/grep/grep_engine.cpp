@@ -90,8 +90,7 @@ MaxLimitTerminationMode("maxlimit-termination-mode",
                   cl::desc("method of pipeline termination when -m=maxlimit is reached."),
                   cl::values(clEnumValN(UntilNMode::ReportAcceptedLengthAtAndBeforeN, "report", "halt pipeline after maxlimit using truncated streamset"),
                              clEnumValN(UntilNMode::TerminateAtN, "terminate", "halt pipeline after maxlimit using streamset copy"),
-                             clEnumValN(UntilNMode::ZeroAfterN, "zero", "fully process the file")
-                  CL_ENUM_VAL_SENTINEL));
+                             clEnumValN(UntilNMode::ZeroAfterN, "zero", "fully process the file")));
 
 
 const auto ENCODING_BITS = 8;

@@ -578,8 +578,6 @@ llvm::Value * IDISA_AVX2_Builder::mvmd_compress(unsigned fw, llvm::Value * a, ll
     return IDISA_Builder::mvmd_compress(fw, a, select_mask);
 }
 
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 8, 0)
-
 std::string IDISA_AVX512F_Builder::getBuilderUniqueName() {
     return mBitBlockWidth != 512 ? "AVX512F_" + std::to_string(mBitBlockWidth) : "AVX512BW";
 }
@@ -615,14 +613,8 @@ llvm::Value * IDISA_AVX512F_Builder::hsimd_packl(unsigned fw, llvm::Value * a, l
 
 Value * IDISA_AVX512F_Builder::hsimd_packus(unsigned fw, Value * a, Value * b) {
     if (hostCPUFeatures.hasAVX512BW && ((fw == 16) || (fw == 32)) && (getVectorBitWidth(a) == AVX512_width)) {
-#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(5, 0, 0)
-        Function * pack_func = Intrinsic::getDeclaration(getModule(), fw == 16 ? Intrinsic::x86_avx512_mask_packuswb_512 : Intrinsic::x86_avx512_mask_packusdw_512);
-        Constant * mask = Constant::getAllOnesValue(getIntNTy(AVX512_width/(fw/2)));
-        Value * packed = CreateCall(pack_func->getFunctionType(), pack_func, {fwCast(fw, a), fwCast(fw, b), fwCast(32, allZeroes()), mask});
-#else
         Function * pack_func = Intrinsic::getDeclaration(getModule(), fw == 16 ? Intrinsic::x86_avx512_packuswb_512 : Intrinsic::x86_avx512_packusdw_512);
         Value * packed = CreateCall(pack_func->getFunctionType(), pack_func, {fwCast(fw, a), fwCast(fw, b)});
-#endif
         auto field_count = AVX512_width/64;
         SmallVector<Constant *, 16> Idxs(field_count);
         for (unsigned int i = 0; i < field_count/2; i++) {
@@ -638,14 +630,8 @@ Value * IDISA_AVX512F_Builder::hsimd_packus(unsigned fw, Value * a, Value * b) {
 
 Value * IDISA_AVX512F_Builder::hsimd_packss(unsigned fw, Value * a, Value * b) {
     if (hostCPUFeatures.hasAVX512BW && ((fw == 16) || (fw == 32)) && (getVectorBitWidth(a) == AVX512_width)) {
-#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(5, 0, 0)
-        Function * pack_func = Intrinsic::getDeclaration(getModule(), fw == 16 ? Intrinsic::x86_avx512_mask_packsswb_512 : Intrinsic::x86_avx512_mask_packssdw_512);
-        Constant * mask = Constant::getAllOnesValue(getIntNTy(AVX512_width/(fw/2)));
-        Value * packed = CreateCall(pack_func->getFunctionType(), pack_func, {fwCast(fw, a), fwCast(fw, b), fwCast(32, allZeroes()), mask});
-#else
         Function * pack_func = Intrinsic::getDeclaration(getModule(), fw == 16 ? Intrinsic::x86_avx512_packsswb_512 : Intrinsic::x86_avx512_packssdw_512);
         Value * packed = CreateCall(pack_func->getFunctionType(), pack_func, {fwCast(fw, a), fwCast(fw, b)});
-#endif
         auto field_count = AVX512_width/64;
         SmallVector<Constant *, 16> Idxs(field_count);
         for (unsigned int i = 0; i < field_count/2; i++) {
@@ -661,39 +647,10 @@ Value * IDISA_AVX512F_Builder::hsimd_packss(unsigned fw, Value * a, Value * b) {
 
 
 llvm::Value * IDISA_AVX512F_Builder::esimd_bitspread(unsigned fw, llvm::Value * bitmask) {
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(6, 0, 0)
     const auto field_count = mBitBlockWidth / fw;
     Type * maskTy = FixedVectorType::get(getInt1Ty(), field_count);
     Type * resultTy = fwVectorType(fw);
     return CreateZExt(CreateBitCast(CreateZExtOrTrunc(bitmask, getIntNTy(field_count)), maskTy), resultTy);
-#else
-    if (mBitBlockWidth == 512 && fw == 64) {
-#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(7, 0, 0)
-        Function * broadcastFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_broadcasti64x4_512);
-#else
-        Function * broadcastFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_broadcasti64x4_512);
-#endif
-        Value * broadcastMask = CreateZExtOrTrunc(bitmask, getInt8Ty());
-
-        const unsigned int srcFieldCount = 8;
-        Constant * srcArr[srcFieldCount];
-        for (unsigned int i = 0; i < srcFieldCount; i++) {
-            srcArr[i] = getInt64(0);
-        }
-        Constant * src = ConstantVector::get({srcArr, srcFieldCount});
-
-        const unsigned int aFieldCount = 4;
-        Constant * aArr[aFieldCount];
-        for (unsigned int i = 0; i < aFieldCount; i++) {
-            aArr[i] = getInt64(1);
-        }
-        Constant * a = ConstantVector::get({aArr, aFieldCount});
-
-        return CreateCall(broadcastFunc->getFunctionType(), broadcastFunc, {a, src, broadcastMask});
-    }
-
-    return IDISA_Builder::esimd_bitspread(fw, bitmask);
-#endif
 }
 
 llvm::Value * IDISA_AVX512F_Builder::mvmd_srl(unsigned fw, llvm::Value * a, llvm::Value * shift, const bool safe) {
@@ -915,20 +872,9 @@ Value * IDISA_AVX512F_Builder::esimd_mergeh(unsigned fw, Value * a, Value * b) {
         Constant * interleave_table = bit_interleave_byteshuffle_table(fw);
         // Merge the bytes.
         Value * byte_merge = esimd_mergeh(8, a, b);
-#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(4, 0, 0)
-        Function * shufFn = Intrinsic::getDeclaration(getModule(),  Intrinsic::x86_avx512_mask_pshuf_b_512);
-        // Make a shuffle table that translates the lower 4 bits of each byte in
-        // order to spread out the bits: xxxxdcba => .d.c.b.a
-        // We use two copies of the table for the AVX2 _mm256_shuffle_epi8
-        Value * zeroByteSplat = fwCast(8, allZeroes());
-        Constant * mask = ConstantInt::getAllOnesValue(getInt64Ty());
-        Value * low_bits = CreateCall(shufFn->getFunctionType(), shufFn, {interleave_table, fwCast(8, simd_and(byte_merge, simd_lomask(8))), zeroByteSplat, mask});
-        Value * high_bits = simd_slli(16, CreateCall(shufFn->getFunctionType(), shufFn, {interleave_table, fwCast(8, simd_srli(8, byte_merge, 4)), zeroByteSplat, mask}), fw);
-#else
         Function * shufFn = Intrinsic::getDeclaration(getModule(),  Intrinsic::x86_avx512_pshuf_b_512);
         Value * low_bits = CreateCall(shufFn->getFunctionType(), shufFn, {interleave_table, fwCast(8, simd_and(byte_merge, simd_lomask(8)))});
         Value * high_bits = simd_slli(16, CreateCall(shufFn->getFunctionType(), shufFn, {interleave_table, fwCast(8, simd_srli(8, byte_merge, 4))}), fw);
-#endif
         Value * lo_move_back = simd_srli(16, low_bits, 8-fw);
         Value * hi_move_fwd = simd_slli(16, high_bits, 8-fw);
         return simd_or(simd_if(1, simd_himask(16), high_bits, low_bits), simd_or(lo_move_back, hi_move_fwd));
@@ -960,21 +906,9 @@ Value * IDISA_AVX512F_Builder::esimd_mergel(unsigned fw, Value * a, Value * b) {
         Constant * interleave_table = bit_interleave_byteshuffle_table(fw);
         // Merge the bytes.
         Value * byte_merge = esimd_mergel(8, a, b);
-
-#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(4, 0, 0)
-        Function * shufFn = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_pshuf_b_512);
-        // Make a shuffle table that translates the lower 4 bits of each byte in
-        // order to spread out the bits: xxxxdcba => .d.c.b.a
-        // We use two copies of the table for the AVX2 _mm256_shuffle_epi8
-        Value * zeroByteSplat = fwCast(8, allZeroes());
-        Constant * mask = ConstantInt::getAllOnesValue(getInt64Ty());
-        Value * low_bits = CreateCall(shufFn->getFunctionType(), shufFn, {interleave_table, fwCast(8, simd_and(byte_merge, simd_lomask(8))), zeroByteSplat, mask});
-        Value * high_bits = simd_slli(16, CreateCall(shufFn->getFunctionType(), shufFn, {interleave_table, fwCast(8, simd_srli(8, byte_merge, 4)), zeroByteSplat, mask}), fw);
-#else
         Function * shufFn = Intrinsic::getDeclaration(getModule(),  Intrinsic::x86_avx512_pshuf_b_512);
         Value * low_bits = CreateCall(shufFn->getFunctionType(), shufFn, {interleave_table, fwCast(8, simd_and(byte_merge, simd_lomask(8)))});
         Value * high_bits = simd_slli(16, CreateCall(shufFn->getFunctionType(), shufFn, {interleave_table, fwCast(8, simd_srli(8, byte_merge, 4))}), fw);
-#endif
         Value * lo_move_back = simd_srli(16, low_bits, 8-fw);
         Value * hi_move_fwd = simd_slli(16, high_bits, 8-fw);
         return simd_or(simd_if(1, simd_himask(16), high_bits, low_bits), simd_or(lo_move_back, hi_move_fwd));
@@ -1095,7 +1029,4 @@ void IDISA_AVX512F_Builder::getAVX512Features() {
         hostCPUFeatures.hasAVX512VPOPCNTDQ = features.lookup("avx512_vpopcntdq");
     }
 }
-#endif
-
-
 }

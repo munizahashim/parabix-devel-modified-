@@ -73,8 +73,7 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
 
                         clEnumVal(PrintKernelSizes, "Write kernel state object size in bytes to stderr."),
                         clEnumVal(PrintPipelineGraph, "Write PipelineKernel graph in dot file format to stderr."),
-                        clEnumVal(ForcePipelineRecompilation, "Disable object cache lookup for any PipelineKernel.")
-                        CL_ENUM_VAL_SENTINEL), cl::cat(CodeGenOptions));
+                        clEnumVal(ForcePipelineRecompilation, "Disable object cache lookup for any PipelineKernel.")), cl::cat(CodeGenOptions));
 
 
 std::string ShowIROption = OmittedOption;
@@ -92,11 +91,9 @@ static cl::opt<std::string, true> clPapiCounterOptions("PapiCounters", cl::locat
                                                        cl::value_desc("comma delimited list"), cl::cat(CodeGenOptions));
 #endif
 
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 7, 0)
 std::string ShowASMOption = OmittedOption;
 static cl::opt<std::string, true> ASMOutputFilenameOption("ShowASM", cl::location(ShowASMOption), cl::ValueOptional,
                                                          cl::desc("Print generated assembly code to stderr (by omitting =<filename> or a file"), cl::value_desc("filename"), cl::cat(CodeGenOptions));
-#endif
 
 // Enable Debug Options to be specified on the command line
 
@@ -106,15 +103,13 @@ OptimizationLevel("optimization-level", cl::location(OptLevel), cl::init(CodeGen
                   cl::values(clEnumValN(CodeGenOpt::None, "none", "no optimizations (default)"),
                              clEnumValN(CodeGenOpt::Less, "less", "trivial optimizations"),
                              clEnumValN(CodeGenOpt::Default, "standard", "standard optimizations"),
-                             clEnumValN(CodeGenOpt::Aggressive, "aggressive", "aggressive optimizations")
-                  CL_ENUM_VAL_SENTINEL), cl::cat(CodeGenOptions));
+                             clEnumValN(CodeGenOpt::Aggressive, "aggressive", "aggressive optimizations")), cl::cat(CodeGenOptions));
 static cl::opt<CodeGenOpt::Level, true>
 BackEndOptOption("backend-optimization-level", cl::location(BackEndOptLevel), cl::init(CodeGenOpt::None), cl::desc("Set the back-end optimization level:"),
                   cl::values(clEnumValN(CodeGenOpt::None, "none", "no optimizations (default)"),
                              clEnumValN(CodeGenOpt::Less, "less", "trivial optimizations"),
                              clEnumValN(CodeGenOpt::Default, "standard", "standard optimizations"),
-                             clEnumValN(CodeGenOpt::Aggressive, "aggressive", "aggressive optimizations")
-                CL_ENUM_VAL_SENTINEL), cl::cat(CodeGenOptions));
+                             clEnumValN(CodeGenOpt::Aggressive, "aggressive", "aggressive optimizations")), cl::cat(CodeGenOptions));
 
 PipelineCompilationModeOptions PipelineCompilationMode = PipelineCompilationModeOptions::DefaultFast;
 
@@ -123,8 +118,7 @@ PipelineCompilationModeOption("pipeline-optimization-level", cl::location(Pipeli
                   cl::init(PipelineCompilationModeOptions::DefaultFast),
                   cl::desc("Set the pipeline optimization level:"),
                   cl::values(clEnumValN(PipelineCompilationModeOptions::DefaultFast, "fast", "minimal analysis(default)"),
-                             clEnumValN(PipelineCompilationModeOptions::Expensive, "aggressive", "full analysis")
-                  CL_ENUM_VAL_SENTINEL), cl::cat(CodeGenOptions));
+                             clEnumValN(PipelineCompilationModeOptions::Expensive, "aggressive", "full analysis")), cl::cat(CodeGenOptions));
 
 static cl::opt<bool, true> EnableObjectCacheOption("enable-object-cache", cl::location(EnableObjectCache), cl::init(true),
                                                    cl::desc("Enable object caching"), cl::cat(CodeGenOptions));
@@ -184,24 +178,20 @@ static cl::opt<unsigned, true>
 MaxTaskThreadsOption("max-task-threads", cl::location(TaskThreads),
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
                      cl::init(std::thread::hardware_concurrency()),
-#elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
-                     cl::init(llvm::sys::getHostNumPhysicalCores()),
 #else
-                     cl::init(2),
+                     cl::init(llvm::sys::getHostNumPhysicalCores()),
 #endif
                      cl::desc("Maximum number of threads to assign for separate pipeline tasks."),
                      cl::value_desc("positive integer"));
 
 static cl::opt<unsigned, true>
 ThreadNumOption("thread-num", cl::location(SegmentThreads),
-                #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
                 cl::init(std::thread::hardware_concurrency() - 1),
-                #elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
+#else
                 // If we have more than 2 cores, leave one for other processes,
                 // and use the rest for multithreading of the pipeline.
                 cl::init(std::max(llvm::sys::getHostNumPhysicalCores() - 1, 2)),
-#else
-                cl::init(2),
 #endif
                 cl::desc("Number of threads used for segment pipeline parallel"),
                 cl::value_desc("positive integer"));
@@ -297,9 +287,7 @@ inline bool disableObjectCacheDueToCommandLineOptions() {
     if (DebugOptions.isSet(PrintPipelineGraph)) return true;
     if (ShowIROption != OmittedOption) return true;
     if (ShowUnoptimizedIROption != OmittedOption) return true;
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 7, 0)
     if (ShowASMOption != OmittedOption) return true;
-    #endif
 //    if (pablo::ShowPabloOption != OmittedOption) return true;
 //    if (pablo::ShowOptimizedPabloOption != OmittedOption) return true;
     return false;
@@ -318,11 +306,9 @@ void ParseCommandLineOptions(int argc, const char * const *argv, std::initialize
     AddParabixVersionPrinter();
 
     codegen::ProgramName = argv[0];
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 7, 0)
     if (hiding.size() != 0) {
         cl::HideUnrelatedOptions(ArrayRef<const cl::OptionCategory *>(hiding));
     }
-#endif
     cl::ParseCommandLineOptions(argc, argv);
 //    if (LLVM_UNLIKELY(!PabloIllustrateBitstreamRegEx.empty() || IllustratorDisplay != 0)) {
 //        EnableIllustrator = true;
@@ -333,22 +319,13 @@ void ParseCommandLineOptions(int argc, const char * const *argv, std::initialize
         EnablePipelineObjectCache = false;
     }
     ObjectCacheDir = ObjectCacheDirOption.empty() ? nullptr : ObjectCacheDirOption.data();
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 7, 0)
     target_Options.MCOptions.AsmVerbose = true;
-#endif
 }
 
-#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(6, 0, 0)
-void printParabixVersion () {
-    outs() << "Unicode version " << UCD::UnicodeVersion << "\n";
-    outs() << "Parabix (http://parabix.costar.sfu.ca/):\n  " << "Parabix revision " << PARABIX_VERSION << "\n";
-}
-#else
 void printParabixVersion (raw_ostream & outs) {
     outs << "Unicode version " << UCD::UnicodeVersion << "\n";
     outs << "Parabix (http://parabix.costar.sfu.ca/):\n  " << "Parabix revision " << PARABIX_VERSION << "\n";
 }
-#endif
 
 void AddParabixVersionPrinter() {
     cl::AddExtraVersionPrinter(&printParabixVersion);
@@ -358,10 +335,8 @@ void setTaskThreads(unsigned taskThreads) {
     TaskThreads = std::max(taskThreads, 1u);
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
     unsigned coresPerTask = std::thread::hardware_concurrency()/TaskThreads;
-#elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
-    unsigned coresPerTask = llvm::sys::getHostNumPhysicalCores()/TaskThreads;
 #else
-    unsigned coresPerTask = 2;  // assumption
+    unsigned coresPerTask = llvm::sys::getHostNumPhysicalCores()/TaskThreads;
 #endif
     SegmentThreads = std::min(coresPerTask, SegmentThreads);
 }

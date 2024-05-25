@@ -70,16 +70,14 @@ static cl::list<std::string> IncludeFiles("include", cl::ZeroOrMore, cl::desc("I
 DevDirAction DevicesFlag;
 static cl::opt<DevDirAction, true> DevicesOption("D", cl::desc("Processing mode for devices:"),
                                                  cl::values(clEnumValN(Read, "read", "Treat devices as files to be searched."),
-                                                            clEnumValN(Skip, "skip", "Silently skip devices.")
-                                                            CL_ENUM_VAL_SENTINEL), cl::cat(Input_Options), cl::location(DevicesFlag), cl::init(Read));
+                                                            clEnumValN(Skip, "skip", "Silently skip devices.")), cl::cat(Input_Options), cl::location(DevicesFlag), cl::init(Read));
 static cl::alias DevicesAlias("devices", cl::desc("Alias for -D"), cl::aliasopt(DevicesOption));
 
 DevDirAction DirectoriesFlag;
 static cl::opt<DevDirAction, true> DirectoriesOption("d", cl::desc("Processing mode for directories:"),
                                                      cl::values(clEnumValN(Read, "read", "Print an error message for any listed directories."),
                                                                 clEnumValN(Skip, "skip", "Silently skip directories."),
-                                                                clEnumValN(Recurse, "recurse", "Recursive process directories, equivalent to -r.")
-                                                                CL_ENUM_VAL_SENTINEL), cl::cat(Input_Options), cl::location(DirectoriesFlag), cl::init(Read));
+                                                                clEnumValN(Recurse, "recurse", "Recursive process directories, equivalent to -r.")), cl::cat(Input_Options), cl::location(DirectoriesFlag), cl::init(Read));
 static cl::alias DirectoriesAlias("directories", cl::desc("Alias for -d"), cl::aliasopt(DirectoriesOption));
 
 static cl::opt<bool> TraceFileSelect("TraceFileSelect", cl::desc("Trace file selection"), cl::cat(Input_Options));

@@ -12,11 +12,7 @@
 #include <llvm/IR/MDBuilder.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
-#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(4, 0, 0)
-#include <llvm/Bitcode/ReaderWriter.h>
-#else
 #include <llvm/Bitcode/BitcodeWriter.h>
-#endif
 #include <llvm/Transforms/Utils/Local.h>
 #include <sstream>
 

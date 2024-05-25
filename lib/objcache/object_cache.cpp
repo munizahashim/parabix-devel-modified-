@@ -12,12 +12,8 @@
 #include <llvm/Support/Debug.h>
 #include <llvm/IR/Module.h>
 #include <toolchain/toolchain.h>
-#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(4, 0, 0)
-#include <llvm/Bitcode/ReaderWriter.h>
-#else
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
-#endif
 #include <llvm/IR/Verifier.h>
 #include <system_error>
 
@@ -125,12 +121,7 @@ CacheObjectResult ParabixObjectCache::loadCachedObjectFile(kernel::KernelBuilder
         auto kernelBuffer = MemoryBuffer::getFile(fileName, false, false, false);
         #endif
         if (kernelBuffer) {
-
-            #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(4, 0, 0)
-            auto loadedFile = getLazyBitcodeModule(std::move(kernelBuffer.get()), b.getContext());
-            #else
             auto loadedFile = getOwningLazyBitcodeModule(std::move(kernelBuffer.get()), b.getContext());
-            #endif
             // if there was no error when parsing the bitcode
             if (LLVM_LIKELY(loadedFile)) {
 

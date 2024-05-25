@@ -8,9 +8,7 @@
 #include <llvm/IR/Verifier.h>
 // #include <llvm/Analysis/CFGPrinter.h>
 #endif
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(6, 0, 0)
 #include <llvm/Transforms/Scalar/MemCpyOptimizer.h>
-#endif
 
 namespace kernel {
 
@@ -89,7 +87,7 @@ void PipelineCompiler::runOptimizationPasses(KernelBuilder & b) {
     #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(17, 0, 0)
     // TODO: look into using the newer pass manager system
     // pm->add(new MemCpyOptPass());
-    #elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(6, 0, 0)
+    #else
     pm->add(createMemCpyOptPass());
     #endif
     // pm->add(createHotColdSplittingPass());

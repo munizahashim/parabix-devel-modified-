@@ -20,9 +20,7 @@
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Target/TargetMachine.h>
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 9, 0)
 #include <llvm/Transforms/Scalar/GVN.h>
-#endif
 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(7, 0, 0)
 #define OF_None F_None
 #endif
@@ -44,11 +42,7 @@ NVPTXDriver::NVPTXDriver(std::string && moduleName)
     initializeCodeGen(*Registry);
     initializeLoopStrengthReducePass(*Registry);
     initializeLowerIntrinsicsPass(*Registry);
-#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(3, 9, 0)
-    initializeUnreachableBlockElimPass(*Registry);
-#else
     initializeUnreachableBlockElimLegacyPassPass(*Registry);
-#endif
 
     mMainModule->setDataLayout("e-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-v16:16:16-v32:32:32-v64:64:64-v128:128:128-n16:32:64");
     mMainModule->setTargetTriple("nvptx64-nvidia-cuda");

@@ -20,14 +20,12 @@ const cl::OptionCategory * LLVM_READONLY re_toolchain_flags() {
 
 static cl::bits<RE_PrintFlags>
     PrintOptions(cl::values(clEnumVal(ShowREs, "Show parsed regular expressions and transformations that change them"),
-                            clEnumVal(ShowAllREs, "Print all regular expression passes")
-                            CL_ENUM_VAL_SENTINEL), cl::cat(RegexOptions));
+                            clEnumVal(ShowAllREs, "Print all regular expression passes")), cl::cat(RegexOptions));
 
 static cl::bits<RE_AlgorithmFlags>
     AlgorithmOptions(cl::values(clEnumVal(DisableLog2BoundedRepetition, "disable log2 optimizations for bounded repetition of bytes"),
                               clEnumVal(DisableIfHierarchy, "disable nested if hierarchy for generated Unicode classes (not recommended)"),
-                              clEnumVal(DisableMatchStar, "disable MatchStar optimization")
-                              CL_ENUM_VAL_SENTINEL), cl::cat(RegexOptions));
+                              clEnumVal(DisableMatchStar, "disable MatchStar optimization")), cl::cat(RegexOptions));
 
 
 static cl::opt<bool> UnicodeLevel2("U2", cl::desc("Enable Unicode Level matching under canonical and compatible (?K) equivalence."), cl::cat(RegexOptions));

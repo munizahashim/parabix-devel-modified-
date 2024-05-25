@@ -45,14 +45,9 @@ void * ProgramBuilder::compile() {
     }
     void * finalObj;
     {
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(4, 0, 0)
         NamedRegionTimer T(kernel->getSignature(), kernel->getName(),
                            "pipeline", "Pipeline Compilation",
                            codegen::TimeKernelsIsEnabled);
-#else
-        NamedRegionTimer T(kernel->getName(), "Pipeline Compilation",
-                           codegen::TimeKernelsIsEnabled);
-#endif
         finalObj = compileKernel(kernel);
     }
     return finalObj;

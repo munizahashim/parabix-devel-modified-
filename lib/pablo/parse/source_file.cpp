@@ -15,8 +15,7 @@ namespace parse {
 inline static std::string appendToBasePath(std::string const & filename) {
     llvm::SmallString<128> path{};
 #ifdef PARABIX_OBJECT_CACHE
-    path = PARABIX_OBJECT_CACHE;
-    path = llvm::sys::path::parent_path(path);
+    path.assign(llvm::sys::path::parent_path(PARABIX_OBJECT_CACHE));
 #else
     // default: $HOME/.parabix
     sys::path::home_directory(path);

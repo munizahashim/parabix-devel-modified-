@@ -59,7 +59,6 @@ public:
     ~IDISA_AVX2_Builder() override {}
 };
 
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(3, 8, 0)
 class IDISA_AVX512F_Builder : public IDISA_AVX2_Builder {
 public:
     static const unsigned NativeBitBlockWidth = AVX512_width;
@@ -102,6 +101,5 @@ private:
     };
     Features hostCPUFeatures;
 };
-#endif
 
 }

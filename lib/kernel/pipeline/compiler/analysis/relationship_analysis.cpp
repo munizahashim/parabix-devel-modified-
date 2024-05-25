@@ -908,8 +908,10 @@ void PipelineAnalysis::generateInitialPipelineGraph(KernelBuilder & b) {
     }
 
     // Pipeline optimizations
-    B.combineDuplicateKernels(b);
-    B.removeUnusedKernels(p_in, p_out);
+    if (LLVM_UNLIKELY(!codegen::EnableIllustrator)) {
+        B.combineDuplicateKernels(b);
+        B.removeUnusedKernels(p_in, p_out);
+    }
 
 }
 
