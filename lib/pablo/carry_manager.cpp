@@ -56,14 +56,15 @@ static Value * castToSummaryType(KernelBuilder & b, Value * carryOut, Type * sum
     if (!(carryOut->getType()->isIntegerTy() || carryOut->getType() == b.getBitBlockType())) {
         assert (false);
     }
-
-    if (carryOut->getType() == summaryTy) {
+    Type * carryOutTy = carryOut->getType();
+    if (carryOutTy == summaryTy) {
         return carryOut;
     } else if (summaryTy == b.getBitBlockType()) {
         return b.CreateBitCast(b.CreateZExt(carryOut, b.getIntNTy(b.getBitBlockWidth())), b.getBitBlockType());
-    } else {
-        // assert (carryOut->getType()->getPrimitiveSizeInBits() <= summaryTy->getPrimitiveSizeInBits());
+    } else if (carryOutTy->isIntegerTy() && summaryTy->isIntegerTy()) {
         return b.CreateZExt(carryOut, summaryTy);
+    } else {
+        return b.CreateBitCast(carryOut, summaryTy);
     }
 }
 
