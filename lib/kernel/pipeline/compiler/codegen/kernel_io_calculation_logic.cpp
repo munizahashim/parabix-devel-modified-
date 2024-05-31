@@ -850,8 +850,8 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     // we can proceed.
 
     // TODO: can we determine which locks will always dominate another?
-
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
+        assert (!mIsIOProcessThread);
         acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
     }
 

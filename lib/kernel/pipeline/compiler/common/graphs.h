@@ -282,7 +282,6 @@ enum BufferLocality {
 
 enum KernelFlags {
     PermitSegmentSizeSlidingWindowing = 1
-    , InitialSourceConsumer = 2
 };
 
 struct BufferNode {

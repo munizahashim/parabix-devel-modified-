@@ -74,8 +74,7 @@ Value * PipelineCompiler::hasPipelineTerminated(KernelBuilder & b) {
         if (const auto type = mTerminationCheck[partitionId]) {
             const auto root = FirstKernelInPartition[partitionId];
             assert (HasTerminationSignal[root]);
-            Value * signal = readIfKernelIsClosed(b, root);
-
+            Value * const signal = readIfKernelIsClosed(b, root);
             if (type & TerminationCheckFlag::Hard) {
                 assert (signal);
                 Value * const final = b.CreateICmpEQ(signal, fatal);
@@ -198,7 +197,7 @@ Value *  PipelineCompiler::readIfKernelIsClosed(KernelBuilder & b, const size_t 
     Value * signal = mKernelTerminationSignal[idx];
     if (signal == nullptr) {
         signal = readTerminationSignal(b, idx);
-        mKernelTerminationSignal[idx] = signal;
+       // mKernelTerminationSignal[idx] = signal;
     }
     return signal;
 }
@@ -226,7 +225,9 @@ void PipelineCompiler::checkPropagatedTerminationSignals(KernelBuilder & b) {
         b.CreateUnlikelyCondBr(allConsumersFinished, caughtPropagatedTerminationSignal, np);
         if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
             b.SetInsertPoint(caughtPropagatedTerminationSignal);
-            acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+            if (LLVM_LIKELY(!mIsIOProcessThread)) {
+                acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+            }
             b.CreateBr(mKernelTerminated);
         }
         BasicBlock * const entryPoint = b.GetInsertBlock();
@@ -258,7 +259,7 @@ void PipelineCompiler::checkPropagatedTerminationSignals(KernelBuilder & b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readTerminationSignal
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::readTerminationSignal(KernelBuilder & b, const unsigned kernelId) {
+Value * PipelineCompiler::readTerminationSignal(KernelBuilder & b, const unsigned kernelId) const {
     assert (HasTerminationSignal.test(kernelId));
     const auto name = TERMINATION_PREFIX + std::to_string(kernelId);
     auto ref = b.getScalarFieldPtr(name);
@@ -272,6 +273,14 @@ void PipelineCompiler::writeTerminationSignal(KernelBuilder & b, const unsigned 
     assert (HasTerminationSignal.test(kernelId));
     Value * const ptr = b.getScalarFieldPtr(TERMINATION_PREFIX + std::to_string(kernelId)).first;
     b.CreateStore(signal, ptr, true);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getTerminationSignalPtr
+ ** ------------------------------------------------------------------------------------------------------------- */
+KernelBuilder::ScalarRef PipelineCompiler::getKernelTerminationSignalPtr(KernelBuilder & b, const unsigned kernelId) const {
+    assert (HasTerminationSignal.test(kernelId));
+    return b.getScalarFieldPtr(TERMINATION_PREFIX + std::to_string(kernelId));
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

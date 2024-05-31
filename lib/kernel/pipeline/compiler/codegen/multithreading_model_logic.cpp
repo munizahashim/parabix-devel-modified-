@@ -247,13 +247,25 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
 
     FunctionType * const csFuncType = FunctionType::get(csRetValType, csParams, false);
 
+    FunctionType * csDoProcessSegmentFuncType = nullptr;
+    if (AllowIOProcessThread) {
+        FixedArray<Type *, 3> csParams;
+        csParams[0] = threadStructPtrTy; // thread state
+        csParams[1] = sizeTy; // segment number
+        csParams[2] = sizeTy; // number of threads
+        csDoProcessSegmentFuncType = FunctionType::get(csRetValType, csParams, false);
+    } else {
+        csDoProcessSegmentFuncType = csFuncType;
+    }
+
+
     const auto hasTermSignal = !mIsNestedPipeline || PipelineHasTerminationSignal;
 
     // -------------------------------------------------------------------------------------------------------------------------
     // GENERATE DO SEGMENT (KERNEL EXECUTION) FUNCTION CODE
     // -------------------------------------------------------------------------------------------------------------------------
 
-    auto makeDoSegmentLogicFunction = [&](Function * csFunc, const bool generateProcessThread)  {
+    auto makeDoSegmentLogicFunction = [&](Function * csFunc, const bool generateProcessThread) -> void {
 
         csFunc->setCallingConv(CallingConv::C);
 
@@ -272,7 +284,12 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         assert (isFromCurrentFunction(b, getHandle(), !mTarget->isStateful()));
         readDoSegmentState(b, threadStructTy, threadStruct);
         initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
-        mSegNo = &*args;
+        mSegNo = &*args++;
+        Value * numOfActiveThreads = nullptr;
+        if (generateProcessThread) {
+            numOfActiveThreads = &*args++;
+        }
+        assert (args == csFunc->arg_end());
         #ifdef PRINT_DEBUG_MESSAGES
         debugInit(b);
         #endif
@@ -289,24 +306,26 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         mIsIOProcessThread = generateProcessThread;
         start(b);
         branchToInitialPartition(b);
+        const auto firstComputeKernel = FirstKernelInPartition[FirstComputePartitionId];
+        assert (AllowIOProcessThread || firstComputeKernel == FirstKernel);
         if (generateProcessThread) {
-            // TODO: we don't want the IO thread to get too far ahead of the compute threads
             assert (AllowIOProcessThread);
             assert (!mIsNestedPipeline);
-            const auto firstComputeKernel = FirstKernelInPartition[FirstComputePartitionId];
-            const auto afterLastComputeKernel = FirstKernelInPartition[LastComputePartitionId + 1];
+            waitUntilCurrentSegmentNumberIsAtLeast(b, firstComputeKernel, numOfActiveThreads);
             for (auto i = FirstKernel; i < firstComputeKernel; ++i) {
                 setActiveKernel(b, i, true);
                 executeKernel(b);
             }
+            const auto afterLastComputeKernel = FirstKernelInPartition[LastComputePartitionId + 1];
             assert (firstComputeKernel < afterLastComputeKernel);
             for (auto i = afterLastComputeKernel; i <= LastKernel; ++i) {
                 setActiveKernel(b, i, true);
                 executeKernel(b);
             }
         } else {
-            const auto firstComputeKernel = FirstKernelInPartition[FirstComputePartitionId];
-            assert (AllowIOProcessThread || firstComputeKernel == FirstKernel);
+            if (AllowIOProcessThread && firstComputeKernel != FirstKernel) {
+                waitUntilCurrentSegmentNumberIsAtLeast(b, firstComputeKernel - 1, nullptr);
+            }
             const auto lastComputeKernel = FirstKernelInPartition[LastComputePartitionId + 1] - 1;
             assert (AllowIOProcessThread || lastComputeKernel == LastKernel);
             for (auto i = firstComputeKernel; i <= lastComputeKernel; ++i) {
@@ -341,8 +360,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         } else {
             b.CreateRetVoid();
         }
-
-        return std::make_tuple(csFuncType, csFunc, hasTermSignal);
     };
 
     const auto outerFuncName = concat(mTarget->getName(), "_MultithreadedThread", tmp);
@@ -352,9 +369,9 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
 
     Function * doSegmentProcessThreadFunc = nullptr;
 
-    if (mUseDynamicMultithreading || AllowIOProcessThread) {
+    if (AllowIOProcessThread) {
         const auto outerFuncName = concat(mTarget->getName(), "_ProcessThread", tmp);
-        doSegmentProcessThreadFunc = Function::Create(csFuncType, Function::InternalLinkage, outerFuncName, m);
+        doSegmentProcessThreadFunc = Function::Create(csDoProcessSegmentFuncType, Function::InternalLinkage, outerFuncName, m);
         makeDoSegmentLogicFunction(doSegmentProcessThreadFunc, true);
         doSegmentProcessThreadFunc->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
         doSegmentComputeThreadFunc->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
@@ -426,6 +443,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         // generate the pipeline logic for this thread
         BasicBlock * const mPipelineLoop = b.CreateBasicBlock("PipelineLoop");
         BasicBlock * const mPipelineEnd = b.CreateBasicBlock("PipelineEnd");
+
         BasicBlock * const entryBlock = b.GetInsertBlock();
         b.CreateBr(mPipelineLoop);
 
@@ -448,10 +466,15 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         SmallVector<Value *, 3> args(2);
         args[0] = threadStruct;
         args[1] = mSegNo; assert (mSegNo);
+        FunctionType * funcType = csFuncType;
+        if (generateProcessThread && AllowIOProcessThread) {
+            assert (doSegmentProcessThreadFunc != doSegmentComputeThreadFunc);
+            args.push_back(mUseDynamicMultithreading ? activeThreadsPhi : mNumOfFixedThreads);
+            funcType = csDoProcessSegmentFuncType;
+        }
 
-        Function * doSegFunc = generateProcessThread ? doSegmentProcessThreadFunc : doSegmentComputeThreadFunc;
-
-        Value * const csRetVal = b.CreateCall(csFuncType, doSegFunc, args);
+        Function * const doSegFunc = generateProcessThread ? doSegmentProcessThreadFunc : doSegmentComputeThreadFunc;
+        Value * const csRetVal = b.CreateCall(funcType, doSegFunc, args);
 
         Value * terminated = nullptr;
         Value * done = nullptr;
@@ -677,6 +700,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         b.SetInsertPoint(mPipelineEnd);
         assert (isFromCurrentFunction(b, getHandle(), !mTarget->isStateful()));
         assert (isFromCurrentFunction(b, getThreadLocalHandle(), !mTarget->hasThreadLocal()));
+
         #ifdef PRINT_DEBUG_MESSAGES
         if (mIsNestedPipeline) {
             debugPrint(b, "------------------------------------------------- END %" PRIx64, getHandle());
@@ -900,13 +924,14 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::start(KernelBuilder & b) {
 
-    mCurrentKernelName = mKernelName[PipelineInput];
+    mLocallyAvailableItems.reset(FirstStreamSet, LastStreamSet);
+    mKernelTerminationSignal.reset(FirstKernel, LastKernel);
+
     makePartitionEntryPoints(b);
 
-    if (CheckAssertions) {
+    if (LLVM_UNLIKELY(CheckAssertions)) {
         mRethrowException = b.WriteDefaultRethrowBlock();
     }
-
 
     mExpectedNumOfStridesMultiplier = b.getScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER);
     initializeFlowControl(b);
@@ -915,11 +940,12 @@ void PipelineCompiler::start(KernelBuilder & b) {
     loadInternalStreamSetHandles(b, false);
 
     mKernel = nullptr;
+    mCurrentKernelName = nullptr;
     mKernelId = 0;
     mAddressableItemCountPtr.clear();
     mVirtualBaseAddressPtr.clear();
     mPipelineProgress = b.getFalse();
-    mLocallyAvailableItems.reset(FirstStreamSet, LastStreamSet);
+
 
 }
 

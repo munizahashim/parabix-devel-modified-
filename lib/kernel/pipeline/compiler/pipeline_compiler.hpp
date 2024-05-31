@@ -366,7 +366,8 @@ public:
     bool kernelCanTerminateAbnormally(const unsigned kernel) const;
     void checkIfKernelIsAlreadyTerminated(KernelBuilder & b);
     void checkPropagatedTerminationSignals(KernelBuilder & b);
-    Value * readTerminationSignal(KernelBuilder & b, const unsigned kernelId);
+    Value * readTerminationSignal(KernelBuilder & b, const unsigned kernelId) const;
+    ScalarRef getKernelTerminationSignalPtr(KernelBuilder & b, const unsigned kernelId) const;
     void writeTerminationSignal(KernelBuilder & b, const unsigned kernelId, Value * const signal) const;
     Value * readIfStreamSetlIsClosed(KernelBuilder & b, const size_t streamSet);
     Value *  readIfKernelIsClosed(KernelBuilder & b, const size_t kernelId);
@@ -481,6 +482,7 @@ public:
     void acquireSynchronizationLock(KernelBuilder & b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
     void releaseSynchronizationLock(KernelBuilder & b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
     Value * getSynchronizationLockPtrForKernel(KernelBuilder & b, const unsigned kernelId, const unsigned lockType) const;
+    void waitUntilCurrentSegmentNumberIsAtLeast(KernelBuilder & b, const unsigned kernelId, Value * const windowLength);
     inline LLVM_READNONE bool isMultithreaded() const;
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     Value * obtainNextSegmentNumber(KernelBuilder & b);
@@ -599,7 +601,6 @@ public:
     bool hasAtLeastOneNonGreedyInput() const;
     bool hasAnyGreedyInput(const unsigned kernelId) const;
     bool isDataParallel(const size_t kernel) const;
-    bool isCurrentKernelStateFree() const;
     bool hasPrincipalInputRate() const;
 
 protected:
@@ -741,7 +742,6 @@ protected:
 
     Value *                                     mNumOfPartitionStrides = nullptr;
 
-    BasicBlock *                                mCurrentPartitionEntryGuard = nullptr;
     BasicBlock *                                mNextPartitionEntryPoint = nullptr;
     FixedVector<Value *>                        mKernelTerminationSignal;
     FixedVector<Value *>                        mInitialConsumedItemCount;

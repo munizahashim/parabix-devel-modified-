@@ -1135,7 +1135,7 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
             for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
                 const auto consumer = target(input, mBufferGraph);
                 const auto cid = KernelPartitionId[consumer];
-                if (cid != pid && cid <= LastComputePartitionId) {
+                if (cid != pid) {
                     add_edge(pid, cid, J);
                     if (hasVarOutput) {
                         addRateId(cid, rateId);

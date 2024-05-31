@@ -39,9 +39,7 @@ namespace kernel {
 void PipelineCompiler::obtainCurrentSegmentNumber(KernelBuilder & b, BasicBlock * const entryBlock) {
     if (mIsNestedPipeline) {
         assert (mSegNo == mExternalSegNo && mSegNo);
-    } else if (LLVM_UNLIKELY(mIsIOProcessThread)) {
-        return;
-    } else if (mUseDynamicMultithreading) {
+    } else if (mUseDynamicMultithreading && !mIsIOProcessThread) {
         Value * const segNoPtr = b.getScalarFieldPtr(NEXT_LOGICAL_SEGMENT_NUMBER).first;
         // NOTE: this must be atomic or the pipeline will deadlock when some thread
         // fetches a number before the prior one to fetch the same number updates it.
@@ -67,9 +65,6 @@ void PipelineCompiler::obtainCurrentSegmentNumber(KernelBuilder & b, BasicBlock 
  * @brief incrementCurrentSegNo
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::incrementCurrentSegNo(KernelBuilder & b, BasicBlock * const exitBlock) {
-    if (LLVM_UNLIKELY(mIsIOProcessThread)) {
-        return;
-    }
     assert (!mIsNestedPipeline && !mUseDynamicMultithreading);
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     Value * const segNo = mBaseSegNo; assert (mBaseSegNo);
@@ -105,9 +100,6 @@ LLVM_READNONE Constant * __getSyncLockName(KernelBuilder & b, const unsigned typ
 
 }
 
-#define HAS_SYNC(kernelId) \
-    (FirstKernelInPartition[FirstComputePartitionId] <= kernelId && kernelId < FirstKernelInPartition[LastComputePartitionId + 1])
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief acquireCurrentSegment
  *
@@ -115,7 +107,7 @@ LLVM_READNONE Constant * __getSyncLockName(KernelBuilder & b, const unsigned typ
  * segment is complete (by checking that the acquired segment number is equal to the desired segment number).
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::acquireSynchronizationLock(KernelBuilder & b, const unsigned kernelId, const unsigned type, Value * const segNo) {
-    if (isMultithreaded() && HAS_SYNC(kernelId)) {
+    if (isMultithreaded()) {
         // TODO: make this an function?
         const auto prefix = makeKernelName(kernelId) + ":" + __getSyncLockNameString(type);
         const auto serialize = codegen::DebugOptionIsSet(codegen::SerializeThreads);
@@ -134,15 +126,13 @@ void PipelineCompiler::acquireSynchronizationLock(KernelBuilder & b, const unsig
         b.SetInsertPoint(acquire);
         Value * const currentSegNo = b.CreateAtomicLoadAcquire(b.getSizeTy(), waitingOnPtr);
         if (LLVM_UNLIKELY(CheckAssertions)) {
-            Value * const minExpectedSegNo = b.getSize(0); // b.CreateSaturatingSub(segNo, b.getSize(mNumOfThreads - 1U));
-            Value * const valid = b.CreateICmpUGE(currentSegNo, minExpectedSegNo);
-            Value * const pendingOrReady = b.CreateAnd(valid, b.CreateICmpULE(currentSegNo, segNo));
+            Value * const pendingOrReady = b.CreateICmpULE(currentSegNo, segNo);
             SmallVector<char, 256> tmp;
             raw_svector_ostream out(tmp);
             out << "%s: acquired %ssegment number is %" PRIu64 " "
-                   "but was expected to be within [%" PRIu64 ",%" PRIu64 "]";
+                   "but was expected to be no more than %" PRIu64;
             b.CreateAssert(pendingOrReady, out.str(), mKernelName[kernelId], __getSyncLockName(b, type),
-                            currentSegNo, minExpectedSegNo, segNo);
+                            currentSegNo, segNo);
         }
         Value * const ready = b.CreateICmpEQ(segNo, currentSegNo);
         b.CreateLikelyCondBr(ready, acquired, acquire);
@@ -161,8 +151,7 @@ void PipelineCompiler::acquireSynchronizationLock(KernelBuilder & b, const unsig
  * After executing the kernel, the segment number must be incremented to release the kernel for the next thread.
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::releaseSynchronizationLock(KernelBuilder & b, const unsigned kernelId, const unsigned type, Value * const segNo) {
-#warning trace wont work here
-    if ((isMultithreaded() && HAS_SYNC(kernelId)) || TraceProducedItemCounts || TraceUnconsumedItemCounts || TraceIO) {
+    if (isMultithreaded() || TraceProducedItemCounts || TraceUnconsumedItemCounts || TraceIO) {
         Value * const waitingOnPtr = getSynchronizationLockPtrForKernel(b, kernelId, type);
         Value * const nextSegNo = b.CreateAdd(segNo, b.getSize(1));
         if (LLVM_UNLIKELY(CheckAssertions)) {
@@ -190,6 +179,36 @@ void PipelineCompiler::releaseSynchronizationLock(KernelBuilder & b, const unsig
         debugPrint(b, prefix + ": released %ssegment number %" PRIu64, __getSyncLockName(b, type), segNo);
         #endif
     }
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief waitUntilCurrentSegmentNumberIsAtLeast
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::waitUntilCurrentSegmentNumberIsAtLeast(KernelBuilder & b, const unsigned kernelId, Value * const windowLength) {
+    assert (b.GetInsertBlock());
+    BasicBlock * const nextNode = b.GetInsertBlock()->getNextNode();
+    const auto lockType = isDataParallel(kernelId) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
+    const auto prefix = makeKernelName(kernelId) + ":" + __getSyncLockNameString(lockType);
+    BasicBlock * const segmentCheckLoop = b.CreateBasicBlock(prefix + "_crossTheadWaitLoop", nextNode);
+    BasicBlock * const segmentCheckExit = b.CreateBasicBlock(prefix + "_crossTheadWaitExit", nextNode);
+    Value * const syncLockPtr = getSynchronizationLockPtrForKernel(b, kernelId, lockType);
+    Value * signalPtr; Type * signalTy;
+    std::tie(signalPtr, signalTy) = getKernelTerminationSignalPtr(b, kernelId);
+    b.CreateBr(segmentCheckLoop);
+
+    b.SetInsertPoint(segmentCheckLoop);
+    Function * schedYieldFunc = b.getModule()->getFunction("sched_yield");
+    b.CreateCall(schedYieldFunc);
+    Value * const syncNum = b.CreateAtomicLoadAcquire(b.getSizeTy(), syncLockPtr);
+    Value * min = syncNum;
+    if (windowLength) {
+        min = b.CreateAdd(syncNum, windowLength);
+    }
+    Value * const isProgressedFarEnough = b.CreateICmpULE(mSegNo, min);
+    Value * const isTerminated = b.CreateIsNotNull(b.CreateLoad(signalTy, signalPtr));
+    b.CreateLikelyCondBr(b.CreateOr(isProgressedFarEnough, isTerminated), segmentCheckExit, segmentCheckLoop);
+
+    b.SetInsertPoint(segmentCheckExit);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
