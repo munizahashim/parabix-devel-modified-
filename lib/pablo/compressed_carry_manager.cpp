@@ -153,6 +153,10 @@ void CompressedCarryManager::combineCarryOutSummary(kernel::KernelBuilder & b, c
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * CompressedCarryManager::shortIndexedAdvanceCarryInCarryOut(kernel::KernelBuilder & b, const unsigned shiftAmount, Value * const strm, Value * const index_strm) {
     Value * carryIn = getNextCarryIn(b);
+    Type * ty = carryIn->getType();
+    if (ty->isVectorTy()) {
+        carryIn = b.CreateBitCast(carryIn, b.getIntNTy(getTypeBitWidth(ty)));
+    }
     carryIn = b.CreateBitCast(b.CreateZExt(carryIn, b.getIntNTy(b.getBitBlockWidth())), b.getBitBlockType());
     Value * carryOut, * result;
     std::tie(carryOut, result) = b.bitblock_indexed_advance(strm, index_strm, carryIn, shiftAmount);
