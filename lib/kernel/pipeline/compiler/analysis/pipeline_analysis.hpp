@@ -69,13 +69,13 @@ public:
 
         P.identifyInterPartitionSymbolicRates();
 
+        P.addFlowControlAnnotations();
+
         P.identifyTerminationChecks();
 
         P.makeTerminationPropagationGraph();
 
         P.analyzePrincipalRateIO();
-
-        P.addFlowControlAnnotations();
 
         P.determinePartitionJumpIndices();
 

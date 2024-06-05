@@ -80,9 +80,12 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     }
     mKernelInitiallyTerminated = nullptr;
     mKernelJumpToNextUsefulPartition = nullptr;
+
+    assert (mIsPartitionRoot || !mIsIOProcessThread);
+
     if (LLVM_UNLIKELY(mIsPartitionRoot || mKernelCanTerminateEarly)) {
         mKernelInitiallyTerminated = b.CreateBasicBlock(prefix + "_initiallyTerminated", mNextPartitionEntryPoint);
-        if (LLVM_LIKELY(mIsPartitionRoot && !mIsIOProcessThread)) {
+        if (LLVM_LIKELY(!mIsIOProcessThread)) {
             // if we are actually jumping over any kernels, create the basicblock for the code to perform it.
             const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];
             assert (jumpId > mCurrentPartitionId);
@@ -205,19 +208,27 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "** " + prefix + ".terminated at segment %" PRIu64, mSegNo);
     #endif
+    clearUnwrittenOutputData(b);
+    splatMultiStepPartialSumValues(b);
+    if (LLVM_UNLIKELY(mCurrentKernelIsStateFree)) {
+        writeInternalProcessedAndProducedItemCounts(b, true);
+    }
     if (mIsPartitionRoot || mKernelCanTerminateEarly) {
+        // When we have a cross-threaded buffer, we need to write out their produced counts
+        // prior to writing the termination signal otherwise we risk a consumer assuming
+        // a streamset is closed but does not know the correct item count. Rather than
+        // potentially slowing down the loop exit by writing an unnecessary value to the
+        // global state, we just write it here despite knowing it'll be written again later.
+        if (LLVM_LIKELY(!mCurrentKernelIsStateFree)) {
+            writeCrossThreadedProducedItemCountAfterTermination(b);
+        }
         writeTerminationSignal(b, mKernelId, mTerminatedSignalPhi);
         propagateTerminationSignal(b);
     }
-    clearUnwrittenOutputData(b);
-    splatMultiStepPartialSumValues(b);
     // We do not release the pre-invocation synchronization lock in the execution phase
     // when a kernel is terminating.
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
         assert (!mIsIOProcessThread);
-        if (LLVM_LIKELY(mCurrentKernelIsStateFree)) {
-            writeInternalProcessedAndProducedItemCounts(b, true);
-        }
         releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
     }
     updatePhisAfterTermination(b);
@@ -276,7 +287,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     b.SetInsertPoint(mKernelExit);
     recordFinalProducedItemCounts(b);
     writeConsumedItemCounts(b);
-    mKernelTerminationSignal[mKernelId] = mTerminatedAtExitPhi;
+    mKernelTerminationSignal[mKernelId] = mTerminatedAtExitPhi; assert (mTerminatedAtExitPhi);
     if (mIsPartitionRoot) {
         recordStridesPerSegment(b, mKernelId, mTotalNumOfStridesAtExitPhi);
     }

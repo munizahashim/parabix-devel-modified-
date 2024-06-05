@@ -332,6 +332,7 @@ public:
     void computeMinimumConsumedItemCounts(KernelBuilder & b);
     void writeConsumedItemCounts(KernelBuilder & b);
     void recordFinalProducedItemCounts(KernelBuilder & b);
+    void writeCrossThreadedProducedItemCountAfterTermination(KernelBuilder & b);
     void writeUpdatedItemCounts(KernelBuilder & b);
 
     void writeOutputScalars(KernelBuilder & b, const size_t index, std::vector<Value *> & args);
@@ -482,7 +483,7 @@ public:
     void acquireSynchronizationLock(KernelBuilder & b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
     void releaseSynchronizationLock(KernelBuilder & b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
     Value * getSynchronizationLockPtrForKernel(KernelBuilder & b, const unsigned kernelId, const unsigned lockType) const;
-    void waitUntilCurrentSegmentNumberIsAtLeast(KernelBuilder & b, const unsigned kernelId, Value * const windowLength);
+    void waitUntilCurrentSegmentNumberIsLessThan(KernelBuilder & b, const unsigned kernelId, Value * const windowLength);
     inline LLVM_READNONE bool isMultithreaded() const;
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     Value * obtainNextSegmentNumber(KernelBuilder & b);

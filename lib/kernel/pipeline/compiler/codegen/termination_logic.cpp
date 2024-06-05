@@ -64,42 +64,56 @@ Value * PipelineCompiler::hasPipelineTerminated(KernelBuilder & b) {
     Value * soft = nullptr;
 
     Constant * const unterminated = getTerminationSignal(b, TerminationSignal::None);
-    Constant * const aborted = getTerminationSignal(b, TerminationSignal::Aborted);
+//    Constant * const aborted = getTerminationSignal(b, TerminationSignal::Aborted);
     Constant * const fatal = getTerminationSignal(b, TerminationSignal::Fatal);
 
     assert (KernelPartitionId[PipelineInput] == 0);
-    assert (KernelPartitionId[PipelineOutput] == PartitionCount - 1);
+    assert (KernelPartitionId[PipelineOutput] == (PartitionCount - 1));
 
-    for (unsigned partitionId = 1; partitionId < (PartitionCount - 1); ++partitionId) {
+    for (auto partitionId = 1U; partitionId < (PartitionCount - 1); ++partitionId) {
         if (const auto type = mTerminationCheck[partitionId]) {
             const auto root = FirstKernelInPartition[partitionId];
-            assert (HasTerminationSignal[root]);
-            Value * const signal = readIfKernelIsClosed(b, root);
-            if (type & TerminationCheckFlag::Hard) {
-                assert (signal);
-                Value * const final = b.CreateICmpEQ(signal, fatal);
-                if (hard) {
-                    hard = b.CreateOr(hard, final);
+            assert (HasTerminationSignal.test(root));
+            const auto onSameThread =
+                ((FirstComputePartitionId <= partitionId) && (partitionId <= LastComputePartitionId)) != mIsIOProcessThread;
+            if (onSameThread || (type & TerminationCheckFlag::Hard)) {
+                Value * signal = nullptr;
+                if (onSameThread) {
+                    signal = mKernelTerminationSignal[root];
+                    assert (signal);
                 } else {
-                    hard = final;
+                    signal = readTerminationSignal(b, root);
                 }
-            }
-            if (type & TerminationCheckFlag::Soft) {
-                assert (signal);
-                Value * const final = b.CreateICmpNE(signal, unterminated);
-                if (soft) {
-                    soft = b.CreateAnd(soft, final);
-                } else {
-                    soft = final;
+                if (type & TerminationCheckFlag::Hard) {
+                    Value * const final = b.CreateICmpEQ(signal, fatal);
+                    if (hard) {
+                        hard = b.CreateOr(hard, final);
+                    } else {
+                        hard = final;
+                    }
+                }
+                if (type & TerminationCheckFlag::Soft) {
+                    Value * const final = b.CreateICmpNE(signal, unterminated);
+                    if (soft) {
+                        soft = b.CreateAnd(soft, final);
+                    } else {
+                        soft = final;
+                    }
                 }
             }
         }
     }
+
     assert (soft);
-    Value * signal = b.CreateSelect(soft, aborted, unterminated);
+    Value * signal = soft;
     if (hard) {
-        signal = b.CreateSelect(hard, fatal, signal);
+        signal = b.CreateOr(soft, hard);
     }
+
+//    Value * signal = b.CreateSelect(soft, aborted, unterminated);
+//    if (hard) {
+//        signal = b.CreateSelect(hard, fatal, signal);
+//    }
     return signal;
 
 }

@@ -455,10 +455,14 @@ void PipelineCompiler::generateKernelMethod(KernelBuilder & b) {
  * @brief generateFinalizeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateFinalizeMethod(KernelBuilder & b) {
+
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet() || NumOfPAPIEvents > 0)) {
         // get the last segment # used by any kernel in case any reports require it.
-        const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        const auto firstComputeKernel = FirstKernelInPartition[FirstComputePartitionId];
+        #warning this won't work for showing the cycle counts of non-compute kernels
+        const auto type = isDataParallel(firstComputeKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         Value * const ptr = getSynchronizationLockPtrForKernel(b, FirstKernel, type);
+
         mSegNo = b.CreateLoad(b.getSizeTy(), ptr);
 
         printOptionalCycleCounter(b);
@@ -496,9 +500,13 @@ void PipelineCompiler::generateFinalizeMethod(KernelBuilder & b) {
         }
         mScalarValue[i] = callKernelFinalizeFunction(b, params);
     }
+
+
+
     if (LLVM_UNLIKELY(mGenerateTransferredItemCountHistogram || mGenerateDeferredItemCountHistogram)) {
         freeHistogramProperties(b);
     }
+
     deallocateRepeatingBuffers(b);
     releaseOwnedBuffers(b);
     resetInternalBufferHandles();
@@ -508,7 +516,9 @@ void PipelineCompiler::generateFinalizeMethod(KernelBuilder & b) {
  * @brief generateFinalizeThreadLocalMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
+
     assert (mTarget->hasThreadLocal());
+
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernel = getKernel(i);
         assert (kernel->hasThreadLocal() || !isa<PipelineKernel>(kernel));

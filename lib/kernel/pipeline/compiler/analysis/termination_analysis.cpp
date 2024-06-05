@@ -16,6 +16,7 @@ void PipelineAnalysis::identifyTerminationChecks() {
 
     for (auto consumer = FirstKernel; consumer <= PipelineOutput; ++consumer) {
         const auto cid = KernelPartitionId[consumer];
+
         for (const auto e : make_iterator_range(in_edges(consumer, mBufferGraph))) {
             const auto streamSet = source(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
@@ -53,13 +54,34 @@ void PipelineAnalysis::identifyTerminationChecks() {
 
     assert ("program has no outputs? relationship construction should have reported this case." && in_degree(terminal, G) > 0);
 
-    transitive_reduction_dag(G);
+    ReverseTopologicalOrdering ordering;
+    ordering.reserve(num_vertices(G));
+    topological_sort(G, std::back_inserter(ordering));
+    transitive_closure_dag(ordering, G);
+
+    if (1 < FirstComputePartitionId || LastComputePartitionId < (PartitionCount - 1)) {
+
+        #define ON_COMPUTE(id) ((FirstComputePartitionId <= id) && (id <= LastComputePartitionId))
+
+        #define ON_DIFFERENT_THREADS(a, b) (ON_COMPUTE(a) ^ ON_COMPUTE(b))
+
+        remove_edge_if([&](TerminationGraph::edge_descriptor e){
+            const auto a = source(e, G);
+            const auto b = target(e, G);
+            assert (a < b);
+            return ON_DIFFERENT_THREADS(a, b) && (b != (PartitionCount - 1));
+        }, G);
+
+    }
+
+    transitive_reduction_dag(ordering, G);
 
     mTerminationCheck.resize(PartitionCount, 0U);
 
     // we are only interested in the incoming edges of the pipeline output
     for (const auto e : make_iterator_range(in_edges(terminal, G))) {
-        mTerminationCheck[source(e, G)] = TerminationCheckFlag::Soft;
+        const auto partId = source(e, G);
+        mTerminationCheck[partId] = TerminationCheckFlag::Soft;
     }
 
     // hard terminations

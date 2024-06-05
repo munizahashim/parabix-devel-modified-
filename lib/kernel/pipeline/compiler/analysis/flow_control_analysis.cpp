@@ -42,7 +42,11 @@ void PipelineAnalysis::addFlowControlAnnotations() {
                 assert (in_degree(kernel, mBufferGraph) == 0);
                 for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
                     const auto streamSet = target(e, mBufferGraph);
-                    mBufferGraph[streamSet].Type |= BufferType::CrossThreaded;
+                    auto & bn = mBufferGraph[streamSet];
+                    bn.Type |= BufferType::CrossThreaded;
+                    if (LLVM_UNLIKELY(bn.isThreadLocal())) {
+                        bn.Locality = BufferLocality::GloballyShared;
+                    }
                 }
             }
 
@@ -50,7 +54,11 @@ void PipelineAnalysis::addFlowControlAnnotations() {
                 assert (out_degree(kernel, mBufferGraph) == 0);
                 for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
                     const auto streamSet = source(e, mBufferGraph);
-                    mBufferGraph[streamSet].Type |= BufferType::CrossThreaded;
+                    auto & bn = mBufferGraph[streamSet];
+                    bn.Type |= BufferType::CrossThreaded;
+                    if (LLVM_UNLIKELY(bn.isThreadLocal())) {
+                        bn.Locality = BufferLocality::GloballyShared;
+                    }
                 }
             }
             AllowIOProcessThread = true;

@@ -370,8 +370,7 @@ enum BufferPortType : unsigned {
     IsShared = 16,
     IsManaged = 32,
     CanModifySegmentLength = 64,
-    Illustrated = 128,
-    InitialIOThreadRead = 256
+    Illustrated = 128
 };
 
 struct BufferPort {
@@ -426,10 +425,6 @@ struct BufferPort {
 
     bool isIllustrated() const {
         return (Flags & BufferPortType::Illustrated) != 0;
-    }
-
-    bool isInitialIOThreadRead() const {
-        return (Flags & BufferPortType::InitialIOThreadRead) != 0;
     }
 
     bool operator < (const BufferPort & rn) const {

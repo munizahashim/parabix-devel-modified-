@@ -182,9 +182,9 @@ void PipelineCompiler::releaseSynchronizationLock(KernelBuilder & b, const unsig
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief waitUntilCurrentSegmentNumberIsAtLeast
+ * @brief waitUntilCurrentSegmentNumberIsLessThan
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::waitUntilCurrentSegmentNumberIsAtLeast(KernelBuilder & b, const unsigned kernelId, Value * const windowLength) {
+void PipelineCompiler::waitUntilCurrentSegmentNumberIsLessThan(KernelBuilder & b, const unsigned kernelId, Value * const windowLength) {
     assert (b.GetInsertBlock());
     BasicBlock * const nextNode = b.GetInsertBlock()->getNextNode();
     const auto lockType = isDataParallel(kernelId) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
@@ -197,14 +197,14 @@ void PipelineCompiler::waitUntilCurrentSegmentNumberIsAtLeast(KernelBuilder & b,
     b.CreateBr(segmentCheckLoop);
 
     b.SetInsertPoint(segmentCheckLoop);
-    Function * schedYieldFunc = b.getModule()->getFunction("sched_yield");
-    b.CreateCall(schedYieldFunc);
+//    Function * schedYieldFunc = b.getModule()->getFunction("sched_yield");
+//    b.CreateCall(schedYieldFunc);
     Value * const syncNum = b.CreateAtomicLoadAcquire(b.getSizeTy(), syncLockPtr);
     Value * min = syncNum;
     if (windowLength) {
         min = b.CreateAdd(syncNum, windowLength);
     }
-    Value * const isProgressedFarEnough = b.CreateICmpULE(mSegNo, min);
+    Value * const isProgressedFarEnough = b.CreateICmpULT(mSegNo, min);
     Value * const isTerminated = b.CreateIsNotNull(b.CreateLoad(signalTy, signalPtr));
     b.CreateLikelyCondBr(b.CreateOr(isProgressedFarEnough, isTerminated), segmentCheckExit, segmentCheckLoop);
 

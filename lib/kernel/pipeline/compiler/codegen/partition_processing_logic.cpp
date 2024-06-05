@@ -92,6 +92,7 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
             mPartitionTerminationSignalPhi[i][j - FirstKernel] = nullptr;
         }
     }
+
     for (size_t kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
         mKernelTerminationSignal[kernel] = nullptr;
     }
@@ -493,9 +494,9 @@ void PipelineCompiler::phiOutPartitionStateAndReleaseSynchronizationLocks(Kernel
     mSegNo = curSegNo;
 
     phiOutPartitionStatusFlags(b, targetPartitionId, fromKernelEntryBlock);
-    for (auto kernel = mKernelId + 1; kernel < targetKernelId; ++kernel) {
-        mKernelTerminationSignal[kernel] = nullptr;
-    }
+//    for (auto kernel = mKernelId + 1; kernel < targetKernelId; ++kernel) {
+//        mKernelTerminationSignal[kernel] = nullptr;
+//    }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

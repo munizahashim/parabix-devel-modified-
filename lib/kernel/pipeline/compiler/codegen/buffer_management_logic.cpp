@@ -354,33 +354,9 @@ void PipelineCompiler::constructStreamSetBuffers(KernelBuilder & /* b */) {
 void PipelineCompiler::readAvailableItemCounts(KernelBuilder & b) {
 
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-
         const auto streamSet = source(e, mBufferGraph);
         if (mLocallyAvailableItems[streamSet] == nullptr || mIsIOProcessThread) {
-            const auto & port = mBufferGraph[e];
-            Value * avail = nullptr;
-//            if (LLVM_UNLIKELY(port.isInitialIOThreadRead())) {
-//                assert ("this could deadlock the IO thread" && mBufferGraph[streamSet].isInternal());
-//                assert ("this could deadlock the IO thread" && !mIsIOProcessThread);
-
-//                BasicBlock * const checkForInput = b.CreateBasicBlock("checkForInput");
-//                BasicBlock * const checkForInputExit = b.CreateBasicBlock("checkForInputExit");
-//                Value * const processed = mInitiallyProcessedItemCount[port.Port];
-//                b.CreateBr(checkForInput);
-
-//                b.SetInsertPoint(checkForInput);
-//                Function * schedYieldFunc = b.getModule()->getFunction("sched_yield");
-//                b.CreateCall(schedYieldFunc);
-//                avail = readAvailableItemCount(b, streamSet);
-//                Value * const closed = b.CreateIsNotNull(readIfStreamSetlIsClosed(b, streamSet));
-//                Value * const ready = b.CreateOr(b.CreateICmpNE(processed, avail), closed);
-//                b.CreateCondBr(ready, checkForInputExit, checkForInput);
-
-//                b.SetInsertPoint(checkForInputExit);
-//            } else {
-                avail = readAvailableItemCount(b, streamSet);
-//            }
-            mLocallyAvailableItems[streamSet] = avail;
+            mLocallyAvailableItems[streamSet] = readAvailableItemCount(b, streamSet);
         }
     }
 
@@ -546,6 +522,25 @@ void PipelineCompiler::writeUpdatedItemCounts(KernelBuilder & b) {
         }
     }
 }
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief writeCrossThreadedProducedItemCountAfterTermination
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::writeCrossThreadedProducedItemCountAfterTermination(KernelBuilder & b) {
+    for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+        const auto streamSet = target(e, mBufferGraph);
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (bn.isCrossThreaded()) {
+            assert (bn.isInternal());
+            const BufferPort & br = mBufferGraph[e];
+            const auto outputPort = br.Port;
+            Value * const produced = mProducedAtTermination[outputPort];
+            b.CreateStore(produced, mProducedItemCountPtr[outputPort]);
+        }
+    }
+}
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recordFinalProducedItemCounts
