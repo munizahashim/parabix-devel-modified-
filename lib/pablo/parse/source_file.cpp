@@ -18,8 +18,8 @@ inline static std::string appendToBasePath(std::string const & filename) {
     path.assign(llvm::sys::path::parent_path(PARABIX_OBJECT_CACHE));
 #else
     // default: $HOME/.parabix
-    sys::path::home_directory(path);
-    sys::path::append(path, ".parabix");
+    llvm::sys::path::home_directory(path);
+    llvm::sys::path::append(path, ".parabix");
 #endif
     llvm::sys::path::append(path, "pablosrc", filename);
     return std::string(path.c_str());
