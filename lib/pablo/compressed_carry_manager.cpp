@@ -153,6 +153,10 @@ void CompressedCarryManager::combineCarryOutSummary(kernel::KernelBuilder & b, c
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * CompressedCarryManager::shortIndexedAdvanceCarryInCarryOut(kernel::KernelBuilder & b, const unsigned shiftAmount, Value * const strm, Value * const index_strm) {
     Value * carryIn = getNextCarryIn(b);
+    Type * ty = carryIn->getType();
+    if (ty->isVectorTy()) {
+        carryIn = b.CreateBitCast(carryIn, b.getIntNTy(getTypeBitWidth(ty)));
+    }
     carryIn = b.CreateBitCast(b.CreateZExt(carryIn, b.getIntNTy(b.getBitBlockWidth())), b.getBitBlockType());
     Value * carryOut, * result;
     std::tie(carryOut, result) = b.bitblock_indexed_advance(strm, index_strm, carryIn, shiftAmount);
@@ -299,7 +303,7 @@ StructType * CompressedCarryManager::analyse(kernel::KernelBuilder & b, const Pa
         /* Construct Carry State Struct */
         CarryData & cd = mCarryMetadata[carryScopeIndex];
         StructType * carryState = nullptr;
-        CarryData::SummaryType summaryType = CarryData::NoSummary;
+        CarryData::SummaryKind summaryKind = CarryData::NoSummary;
 
         // Insert the smallest possible summary for this scope.
         Type * summaryTy = toSummaryType(b, summarySize);
@@ -316,7 +320,7 @@ StructType * CompressedCarryManager::analyse(kernel::KernelBuilder & b, const Pa
         if (LLVM_LIKELY(ifDepth != 0 || whileDepth != 0)) {
             if (LLVM_LIKELY(!isEmptyCarryStruct(state) && !inNonCarryCollapsingLoop)) {
                 if (LLVM_LIKELY(canUseImplicitSummary)) {
-                    summaryType = CarryData::ImplicitSummary;
+                    summaryKind = CarryData::ImplicitSummary;
                     // Insert padding if necessary to ensure the implicit summary does
                     // not contain bits of a subsequent frame.
                     if (packedSizeInBits <= 8) {
@@ -330,7 +334,7 @@ StructType * CompressedCarryManager::analyse(kernel::KernelBuilder & b, const Pa
                     requiredSummaryPaddingInBits = summarySize - packedSizeInBits;
                     summaryTy = toSummaryType(b, summarySize);
                 } else {
-                    summaryType = CarryData::ExplicitSummary;
+                    summaryKind = CarryData::ExplicitSummary;
                     state.insert(state.begin(), ArrayType::get(summaryTy, packSize));
                 }
             }
@@ -354,7 +358,7 @@ StructType * CompressedCarryManager::analyse(kernel::KernelBuilder & b, const Pa
         if (LLVM_UNLIKELY(inNonCarryCollapsingLoop && state.size() > 0)) {
             mHasNonCarryCollapsingLoops = true;
             cd.setNestedCarryStateType(carryState);
-            summaryType = (CarryData::SummaryType)(CarryData::ExplicitSummary | CarryData::NonCarryCollapsingMode);
+            summaryKind = (CarryData::SummaryKind)(CarryData::ExplicitSummary | CarryData::NonCarryCollapsingMode);
             FixedArray<Type *, 3> fields;
             fields[NestedCapacity] = b.getSizeTy();
             fields[LastIncomingCarryLoopIteration] = b.getSizeTy();
@@ -362,7 +366,7 @@ StructType * CompressedCarryManager::analyse(kernel::KernelBuilder & b, const Pa
             carryState = StructType::get(b.getContext(), fields);
         }
         cd.setSummarySizeTy(summaryTy);
-        cd.setSummaryType(summaryType);
+        cd.setSummaryKind(summaryKind);
         return carryState;
     };
 

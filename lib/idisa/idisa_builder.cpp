@@ -971,6 +971,10 @@ Value * IDISA_Builder::mvmd_dslli(unsigned fw, Value * a, Value * b, unsigned sh
 }
 
 Value * IDISA_Builder::mvmd_shuffle(unsigned fw, Value * table, Value * index_vector) {
+    if (fw == mBitBlockWidth) {
+        Value * isIndex0 = CreateIsNull(index_vector);
+        return CreateSelect(isIndex0, table, ConstantInt::getNullValue(mBitBlockType));
+    }
     UnsupportedFieldWidthError(fw, "mvmd_shuffle");
 }
 

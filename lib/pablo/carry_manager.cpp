@@ -56,14 +56,15 @@ static Value * castToSummaryType(KernelBuilder & b, Value * carryOut, Type * sum
     if (!(carryOut->getType()->isIntegerTy() || carryOut->getType() == b.getBitBlockType())) {
         assert (false);
     }
-
-    if (carryOut->getType() == summaryTy) {
+    Type * carryOutTy = carryOut->getType();
+    if (carryOutTy == summaryTy) {
         return carryOut;
     } else if (summaryTy == b.getBitBlockType()) {
         return b.CreateBitCast(b.CreateZExt(carryOut, b.getIntNTy(b.getBitBlockWidth())), b.getBitBlockType());
-    } else {
-        // assert (carryOut->getType()->getPrimitiveSizeInBits() <= summaryTy->getPrimitiveSizeInBits());
+    } else if (carryOutTy->isIntegerTy() && summaryTy->isIntegerTy()) {
         return b.CreateZExt(carryOut, summaryTy);
+    } else {
+        return b.CreateBitCast(carryOut, summaryTy);
     }
 }
 
@@ -1190,7 +1191,7 @@ StructType * CarryManager::analyse(kernel::KernelBuilder & b, const PabloBlock *
     // Build the carry state struct and add the summary pack if needed.
     CarryData & cd = mCarryMetadata[carryScopeIndex];
     StructType * carryState = nullptr;
-    CarryData::SummaryType summaryType = CarryData::NoSummary;
+    CarryData::SummaryKind summaryKind = CarryData::NoSummary;
 
     // if we have at least one non-empty carry state, check if we need a summary
     if (LLVM_UNLIKELY(isEmptyCarryStruct(state) || inNonCarryCollapsingLoop)) {
@@ -1199,12 +1200,12 @@ StructType * CarryManager::analyse(kernel::KernelBuilder & b, const PabloBlock *
         // do we have a summary or a sequence of nested empty structs?
         if (LLVM_LIKELY(ifDepth > 0 || loopDepth > 0)) {
             if (LLVM_LIKELY(state.size() > 1)) {
-                summaryType = CarryData::ExplicitSummary;
+                summaryKind = CarryData::ExplicitSummary;
                 state.insert(state.begin(), carryPackType);
             } else {
-                summaryType = CarryData::ImplicitSummary;
+                summaryKind = CarryData::ImplicitSummary;
                 if (hasNonEmptyCarryStruct(state[0])) {
-                    summaryType = CarryData::BorrowedSummary;
+                    summaryKind = CarryData::BorrowedSummary;
                 }
             }
         }
@@ -1216,7 +1217,7 @@ StructType * CarryManager::analyse(kernel::KernelBuilder & b, const PabloBlock *
     if (LLVM_UNLIKELY(inNonCarryCollapsingLoop && state.size() > 0)) {
         mHasNonCarryCollapsingLoops = true;
         cd.setNestedCarryStateType(carryState);
-        summaryType = (CarryData::SummaryType)(CarryData::ExplicitSummary | CarryData::NonCarryCollapsingMode);
+        summaryKind = (CarryData::SummaryKind)(CarryData::ExplicitSummary | CarryData::NonCarryCollapsingMode);
         FixedArray<Type *, 3> fields;
         fields[NestedCapacity] = b.getSizeTy();
         fields[LastIncomingCarryLoopIteration] = b.getSizeTy();
@@ -1224,7 +1225,7 @@ StructType * CarryManager::analyse(kernel::KernelBuilder & b, const PabloBlock *
         carryState = StructType::get(b.getContext(), fields);
         assert (isDynamicallyAllocatedType(carryState));
     }
-    cd.setSummaryType(summaryType);
+    cd.setSummaryKind(summaryKind);
     assert (carryState);
     return carryState;
 }
