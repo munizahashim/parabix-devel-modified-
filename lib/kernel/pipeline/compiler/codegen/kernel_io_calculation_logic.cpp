@@ -731,7 +731,12 @@ Value * PipelineCompiler::getAccessibleInputItems(KernelBuilder & b, const Buffe
 
     const StreamSetBuffer * const buffer = bn.Buffer;
     Value * const processed = mCurrentProcessedItemCountPhi[inputPort];
-    Value * const available = mLocallyAvailableItems[streamSet]; assert (available);
+    Value * const available = mLocallyAvailableItems[streamSet];
+    if (available == nullptr) {
+        errs() << "Missing avail " << mKernelId << "." << inputPort.Number << " -> " << streamSet << "\n";
+    }
+
+    assert (available);
     #ifdef PRINT_DEBUG_MESSAGES
     const auto prefix = makeBufferName(mKernelId, inputPort);
     debugPrint(b, prefix + "_available = %" PRIu64, available);

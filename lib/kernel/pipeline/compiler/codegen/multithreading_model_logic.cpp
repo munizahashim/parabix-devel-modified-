@@ -229,7 +229,16 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
     const auto resumePoint = b.saveIP();
 
     const auto anyDebugOptionIsSet = codegen::AnyDebugOptionIsSet();
-    SmallVector<Type *, 2> csRetValFields(CheckAssertions ? 2 : 1, boolTy);
+
+    const auto hasTermSignal = !mIsNestedPipeline || PipelineHasTerminationSignal;
+
+    SmallVector<Type *, 2> csRetValFields;
+    csRetValFields.push_back(hasTermSignal ? sizeTy : boolTy);
+    if (CheckAssertions) {
+        csRetValFields.push_back(boolTy);
+    }
+
+
     StructType * const csRetValType = StructType::get(b.getContext(), csRetValFields);
 
     FixedArray<Type *, 2> csParams;
@@ -248,8 +257,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
     } else {
         csDoSegmentProcessFuncType = csDoSegmentComputeFuncType;
     }
-
-    const auto hasTermSignal = !mIsNestedPipeline || PipelineHasTerminationSignal;
 
     // -------------------------------------------------------------------------------------------------------------------------
     // GENERATE DO SEGMENT (KERNEL EXECUTION) FUNCTION CODE
@@ -355,22 +362,17 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
 
         Value * const terminated = hasPipelineTerminated(b);
         SmallVector<Value *, 2> retValFields;
-        retValFields.push_back(terminated);
+        if (hasTermSignal) {
+            retValFields.push_back(terminated);
+        } else {
+            retValFields.push_back(b.CreateIsNotNull(terminated));
+        }
         if (LLVM_UNLIKELY(CheckAssertions)) {
             retValFields.push_back(mPipelineProgress);
         }
         b.CreateAggregateRet(retValFields.data(), CheckAssertions ? 2U : 1U);
 
         mIsIOProcessThread = false;
-
-//        if (LLVM_LIKELY(hasTermSignal)) {
-//            writeTerminationSignalToLocalState(b, threadStructTy, threadStruct, hasPipelineTerminated(b));
-//        }
-//        if (LLVM_UNLIKELY(CheckAssertions)) {
-//            b.CreateRet(mPipelineProgress);
-//        } else {
-//            b.CreateRetVoid();
-//        }
     };
 
     const auto outerFuncName = concat(mTarget->getName(), "_MultithreadedThread", tmp);

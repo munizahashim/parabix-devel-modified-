@@ -370,8 +370,6 @@ public:
     Value * readTerminationSignal(KernelBuilder & b, const unsigned kernelId) const;
     ScalarRef getKernelTerminationSignalPtr(KernelBuilder & b, const unsigned kernelId) const;
     void writeTerminationSignal(KernelBuilder & b, const unsigned kernelId, Value * const signal) const;
-    Value * readIfStreamSetlIsClosed(KernelBuilder & b, const size_t streamSet);
-    Value *  readIfKernelIsClosed(KernelBuilder & b, const size_t kernelId);
     Value * hasPipelineTerminated(KernelBuilder & b);
     void signalAbnormalTermination(KernelBuilder & b);
     LLVM_READNONE static Constant * getTerminationSignal(KernelBuilder & b, const TerminationSignal type);
@@ -719,6 +717,7 @@ protected:
     Vec<AllocaInst *, 16>                       mAddressableItemCountPtr;
     Vec<AllocaInst *, 16>                       mVirtualBaseAddressPtr;
     FixedVector<PHINode *>                      mInitiallyAvailableItemsPhi;
+    FixedVector<Value *>                        mKernelIsClosed;
     FixedVector<Value *>                        mLocallyAvailableItems;
 
     FixedVector<Value *>                        mScalarValue;
@@ -998,6 +997,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mZeroInputGraph(std::move(P.mZeroInputGraph))
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
+, mKernelIsClosed(FirstKernel, LastKernel, mAllocator)
 , mLocallyAvailableItems(FirstStreamSet, LastStreamSet, mAllocator)
 
 , mScalarValue(FirstKernel, LastScalar, mAllocator)

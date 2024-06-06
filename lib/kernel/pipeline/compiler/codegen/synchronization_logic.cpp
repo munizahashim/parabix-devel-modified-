@@ -192,8 +192,6 @@ void PipelineCompiler::waitUntilCurrentSegmentNumberIsLessThan(KernelBuilder & b
     BasicBlock * const segmentCheckLoop = b.CreateBasicBlock(prefix + "_crossTheadWaitLoop", nextNode);
     BasicBlock * const segmentCheckExit = b.CreateBasicBlock(prefix + "_crossTheadWaitExit", nextNode);
     Value * const syncLockPtr = getSynchronizationLockPtrForKernel(b, kernelId, lockType);
-    Value * signalPtr; Type * signalTy;
-    std::tie(signalPtr, signalTy) = getKernelTerminationSignalPtr(b, kernelId);
     b.CreateBr(segmentCheckLoop);
 
     b.SetInsertPoint(segmentCheckLoop);
@@ -205,10 +203,14 @@ void PipelineCompiler::waitUntilCurrentSegmentNumberIsLessThan(KernelBuilder & b
         min = b.CreateAdd(syncNum, windowLength);
     }
     Value * const isProgressedFarEnough = b.CreateICmpULT(mSegNo, min);
-    Value * const isTerminated = b.CreateIsNotNull(b.CreateLoad(signalTy, signalPtr));
+    Value * const isTerminated = b.CreateIsNotNull(readTerminationSignal(b, kernelId));
     b.CreateLikelyCondBr(b.CreateOr(isProgressedFarEnough, isTerminated), segmentCheckExit, segmentCheckLoop);
 
     b.SetInsertPoint(segmentCheckExit);
+    #ifdef PRINT_DEBUG_MESSAGES
+    debugPrint(b, prefix + ": waited for cross thread %ssegment number %" PRIu64 " of %" PRIu64 " isProgressed=%" PRIu8 " isTerminated=%" PRIu8,
+               __getSyncLockName(b, lockType), syncNum, min, isProgressedFarEnough, isTerminated);
+    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

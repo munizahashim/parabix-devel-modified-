@@ -20,7 +20,6 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     mFixedRateLCM = getLCMOfFixedRateInputs(mKernel);
     mKernelIsInternallySynchronized = mIsInternallySynchronized.test(mKernelId);
     mKernelCanTerminateEarly = mKernel->canSetTerminateSignal();
-    assert (HasTerminationSignal[mKernelId] == (mIsPartitionRoot || mKernelCanTerminateEarly));
     mIsOptimizationBranch = isa<OptimizationBranch>(mKernel);
     mRecordHistogramData = recordsAnyHistogramData();
     mExecuteStridesIndividually =
@@ -85,7 +84,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
 
     if (LLVM_UNLIKELY(mIsPartitionRoot || mKernelCanTerminateEarly)) {
         mKernelInitiallyTerminated = b.CreateBasicBlock(prefix + "_initiallyTerminated", mNextPartitionEntryPoint);
-        if (LLVM_LIKELY(!mIsIOProcessThread)) {
+        if (LLVM_LIKELY(mIsPartitionRoot && !mIsIOProcessThread)) {
             // if we are actually jumping over any kernels, create the basicblock for the code to perform it.
             const auto jumpId = PartitionJumpTargetId[mCurrentPartitionId];
             assert (jumpId > mCurrentPartitionId);
@@ -212,18 +211,19 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     splatMultiStepPartialSumValues(b);
     if (LLVM_UNLIKELY(mCurrentKernelIsStateFree)) {
         writeInternalProcessedAndProducedItemCounts(b, true);
-    }
-    if (mIsPartitionRoot || mKernelCanTerminateEarly) {
+    } else {
         // When we have a cross-threaded buffer, we need to write out their produced counts
         // prior to writing the termination signal otherwise we risk a consumer assuming
         // a streamset is closed but does not know the correct item count. Rather than
         // potentially slowing down the loop exit by writing an unnecessary value to the
         // global state, we just write it here despite knowing it'll be written again later.
-        if (LLVM_LIKELY(!mCurrentKernelIsStateFree)) {
-            writeCrossThreadedProducedItemCountAfterTermination(b);
-        }
+        writeCrossThreadedProducedItemCountAfterTermination(b);
+    }
+    if (HasTerminationSignal.test(mKernelId)) {
         writeTerminationSignal(b, mKernelId, mTerminatedSignalPhi);
         propagateTerminationSignal(b);
+    } else {
+
     }
     // We do not release the pre-invocation synchronization lock in the execution phase
     // when a kernel is terminating.
@@ -720,10 +720,10 @@ void PipelineCompiler::writeInsufficientIOExit(KernelBuilder & b) {
 
     assert (isFromCurrentFunction(b, mAlreadyProgressedPhi, false));
     mAnyProgressedAtLoopExitPhi->addIncoming(mAlreadyProgressedPhi, exitBlock);
+    assert (mInitialTerminationSignal);
     mTerminatedAtLoopExitPhi->addIncoming(mInitialTerminationSignal, exitBlock);
 
     if (mKernelJumpToNextUsefulPartition) {
-        assert (mIsPartitionRoot);
         for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
             const auto & br = mBufferGraph[e];
             const auto port = br.Port;
@@ -850,11 +850,6 @@ void PipelineCompiler::updatePhisAfterTermination(KernelBuilder & b) {
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const auto port = mBufferGraph[e].Port;
         Value * const produced = mProducedAtTermination[port];
-
-        #ifdef PRINT_DEBUG_MESSAGES
-        debugPrint(b, makeBufferName(mKernelId, port) + "_producedAtTermination = %" PRIu64, produced);
-        #endif
-
         mUpdatedProducedPhi[port]->addIncoming(produced, exitBlock);
         if (mUpdatedProducedDeferredPhi[port]) {
             mUpdatedProducedDeferredPhi[port]->addIncoming(produced, exitBlock);

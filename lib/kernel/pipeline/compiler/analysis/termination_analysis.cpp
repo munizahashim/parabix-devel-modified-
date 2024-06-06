@@ -109,6 +109,14 @@ void PipelineAnalysis::makeTerminationPropagationGraph() {
 
     HasTerminationSignal.resize(PipelineOutput + 1U);
 
+    const auto firstComputeKernelId = FirstKernelInPartition[FirstComputePartitionId];
+    const auto afterLastComputeKernelId = FirstKernelInPartition[LastComputePartitionId + 1];
+
+
+    if (LLVM_UNLIKELY(firstComputeKernelId != FirstKernel)) {
+        HasTerminationSignal.set(firstComputeKernelId - 1);
+    }
+
     BitVector marks(PipelineOutput + 1U);
 
     for (auto pid = KernelPartitionId[FirstKernel]; pid < PartitionCount; ++pid) {
@@ -142,9 +150,22 @@ void PipelineAnalysis::makeTerminationPropagationGraph() {
             if (kernelObj->canSetTerminateSignal()) {
                 add_edge(i, start, true, mTerminationPropagationGraph);
                 HasTerminationSignal.set(i);
+            } else {
+                // If we have a cross threaded buffer, we cannot rely on only storing the root's
+                // termination signal because we need to know exactly when the actual producer
+                // is terminated and not only whether there is any reason to execute the partition.
+                for (const auto e : make_iterator_range(out_edges(i , mBufferGraph))) {
+                    const BufferNode & bn = mBufferGraph[target(e, mBufferGraph)];
+                    if (LLVM_UNLIKELY(bn.isCrossThreaded())) {
+                        HasTerminationSignal.set(i);
+                        break;
+                    }
+                }
             }
         }
     }
+
+
 
     ReverseTopologicalOrdering ordering;
     ordering.reserve(num_vertices(mTerminationPropagationGraph));

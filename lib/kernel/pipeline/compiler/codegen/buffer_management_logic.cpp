@@ -352,14 +352,23 @@ void PipelineCompiler::constructStreamSetBuffers(KernelBuilder & /* b */) {
  * @brief readAvailableItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::readAvailableItemCounts(KernelBuilder & b) {
-
+    mKernelIsClosed.reset(FirstKernel, LastKernel);
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const auto streamSet = source(e, mBufferGraph);
-        if (mLocallyAvailableItems[streamSet] == nullptr || mIsIOProcessThread) {
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (bn.isCrossThreaded()) {
+            // We need to check the terminated signal *before* the item count or we risk getting
+            // an old available count and new termination signal. Do not rearrange this order.
+            const auto producer = parent(streamSet, mBufferGraph);
+            if (mKernelIsClosed[producer] == nullptr) {
+                mKernelIsClosed[producer] = readTerminationSignal(b, producer);
+            }
+            mLocallyAvailableItems[streamSet] = readAvailableItemCount(b, streamSet);
+        } else if (mLocallyAvailableItems[streamSet] == nullptr) {
+            assert (bn.isExternal() || bn.isConstant());
             mLocallyAvailableItems[streamSet] = readAvailableItemCount(b, streamSet);
         }
     }
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -533,6 +542,11 @@ void PipelineCompiler::writeCrossThreadedProducedItemCountAfterTermination(Kerne
         const BufferNode & bn = mBufferGraph[streamSet];
         if (bn.isCrossThreaded()) {
             assert (bn.isInternal());
+            assert (bn.isNonThreadLocal());
+            if (!HasTerminationSignal.test(mKernelId)) {
+                errs() << mKernelId << " -> " << streamSet << "\n";
+            }
+            assert (HasTerminationSignal.test(mKernelId));
             const BufferPort & br = mBufferGraph[e];
             const auto outputPort = br.Port;
             Value * const produced = mProducedAtTermination[outputPort];

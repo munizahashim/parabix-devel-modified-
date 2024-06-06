@@ -333,7 +333,7 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
 
         // Is this the last kernel in a partition? If so, store the accumulated
         // termination signal.
-        if (terminated && HasTerminationSignal[mKernelId]) {
+        if (terminated && HasTerminationSignal.test(mKernelId)) {
             Value * const signal = b.CreateSelect(terminated, aborted, unterminated);
             writeTerminationSignal(b, mKernelId, signal);
             terminated = nullptr;
