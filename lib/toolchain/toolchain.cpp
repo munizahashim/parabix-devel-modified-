@@ -225,7 +225,7 @@ static cl::opt<bool, true> OptCompileTime("time-kernels", cl::location(TimeKerne
 
 bool UseProcessThreadForIO;
 static cl::opt<bool, true> OptUseProcessThreadForIO("io-thread", cl::location(UseProcessThreadForIO),
-                                        cl::desc("Only permit the process thread to perform IO"), cl::init(true));
+                                        cl::desc("Only permit the process thread to perform IO"), cl::init(false));
 
 CodeGenOpt::Level OptLevel;
 CodeGenOpt::Level BackEndOptLevel;

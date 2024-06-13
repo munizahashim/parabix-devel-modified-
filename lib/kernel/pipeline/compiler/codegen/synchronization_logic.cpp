@@ -192,25 +192,28 @@ void PipelineCompiler::waitUntilCurrentSegmentNumberIsLessThan(KernelBuilder & b
     BasicBlock * const segmentCheckLoop = b.CreateBasicBlock(prefix + "_crossTheadWaitLoop", nextNode);
     BasicBlock * const segmentCheckExit = b.CreateBasicBlock(prefix + "_crossTheadWaitExit", nextNode);
     Value * const syncLockPtr = getSynchronizationLockPtrForKernel(b, kernelId, lockType);
+    Value * terminatedPtr = nullptr;
+    if (mIsIOProcessThread) {
+        std::tie(terminatedPtr, std::ignore) = b.getScalarFieldPtr(COMPUTE_THREAD_TERMINATION_STATE);
+    }
     b.CreateBr(segmentCheckLoop);
 
     b.SetInsertPoint(segmentCheckLoop);
-//    Function * schedYieldFunc = b.getModule()->getFunction("sched_yield");
-//    b.CreateCall(schedYieldFunc);
-    Value * const syncNum = b.CreateAtomicLoadAcquire(b.getSizeTy(), syncLockPtr);
-    Value * min = syncNum;
-    if (windowLength) {
-        min = b.CreateAdd(syncNum, windowLength);
+    Value * min = b.CreateAtomicLoadAcquire(b.getSizeTy(), syncLockPtr);
+    assert (!mIsIOProcessThread || windowLength);
+    if (mIsIOProcessThread) {
+        min = b.CreateAdd(min, windowLength);
     }
     Value * const isProgressedFarEnough = b.CreateICmpULT(mSegNo, min);
-    Value * const isTerminated = b.CreateIsNotNull(readTerminationSignal(b, kernelId));
+    Value * isTerminated = nullptr;
+    if (mIsIOProcessThread) {
+        isTerminated = b.CreateIsNotNull(b.CreateLoad(b.getSizeTy(), terminatedPtr, true));
+    } else {
+        isTerminated = b.CreateIsNotNull(readTerminationSignal(b, kernelId));
+    }
     b.CreateLikelyCondBr(b.CreateOr(isProgressedFarEnough, isTerminated), segmentCheckExit, segmentCheckLoop);
 
     b.SetInsertPoint(segmentCheckExit);
-    #ifdef PRINT_DEBUG_MESSAGES
-    debugPrint(b, prefix + ": waited for cross thread %ssegment number %" PRIu64 " of %" PRIu64 " isProgressed=%" PRIu8 " isTerminated=%" PRIu8,
-               __getSyncLockName(b, lockType), syncNum, min, isProgressedFarEnough, isTerminated);
-    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

@@ -8,11 +8,21 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::addTerminationProperties(KernelBuilder & b, const size_t kernelId, const size_t groupId) {
     if (HasTerminationSignal.test(kernelId)) {
+
         IntegerType * const sizeTy = b.getSizeTy();
         mTarget->addInternalScalar(sizeTy, TERMINATION_PREFIX + std::to_string(kernelId), groupId);
         if (in_degree(kernelId, mTerminationPropagationGraph) != 0) {
             mTarget->addInternalScalar(sizeTy, CONSUMER_TERMINATION_COUNT_PREFIX + std::to_string(kernelId), groupId);
         }
+
+        for (auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
+            if (LLVM_UNLIKELY(mBufferGraph[e].isCrossThreaded())) {
+                mKernelProducesCrossThreadedData.set(kernelId);
+                mTarget->addInternalScalar(sizeTy, CROSS_THREADED_TERMINATION_SEGMENT_NUMBER_PREFIX + std::to_string(kernelId), groupId);
+                break;
+            }
+        }
+
     } else {
         assert (in_degree(kernelId, mTerminationPropagationGraph) == 0);
     }

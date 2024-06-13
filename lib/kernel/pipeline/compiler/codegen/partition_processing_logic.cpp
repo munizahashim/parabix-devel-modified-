@@ -38,11 +38,16 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
         }
         assert (mPartitionEntryPoint[(PartitionCount - 1)] == nullptr);
         mPartitionEntryPoint[(PartitionCount - 1)] = pipelineEnd;
-        for (unsigned i = 2; i < FirstComputePartitionId; ++i) {
-            mPartitionPipelineProgressPhi[i] =
-                PHINode::Create(boolTy, PartitionCount, std::to_string(i) + ".pipelineProgress", mPartitionEntryPoint[i]);
+        size_t skip = 1;
+        if (LLVM_UNLIKELY(FirstComputePartitionId == 1)) {
+            skip = 2;
+        } else {
+            for (auto i = 2; i < FirstComputePartitionId; ++i) {
+                mPartitionPipelineProgressPhi[i] =
+                    PHINode::Create(boolTy, PartitionCount, std::to_string(i) + ".pipelineProgress", mPartitionEntryPoint[i]);
+            }
         }
-        for (unsigned i = LastComputePartitionId + 1; i < PartitionCount; ++i) {
+        for (auto i = (LastComputePartitionId + skip); i < PartitionCount; ++i) {
             mPartitionPipelineProgressPhi[i] =
                 PHINode::Create(boolTy, PartitionCount, std::to_string(i) + ".pipelineProgress", mPartitionEntryPoint[i]);
         }
@@ -105,36 +110,38 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
     // of the kernels we jump over as well as the termination signals for any kernel we may
     // need to check if its closed or not.
 
+    const auto firstComputeKernel = FirstKernelInPartition[FirstComputePartitionId];
+
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
 
-        if (LLVM_UNLIKELY(bn.isConstant() || bn.isCrossThreaded())) {
+        if (LLVM_UNLIKELY(bn.isConstant())) {
             continue;
         }
 
         const auto output = in_edge(streamSet, mBufferGraph);
         const auto producer = source(output, mBufferGraph);
-        if (LLVM_UNLIKELY(producer == PipelineInput)) {
+        if (LLVM_UNLIKELY(producer < firstComputeKernel)) {
             continue;
         }
 
         // TODO: make new buffer type to automatically state this is a cross partition
         // thread local buffer.
 
-        if (bn.isThreadLocal()) {
-            const auto prodPartId = KernelPartitionId[producer];
-            bool noCrossPartitionConsumer = true;
-            for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                const auto consPartId = KernelPartitionId[target(e, mBufferGraph)];
-                if (prodPartId != consPartId) {
-                    noCrossPartitionConsumer = false;
-                    break;
-                }
-            }
-            if (noCrossPartitionConsumer) {
-                continue;
-            }
-        }
+//        if (bn.isThreadLocal()) {
+//            const auto prodPartId = KernelPartitionId[producer];
+//            bool noCrossPartitionConsumer = true;
+//            for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+//                const auto consPartId = KernelPartitionId[target(e, mBufferGraph)];
+//                if (prodPartId != consPartId) {
+//                    noCrossPartitionConsumer = false;
+//                    break;
+//                }
+//            }
+//            if (noCrossPartitionConsumer) {
+//                continue;
+//            }
+//        }
 
         const BufferPort & outputPort = mBufferGraph[output];
         const auto prefix = makeBufferName(producer, outputPort.Port);
@@ -144,12 +151,9 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
         auto lastReader = producer;
         for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
             const auto consumer = target(input, mBufferGraph);
-            // TODO: does the graph need a connection to pipeline output?
-            if (consumer < PipelineOutput) {
-                lastReader = std::max(lastReader, consumer);
-            }
+            lastReader = std::max(lastReader, consumer);
         }
-        const auto readsPartId = KernelPartitionId[lastReader];
+        const auto readsPartId = std::min(KernelPartitionId[lastReader], LastComputePartitionId);
         assert (FirstComputePartitionId <= readsPartId && readsPartId <= LastComputePartitionId);
         const auto prodPrefix = prefix + "_produced@partition";
         const auto prodPartId = KernelPartitionId[producer];
@@ -167,8 +171,6 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
     assert (KernelPartitionId[PipelineOutput] == PartitionCount - 1);
 
     BitVector toCheck(LastKernel + 1);
-
-    const auto firstComputeKernel = FirstKernelInPartition[FirstComputePartitionId];
 
     auto makeTerminationSignal = [&](const size_t partitionId) {
         auto entryPoint = mPartitionEntryPoint[partitionId];

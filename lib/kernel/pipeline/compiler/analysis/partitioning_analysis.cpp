@@ -857,9 +857,9 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
 
     RenumberingGraph T(partitionCount);
 
-    for (unsigned i = 1; i < partitionCount; ++i) {
-        add_edge(0, i, 0, T);
-    }
+//    for (unsigned i = 1; i < partitionCount; ++i) {
+//        add_edge(0, i, 0, T);
+//    }
 
     for (unsigned i = 1; i < m; ++i) {
         const auto u = sequence[i];
@@ -880,9 +880,43 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
         }
     }
 
+    llvm::BitVector V(partitionCount);
+
+    for (unsigned i = 1; i < (partitionCount - 1); ++i) {
+        if (in_degree(i, T) == 0) {
+            add_edge(0, i, 0, T);
+            for (const auto e : make_iterator_range(out_edges(i, T))) {
+                V.set(target(e, T));
+            }
+        }
+    }
+
+    for (const auto e : make_iterator_range(out_edges(0, T))) {
+        const auto s = target(e, T);
+        for (auto j = V.find_first(); j != -1; j = V.find_next(j)) {
+            if (!edge(s, j, T).second) {
+                add_edge(s, j, 0, T);
+            }
+        }
+    }
+
+    V.reset();
+
     for (unsigned i = 1; i < (partitionCount - 1); ++i) {
         if (out_degree(i, T) == 0) {
+            for (const auto e : make_iterator_range(in_edges(i, T))) {
+                V.set(source(e, T));
+            }
             add_edge(i, partitionCount - 1, 0, T);
+        }
+    }
+
+    for (const auto e : make_iterator_range(in_edges(partitionCount - 1, T))) {
+        const auto t = source(e, T);
+        for (auto j = V.find_first(); j != -1; j = V.find_next(j)) {
+            if (!edge(j, t, T).second) {
+                add_edge(j, t, 0, T);
+            }
         }
     }
 
@@ -1200,12 +1234,11 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
     PartitionJumpTargetId[0] = 0;
 
     assert (FirstComputePartitionId > 0);
-
-    for (size_t i = 2; i < (FirstComputePartitionId - 1); ++i) {
+    for (size_t i = 2; i < FirstComputePartitionId; ++i) {
         PartitionJumpTargetId[i - 1] = i;
     }
     assert ((FirstComputePartitionId - 1) < (LastComputePartitionId + 1));
-    PartitionJumpTargetId[(FirstComputePartitionId - 1)] = LastComputePartitionId + 1;
+    PartitionJumpTargetId[(FirstComputePartitionId - 1)] = (LastComputePartitionId + 1);
 
     assert (LastComputePartitionId < (PartitionCount - 1));
 
@@ -1233,7 +1266,7 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
 
     assert (PartitionCount > 1);
 
-    for (auto i = LastComputePartitionId + 1; i < (PartitionCount - 1); ++i) {
+    for (auto i = (LastComputePartitionId + 1); i < (PartitionCount - 1); ++i) {
         PartitionJumpTargetId[i] = (i + 1);
     }
 

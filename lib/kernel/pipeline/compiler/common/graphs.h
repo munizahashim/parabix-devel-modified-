@@ -370,7 +370,8 @@ enum BufferPortType : unsigned {
     IsShared = 16,
     IsManaged = 32,
     CanModifySegmentLength = 64,
-    Illustrated = 128
+    IsCrossThreaded = 128,
+    Illustrated = 256
 };
 
 struct BufferPort {
@@ -397,6 +398,10 @@ struct BufferPort {
 
     bool isPrincipal() const {
         return (Flags & BufferPortType::IsPrincipal) != 0;
+    }
+
+    bool isCrossThreaded() const {
+        return (Flags & BufferPortType::IsCrossThreaded) != 0;
     }
 
     bool isFixed() const {

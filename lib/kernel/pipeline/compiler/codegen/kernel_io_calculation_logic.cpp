@@ -372,8 +372,6 @@ void PipelineCompiler::checkForSufficientInputData(KernelBuilder & b, const Buff
     // simply have to trust that the root determined the correct number or we'd be forced to have an
     // under/overflow capable of containing an entire segment rather than a single stride.
 
-
-
     Value * const strideLength = calculateStrideLength(b, port, mCurrentProcessedItemCountPhi[port.Port], mStrideStepSize, "hasSufficient");
 
     const auto prefix = makeBufferName(mKernelId, inputPort);
@@ -621,7 +619,7 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
 
         for (auto ei = ei_begin; ei != ei_end; ++ei) {
             const BufferPort & port =  mBufferGraph[*ei];
-            if (port.canModifySegmentLength()) {
+            if (port.canModifySegmentLength() || port.isCrossThreaded()) {
                 const auto streamSet = source(*ei, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[streamSet];
                 if (LLVM_UNLIKELY(bn.isConstant())) {
@@ -649,10 +647,9 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
                 }
 
                 Value * const closed = isClosed(b, streamSet);
-
                 Value * hasEnough = closed;
 
-                if (anyNonCountable) {
+                if (anyNonCountable || port.isCrossThreaded()) {
 
                     if (LLVM_UNLIKELY(port.isZeroExtended())) {
                         avail = b.CreateSelect(closed, MAX_INT, avail);
@@ -677,6 +674,7 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
                     Value * const remaining = b.CreateSub(avail, processed, "remaining");
                     Value * const nextStrideLength = calculateStrideLength(b, port, processed, nextStrideIndex, "hasMoreInput");
                     Value * const required = addLookahead(b, port, nextStrideLength); assert (required);
+
                     hasEnough = b.CreateOr(closed, b.CreateICmpUGE(remaining, required));
                 }
 
@@ -731,12 +729,7 @@ Value * PipelineCompiler::getAccessibleInputItems(KernelBuilder & b, const Buffe
 
     const StreamSetBuffer * const buffer = bn.Buffer;
     Value * const processed = mCurrentProcessedItemCountPhi[inputPort];
-    Value * const available = mLocallyAvailableItems[streamSet];
-    if (available == nullptr) {
-        errs() << "Missing avail " << mKernelId << "." << inputPort.Number << " -> " << streamSet << "\n";
-    }
-
-    assert (available);
+    Value * const available = mLocallyAvailableItems[streamSet]; assert (available);
     #ifdef PRINT_DEBUG_MESSAGES
     const auto prefix = makeBufferName(mKernelId, inputPort);
     debugPrint(b, prefix + "_available = %" PRIu64, available);

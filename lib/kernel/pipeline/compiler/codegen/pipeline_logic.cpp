@@ -93,6 +93,15 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
         }
     }
     addZeroInputStructProperties(b);
+
+    const auto first = FirstKernelInPartition[FirstComputePartitionId];
+    const auto last = FirstKernelInPartition[LastComputePartitionId + 1];
+
+    if (first > FirstKernel || last <= LastKernel) {
+        mTarget->addInternalScalar(sizeTy, COMPUTE_THREAD_TERMINATION_STATE);
+    }
+
+
 }
 
 
@@ -137,14 +146,8 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
 
     const auto name = makeKernelName(kernelId);
 
-   // const auto partId = KernelPartitionId[kernelId];
-
-    const auto firstSyncNum = (firstComputeKernelId == FirstKernel) ? FirstKernel : (firstComputeKernelId - 1);
-    const auto needsSynchronizationLock = (firstSyncNum <= kernelId && kernelId < onAfterLastComputeKernelId);
-
-    if (needsSynchronizationLock) {
+    if (kernelId < onAfterLastComputeKernelId) {
         const auto syncLockType = allowDataParallelExecution ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
-        assert (!allowDataParallelExecution || kernelId > firstSyncNum || (!AllowIOProcessThread && firstSyncNum == FirstKernel));
         mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[syncLockType], groupId);
         if (isRoot && (kernelId >= firstComputeKernelId)) {
             addSegmentLengthSlidingWindowKernelProperties(b, kernelId, groupId);
@@ -208,7 +211,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
     }
 
     if (LLVM_UNLIKELY(allowDataParallelExecution)) {
-        assert (needsSynchronizationLock);
+        assert (kernelId < onAfterLastComputeKernelId);
         mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[SYNC_LOCK_POST_INVOCATION], groupId);
     }
 

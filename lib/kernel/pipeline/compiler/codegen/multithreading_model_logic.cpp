@@ -326,7 +326,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             const auto afterLastComputeKernel = FirstKernelInPartition[LastComputePartitionId + 1];
             assert (firstComputeKernel < afterLastComputeKernel);
             if (LLVM_LIKELY(afterLastComputeKernel < PipelineOutput)) {
-               // waitUntilCurrentSegmentNumberIsLessThan(b, afterLastComputeKernel - 1, numOfActiveThreads);
                 for (auto i = afterLastComputeKernel; i <= LastKernel; ++i) {
                     setActiveKernel(b, i, true);
                     executeKernel(b);
@@ -360,7 +359,10 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             b.CreateStore(accum, segPtr);
         }
 
+
+
         Value * const terminated = hasPipelineTerminated(b);
+
         SmallVector<Value *, 2> retValFields;
         if (hasTermSignal) {
             retValFields.push_back(terminated);
@@ -375,7 +377,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         mIsIOProcessThread = false;
     };
 
-    const auto outerFuncName = concat(mTarget->getName(), "_MultithreadedThread", tmp);
+    const auto outerFuncName = concat(mTarget->getName(), "_ComputeThread", tmp);
     Function * doSegmentComputeThreadFunc = Function::Create(csDoSegmentComputeFuncType, Function::InternalLinkage, outerFuncName, m);
 
     makeDoSegmentLogicFunction(doSegmentComputeThreadFunc, false);
@@ -383,6 +385,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
     Function * doSegmentProcessThreadFunc = nullptr;
 
     if (AllowIOProcessThread) {
+        assert (!mIsNestedPipeline);
         const auto outerFuncName = concat(mTarget->getName(), "_ProcessThread", tmp);
         doSegmentProcessThreadFunc = Function::Create(csDoSegmentProcessFuncType, Function::InternalLinkage, outerFuncName, m);
         makeDoSegmentLogicFunction(doSegmentProcessThreadFunc, true); 
@@ -711,6 +714,20 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         b.SetInsertPoint(mPipelineEnd);
         assert (isFromCurrentFunction(b, getHandle(), !mTarget->isStateful()));
         assert (isFromCurrentFunction(b, getThreadLocalHandle(), !mTarget->hasThreadLocal()));
+        if (AllowIOProcessThread && !generateProcessThread) {
+            assert (!mIsNestedPipeline);
+            const auto ref = b.getScalarFieldPtr(COMPUTE_THREAD_TERMINATION_STATE);
+            DataLayout DL(b.getModule());
+            #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(13, 0, 0)
+            llvm::MaybeAlign align = Align(DL.getTypeStoreSize(b.getSizeTy()));
+            #endif
+            Value * const updated = b.CreateAtomicCmpXchg(ref.first, b.getSize(0), terminated,
+            #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(13, 0, 0)
+                                                           *align,
+            #endif
+            AtomicOrdering::Release, AtomicOrdering::Acquire);
+        }
+
 
         #ifdef PRINT_DEBUG_MESSAGES
         if (mIsNestedPipeline) {
