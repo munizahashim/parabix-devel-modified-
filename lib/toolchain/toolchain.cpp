@@ -130,7 +130,7 @@ static cl::opt<std::string> ObjectCacheDirOption("object-cache-dir", cl::init(""
                                                  cl::desc("Path to the object cache diretory"), cl::cat(CodeGenOptions));
 
 bool EnableDynamicMultithreading;
-static cl::opt<bool, true> EnableDynamicMultithreadingOption("dynamic-multithreading", cl::location(EnableDynamicMultithreading), cl::init(false),
+static cl::opt<bool, true> EnableDynamicMultithreadingOption("dynamic-multithreading", cl::location(EnableDynamicMultithreading), cl::init(true),
                                                    cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
 
 float DynamicMultithreadingAddThreshold;
@@ -225,7 +225,7 @@ static cl::opt<bool, true> OptCompileTime("time-kernels", cl::location(TimeKerne
 
 bool UseProcessThreadForIO;
 static cl::opt<bool, true> OptUseProcessThreadForIO("io-thread", cl::location(UseProcessThreadForIO),
-                                        cl::desc("Only permit the process thread to perform IO"), cl::init(false));
+                                        cl::desc("Only permit the process thread to perform IO"), cl::init(true));
 
 CodeGenOpt::Level OptLevel;
 CodeGenOpt::Level BackEndOptLevel;

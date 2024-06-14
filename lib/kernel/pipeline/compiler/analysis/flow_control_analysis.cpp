@@ -27,7 +27,7 @@ void PipelineAnalysis::addFlowControlAnnotations() {
             }
         }
 
-        if (LLVM_UNLIKELY(lastPartitionId <= firstPartitionId)) {
+        if (LLVM_UNLIKELY(lastPartitionId < firstPartitionId)) {
             // No kernels that can be isolated? outside of a nested pipeline, the only
             // way for this to occur is if all input and output are transferred through
             // pipeline I/O streamsets.

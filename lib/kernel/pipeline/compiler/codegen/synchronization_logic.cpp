@@ -65,7 +65,6 @@ void PipelineCompiler::obtainCurrentSegmentNumber(KernelBuilder & b, BasicBlock 
  * @brief incrementCurrentSegNo
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::incrementCurrentSegNo(KernelBuilder & b, BasicBlock * const exitBlock) {
-    assert (!mIsNestedPipeline && !mUseDynamicMultithreading);
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     Value * const segNo = mBaseSegNo; assert (mBaseSegNo);
     #else
@@ -185,6 +184,9 @@ void PipelineCompiler::releaseSynchronizationLock(KernelBuilder & b, const unsig
  * @brief waitUntilCurrentSegmentNumberIsLessThan
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::waitUntilCurrentSegmentNumberIsLessThan(KernelBuilder & b, const unsigned kernelId, Value * const windowLength) {
+
+#warning this should affect dynamic multithreading sync cost
+
     assert (b.GetInsertBlock());
     BasicBlock * const nextNode = b.GetInsertBlock()->getNextNode();
     const auto lockType = isDataParallel(kernelId) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
