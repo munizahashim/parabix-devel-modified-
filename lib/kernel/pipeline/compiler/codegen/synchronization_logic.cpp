@@ -65,6 +65,7 @@ void PipelineCompiler::obtainCurrentSegmentNumber(KernelBuilder & b, BasicBlock 
  * @brief incrementCurrentSegNo
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::incrementCurrentSegNo(KernelBuilder & b, BasicBlock * const exitBlock) {
+    assert (mIsIOProcessThread || !mUseDynamicMultithreading);
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     Value * const segNo = mBaseSegNo; assert (mBaseSegNo);
     #else

@@ -33,6 +33,7 @@ enum PipelineStateObjectField : unsigned {
     SHARED_STATE_PARAM
     , THREAD_LOCAL_PARAM
     , PIPELINE_PARAMS
+    , PIPELINE_PARAM_PADDING
     , INITIAL_SEG_NUMBER
     , FIXED_NUMBER_OF_THREADS
     , ACCUMULATED_SEGMENT_TIME
@@ -115,7 +116,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
     Value * minimumNumOfThreads = nullptr;
 
     size_t numOfComputeKernels = 0;
-
     if (AllowIOProcessThread) {
         const auto firstKernel = KernelPartitionId[FirstComputePartitionId];
         const auto lastKernel = KernelPartitionId[LastComputePartitionId + 1];
@@ -124,22 +124,26 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         numOfComputeKernels = (LastKernel - FirstKernel + 1);
     }
 
+    // TODO: redesign to avoid the unnecessary store?
+
     Value * maximumNumOfThreads = b.CreateUMin(b.getScalarField(MAXIMUM_NUM_OF_THREADS), b.getSize(numOfComputeKernels));
     if (mUseDynamicMultithreading) {
         minimumNumOfThreads = b.getScalarField(MINIMUM_NUM_OF_THREADS);
         if (AllowIOProcessThread) {
             minimumNumOfThreads = b.CreateUMax(minimumNumOfThreads, b.getSize(2));
+            b.setScalarField(MINIMUM_NUM_OF_THREADS, minimumNumOfThreads);
         }
         maximumNumOfThreads = b.CreateUMax(maximumNumOfThreads, minimumNumOfThreads);
+        b.setScalarField(MAXIMUM_NUM_OF_THREADS, maximumNumOfThreads);
     } else {
         minimumNumOfThreads = maximumNumOfThreads;
     }
 
-    Value * const threadStateArray =
-        b.CreateAlignedMalloc(threadStructTy, maximumNumOfThreads, 0, b.getCacheAlignment());
-
+    Value * const threadStateArray = b.CreateAlignedMalloc(threadStructTy, maximumNumOfThreads, 0, b.getCacheAlignment());
+    assert (threadStateArray->getType() == threadStructTy->getPointerTo());
     DataLayout DL(b.getModule());
     Type * const intPtrTy = DL.getIntPtrType(voidPtrTy);
+
     BasicBlock * const constructThread = b.CreateBasicBlock("constructThread");
     BasicBlock * const constructedThreads = b.CreateBasicBlock("constructedThreads");
 
@@ -180,7 +184,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         }
     }
     Value * const cThreadState = b.CreateGEP(threadStructTy, threadStateArray, threadIndex);
-
     Value * initialSegNum = threadIndex;
     Value * maxComputeThreads = maximumNumOfThreads;
     if (AllowIOProcessThread) {
@@ -216,7 +219,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         b.SetInsertPoint(constructNextThread);
     }
 
-    Value * const createMoreThreads = b.CreateICmpULT(nextThreadIndex, minimumNumOfThreads);
+    Value * const createMoreThreads = b.CreateICmpULT(nextThreadIndex, maximumNumOfThreads);
     threadIndex->addIncoming(nextThreadIndex, b.GetInsertBlock());
     b.CreateCondBr(createMoreThreads, constructThread, constructedThreads);
 
@@ -310,7 +313,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         branchToInitialPartition(b);
         const auto firstComputeKernel = FirstKernelInPartition[FirstComputePartitionId];
         assert (AllowIOProcessThread || firstComputeKernel == FirstKernel);
-        if (generateProcessThread) {
+        if (mIsIOProcessThread) {
             assert (!mIsNestedPipeline);
             if (FirstKernel < firstComputeKernel) {
                 // Let C be the current segment number of the compute thread,
@@ -391,7 +394,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         doSegmentProcessThreadFunc->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
         doSegmentComputeThreadFunc->addFnAttr(llvm::Attribute::AttrKind::AlwaysInline);
     } else {
-        doSegmentProcessThreadFunc = threadFunc;
+        doSegmentProcessThreadFunc = doSegmentComputeThreadFunc;
     }
 
     // -------------------------------------------------------------------------------------------------------------------------
@@ -570,6 +573,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             Value * const fSyncTime = b.CreateUIToFP(nextSyncTime, floatTy);
             Value * const fSyncOverhead = b.CreateFDiv(fSyncTime, fSegTime);
 
+
             // subtract out the values so that we can keep each check
             indices2[0] = sz_ZERO;
             indices2[1] = b.getInt32(ACCUMULATED_SEGMENT_TIME);
@@ -584,7 +588,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             Value * const syncOverheadLow = b.CreateFCmpULT(fSyncOverhead, syncAddThreadThreadhold);
             Value * const canAddMoreThreads = b.CreateICmpULT(activeThreadsPhi, maximumThreads);
             Value * const canAdd = b.CreateAnd(syncOverheadLow, canAddMoreThreads);
-
             Value * const startOfNextPeriod = b.CreateAdd(mSegNo, synchronizationCostCheckPeriod);
             b.CreateCondBr(canAdd, selectThreadStructToUseForAddThread, checkToRemoveThread);
 
@@ -695,7 +698,9 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             if (mUseDynamicMultithreading && generateProcessThread) {
                 nextCheckSegmentPhi->addIncoming(startOfNextPeriodPhi, exitBlock);
                 activeThreadsPhi->addIncoming(currentNumOfThreadsPhi, exitBlock);
-                incrementCurrentSegNo(b, exitBlock);
+                if (AllowIOProcessThread) {
+                    incrementCurrentSegNo(b, exitBlock);
+                }
             } else if (mUseDynamicMultithreading) {
                 FixedArray<Value *, 2> indices2;
                 indices2[0] = sz_ZERO;
@@ -1011,11 +1016,16 @@ StructType * PipelineCompiler::getThreadStuctType(KernelBuilder & b, const std::
 
     const auto n = props.size();
     std::vector<Type *> paramType(n);
+
+    DataLayout dl(b.getModule());
     for (unsigned i = 0; i < n; ++i) {
         paramType[i] = props[i]->getType();
     }
     fields[PIPELINE_PARAMS] = StructType::get(b.getContext(), paramType);
-
+    const auto sizeTyWidth = sizeTy->getIntegerBitWidth();
+    const auto paramPaddingBytes = sizeTyWidth - (b.getTypeSize(dl,fields[PIPELINE_PARAMS]) % sizeTyWidth);
+    IntegerType * const int8Ty = b.getInt8Ty();
+    fields[PIPELINE_PARAM_PADDING] = ArrayType::get(int8Ty, paramPaddingBytes);
     if (mUseDynamicMultithreading) {
         fields[INITIAL_SEG_NUMBER] = emptyTy;
         fields[FIXED_NUMBER_OF_THREADS] = emptyTy;
@@ -1027,7 +1037,6 @@ StructType * PipelineCompiler::getThreadStuctType(KernelBuilder & b, const std::
         fields[ACCUMULATED_SEGMENT_TIME] = emptyTy;
         fields[ACCUMULATED_SYNCHRONIZATION_TIME] = emptyTy;
     }
-
     Type * const pthreadTy = TypeBuilder<pthread_t, false>::get(b.getContext());
     assert (pthreadTy == b.getModule()->getFunction("pthread_self")->getReturnType());
     fields[CURRENT_THREAD_ID] = pthreadTy;
@@ -1042,17 +1051,18 @@ StructType * PipelineCompiler::getThreadStuctType(KernelBuilder & b, const std::
         fields[CURRENT_THREAD_STATUS_FLAG] = emptyTy;
     }
 
-    DataLayout dl(b.getModule());
     // add padding to force this struct to be cache-line-aligned
     uint64_t structSize = 0UL;
     for (unsigned i = 0; i < THREAD_STRUCT_SIZE; ++i) {
+        assert (fields[i]);
         structSize += b.getTypeSize(dl, fields[i]);
     }
     const auto cl = b.getCacheAlignment();
     const auto paddingBytes = (2 * cl) - (structSize % cl);
-    IntegerType * const int8Ty = b.getInt8Ty();
     fields[THREAD_STRUCT_SIZE] = ArrayType::get(int8Ty, paddingBytes);
-    return StructType::get(C, fields);
+    StructType * const sty = StructType::get(C, fields, true);
+    assert (b.getTypeSize(dl, sty) == (structSize + paddingBytes));
+    return sty;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
