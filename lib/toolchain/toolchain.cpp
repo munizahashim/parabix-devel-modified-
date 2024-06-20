@@ -63,7 +63,6 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                                                            "particular stream."),
                         clEnumVal(DisableIndirectBranch, "Disable use of indirect branches in kernel code."),
                         clEnumVal(DisableThreadLocalStreamSets, "Disable use of thread-local memory for streamsets within the same partition."),
-                        clEnumVal(EnableAnonymousMMapedDynamicLinearBuffers, "Use anonymous mmap for dynamic linear buffers instead of copyback mechanism."),
 
                         #ifdef ENABLE_PAPI
                         clEnumVal(DisplayPAPICounterThreadTotalsOnly, "Disable per-kernel PAPI counters when given a valid PapiCounters list."),

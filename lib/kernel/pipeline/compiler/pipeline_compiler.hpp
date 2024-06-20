@@ -473,6 +473,8 @@ public:
 
     void printItemCountDeltas(KernelBuilder & b, const StringRef title, const StringRef suffix) const;
 
+    Value * getMaxSegmentNumber(KernelBuilder & b) const;
+
 // internal optimization passes
 
     void simplifyPhiNodes(Module * const m) const;

@@ -790,7 +790,6 @@ void PipelineCompiler::printOptionalBlockingIOStatistics(KernelBuilder & b) {
     }
 }
 
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief printOptionalStridesPerSegment
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -806,8 +805,11 @@ void PipelineCompiler::printOptionalBlockedIOPerSegment(KernelBuilder & b) const
         ConstantInt * const sz_ZERO = b.getSize(0);
         ConstantInt * const sz_ONE = b.getSize(1);
 
+
         Function * Dprintf = b.GetDprintf();
         FunctionType * fTy = Dprintf->getFunctionType();
+
+        Value * const maxSegNo = getMaxSegmentNumber(b);
 
         // Print the first title line
         SmallVector<char, 100> buffer;
@@ -979,7 +981,7 @@ has_ports:
 
         SmallVector<Value *, 64> currentVal(fieldCount + 3);
 
-        Value * writeLine = b.CreateICmpEQ(segNo, mSegNo);
+        Value * writeLine = b.CreateICmpEQ(segNo, maxSegNo);
         for (unsigned i = 0; i < fieldCount; ++i) {
 
             BasicBlock * const entry = b.GetInsertBlock();
@@ -1058,7 +1060,7 @@ has_ports:
 
         segNo->addIncoming(nextSegNo, loopEnd);
 
-        Value * const notDone = b.CreateICmpNE(segNo, mSegNo);
+        Value * const notDone = b.CreateICmpNE(segNo, maxSegNo);
         b.CreateLikelyCondBr(notDone, loopStart, loopExit);
 
         b.SetInsertPoint(loopExit);
@@ -1617,6 +1619,8 @@ void PipelineCompiler::printOptionalStridesPerSegment(KernelBuilder & b) const {
         Function * Dprintf = b.GetDprintf();
         FunctionType * fTy = Dprintf->getFunctionType();
 
+        Value * const maxSegNo = getMaxSegmentNumber(b);
+
         SmallVector<char, 1024> buffer;
         raw_svector_ostream format(buffer);
         format << "STRIDES PER SEGMENT:\n\n"
@@ -1749,7 +1753,7 @@ void PipelineCompiler::printOptionalStridesPerSegment(KernelBuilder & b) const {
             currentValue[i]->addIncoming(updatedValue[i], loopEnd);
         }
 
-        Value * const notDone = b.CreateICmpULT(segNo, mSegNo);
+        Value * const notDone = b.CreateICmpULT(segNo, maxSegNo);
 
         b.CreateLikelyCondBr(notDone, loopStart, loopExit);
 
@@ -1790,8 +1794,8 @@ void PipelineCompiler::recordProducedItemCountDeltas(KernelBuilder & b) const {
         for (unsigned i = 0; i != n; ++i) {
             const StreamSetPort port(PortType::Output, i);
             const auto streamSet = getOutputBufferVertex(port);
-            current[i] = mFullyProducedItemCount[port];
-            prior[i] = mInitiallyProducedItemCount[streamSet];
+            current[i] = mFullyProducedItemCount[port]; assert (current[i]);
+            prior[i] = mInitiallyProducedItemCount[streamSet]; assert (prior[i]);
         }
         recordItemCountDeltas(b, current, prior, STATISTICS_PRODUCED_ITEM_COUNT_SUFFIX);
     }
@@ -1855,53 +1859,152 @@ void PipelineCompiler::recordItemCountDeltas(KernelBuilder & b,
     const auto kernelName = makeKernelName(mKernelId);
     const auto fieldName = (kernelName + suffix).str();
 
+    Value * trace;
 
+    std::tie(trace, std::ignore) = b.getScalarFieldPtr(fieldName);
 
-    Value * trace = b.getScalarFieldPtr(fieldName).first;
+    Module * const m = b.getModule();
 
-    auto & C = b.getContext();
-    IntegerType * const sizeTy = b.getSizeTy();
     PointerType * const voidPtrTy = b.getVoidPtrTy();
+    IntegerType * const sizeTy = b.getSizeTy();
+
+    constexpr auto logName = "__recordItemCountDelta";
+
+    Function * logFunc = m->getFunction(logName);
+    if (logFunc == nullptr) {
+
+        PointerType * const sizePtrTy = sizeTy->getPointerTo();
+
+        FixedArray<Type *, 4> params;
+        params[0] = voidPtrTy;
+        params[1] = sizeTy;
+        params[2] = sizeTy;
+        params[3] = sizePtrTy;
+
+        FunctionType * fTy = FunctionType::get(b.getVoidTy(), params, false);
+        logFunc = Function::Create(fTy, Function::InternalLinkage, logName, m);
+
+        const auto ip = b.saveIP();
+
+        auto & C = b.getContext();
+
+        BasicBlock * const entry = BasicBlock::Create(C, "entry", logFunc);
+
+        b.SetInsertPoint(entry);
+
+        auto arg = logFunc->arg_begin();
+        auto nextArg = [&]() {
+            assert (arg != logFunc->arg_end());
+            Value * const v = &*arg; assert (v);
+            std::advance(arg, 1);
+            return v;
+        };
+
+        FixedArray<Type *, 3> fields;
+        fields[0] = sizeTy;
+        fields[1] = voidPtrTy;
+        fields[2] = ArrayType::get(sizeTy, ITEM_COUNT_DELTA_CHUNK_LENGTH); // Int array of size N * ITEM_COUNT_DELTA_CHUNK_LENGTH
+
+        StructType * const logChunkTy = StructType::get(C, fields);
+        PointerType * const logChunkPtrTy = logChunkTy->getPointerTo();
+        PointerType * const logChunkPtrPtrTy = logChunkPtrTy->getPointerTo();
+
+        Value * const logChunkPtrPtr = b.CreatePointerCast(nextArg(), logChunkPtrPtrTy);
+        Value * const segNo = nextArg();
+        Value * const N = nextArg();
+        Value * const currentArray = nextArg();
+        assert (arg == logFunc->arg_end());
+
+        ConstantInt * const CHUNK_LENGTH =  ConstantInt::get(sizeTy, ITEM_COUNT_DELTA_CHUNK_LENGTH);
+
+        DataLayout DL(b.getModule());
+        const auto sizeTySize = b.getTypeSize(DL, sizeTy);
+        const auto voidPtrTySize = b.getTypeSize(DL, voidPtrTy);
+        Value * const currentLog = b.CreateAlignedLoad(logChunkPtrTy, logChunkPtrPtr, voidPtrTySize);
+        BasicBlock * const checkLogOffset = b.CreateBasicBlock("checkLogOffset");
+        BasicBlock * const allocateNewLogChunk = b.CreateBasicBlock("allocateNewLogChunk");
+        BasicBlock * const writeLogEntry = b.CreateBasicBlock("writeLogEntry");
+        BasicBlock * const exit = b.CreateBasicBlock("exit");
+
+        // TODO: set this to alloc at startup
+
+        Value * const segIndex = b.CreateURem(segNo, CHUNK_LENGTH);
+        Value * const segOffset = b.CreateMul(segIndex, N);
+        b.CreateCondBr(b.CreateIsNull(currentLog), allocateNewLogChunk, checkLogOffset);
+
+        b.SetInsertPoint(checkLogOffset);
+
+        ConstantInt * const i32_ZERO = b.getInt32(0);
+        ConstantInt * const i32_ONE = b.getInt32(1);
+
+        FixedArray<Value *, 2> offset;
+        offset[0] = i32_ZERO;
+        offset[1] = i32_ZERO;
+
+        Value * const chunkStart = b.CreateLoad(sizeTy, b.CreateGEP(logChunkTy, currentLog, offset));
+        Value * const canFit = b.CreateICmpULT(segNo, b.CreateAdd(chunkStart, CHUNK_LENGTH));
+        b.CreateCondBr(canFit, writeLogEntry, allocateNewLogChunk);
+
+        b.SetInsertPoint(allocateNewLogChunk);
+        Value * const m = b.CreateAdd(b.CreateMul(N, CHUNK_LENGTH), b.getSize(1));
+        Value * const sizeLength = b.CreateAdd(b.CreateMul(m, b.getSize(sizeTySize)), b.getSize(voidPtrTySize));
+        Value * const newLog = b.CreatePointerCast(b.CreatePageAlignedMalloc(sizeLength), logChunkPtrTy);
+        b.CreateStore(b.CreateSub(segNo, segIndex), b.CreateGEP(logChunkTy, newLog, offset));
+        offset[1] = i32_ONE;
+        b.CreateStore(currentLog, b.CreateGEP(logChunkTy, newLog, offset));
+        b.CreateStore(newLog, logChunkPtrPtr);
+        b.CreateBr(writeLogEntry);
+
+        ConstantInt * const sz_ZERO = b.getSize(0);
+        ConstantInt * const sz_ONE = b.getSize(1);
+        ConstantInt * const sz_TWO = b.getSize(2);
+
+        b.SetInsertPoint(writeLogEntry);
+        PHINode * const indexPhi = b.CreatePHI(sizeTy, 2);
+        indexPhi->addIncoming(sz_ZERO, checkLogOffset);
+        indexPhi->addIncoming(sz_ZERO, allocateNewLogChunk);
+        PHINode * const logPhi = b.CreatePHI(logChunkPtrTy, 2);
+        logPhi->addIncoming(currentLog, checkLogOffset);
+        logPhi->addIncoming(newLog, allocateNewLogChunk);
+        Value * const val = b.CreateLoad(sizeTy, currentArray, indexPhi);
+
+        FixedArray<Value *, 3> offset3;
+        offset3[0] = i32_ZERO;
+        offset3[1] = b.getInt32(2);
+
+        offset3[2] = b.CreateAdd(segOffset, indexPhi);
+        Value * const arrayPtr = b.CreateGEP(logChunkTy, logPhi, offset3);
+        assert (arrayPtr->getType() == sizePtrTy);
+
+        b.CreateStore(val, arrayPtr);
+        Value * const nextIndex = b.CreateAdd(indexPhi, sz_ONE);
+        indexPhi->addIncoming(nextIndex, writeLogEntry);
+        logPhi->addIncoming(logPhi, writeLogEntry);
+        b.CreateCondBr(b.CreateICmpULT(nextIndex, N), writeLogEntry, exit);
+
+        b.SetInsertPoint(exit);
+        b.CreateRetVoid();
+
+        b.restoreIP(ip);
+    }
+
+    FixedArray<Value *, 4> args;
+    args[0] = b.CreatePointerCast(trace, voidPtrTy);
     const auto n = out_degree(mKernelId, mBufferGraph);
-    ArrayType * const logTy = ArrayType::get(ArrayType::get(sizeTy, n), ITEM_COUNT_DELTA_CHUNK_LENGTH);
-    StructType * const logChunkTy = StructType::get(C, { logTy, voidPtrTy } );
-    PointerType * const traceTy = logChunkTy->getPointerTo();
-
-    BasicBlock * const expand = b.CreateBasicBlock(kernelName + "_expandItemCountDeltArray");
-    BasicBlock * const record = b.CreateBasicBlock(kernelName + "_recordItemCountDelta");
-
-    Value * const offset = b.CreateURem(mSegNo, b.getSize(ITEM_COUNT_DELTA_CHUNK_LENGTH));
-    Constant * const ZERO = b.getInt32(0);
-    Constant * const ONE = b.getInt32(1);
-
-    Value * const currentLog = b.CreateLoad(traceTy, trace);
-    BasicBlock * const entry = b.GetInsertBlock();
-    b.CreateCondBr(b.CreateIsNull(offset), expand, record);
-
-    b.SetInsertPoint(expand);
-    Value * const newLog = b.CreatePageAlignedMalloc(logChunkTy);
-    b.CreateStore(b.CreatePointerCast(currentLog, voidPtrTy), b.CreateGEP(logChunkTy, newLog, { ZERO, ONE}));
-    b.CreateStore(newLog, trace);
-    BasicBlock * const expandExit = b.GetInsertBlock();
-    b.CreateBr(record);
-
-    b.SetInsertPoint(record);
-    PHINode * const log = b.CreatePHI(logTy->getPointerTo(), 2);
-    log->addIncoming(currentLog, entry);
-    log->addIncoming(newLog, expandExit);
-
-    FixedArray<Value *, 4> indices;
-    indices[0] = ZERO;
-    indices[1] = ZERO;
-    indices[2] = offset;
-
+    args[1] = mSegNo;
+    ConstantInt * N = b.getSize(n);
+    args[2] = N;
+    // TODO: just make a single alloca at the top for the max output ports?
+    Value * const array = b.CreateAllocaAtEntryPoint(sizeTy, N);
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & out = mBufferGraph[e];
         const auto i = out.Port.Number;
         Value * const delta = b.CreateSub(current[i], prior[i]);
-        indices[3] = b.getInt32(i);
-        b.CreateStore(delta, b.CreateGEP(logChunkTy, log, indices));
+        b.CreateStore(delta, b.CreateGEP(sizeTy, array, b.getInt32(i)));
     }
+    args[3] = array;
+    b.CreateCall(logFunc, args);
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1913,7 +2016,7 @@ void PipelineCompiler::addItemCountDeltaProperties(KernelBuilder & b, const unsi
     IntegerType * const sizeTy = b.getSizeTy();
     PointerType * const voidPtrTy = b.getVoidPtrTy();
     ArrayType * const logTy = ArrayType::get(ArrayType::get(sizeTy, n), ITEM_COUNT_DELTA_CHUNK_LENGTH);
-    StructType * const logChunkTy = StructType::get(C, { logTy, voidPtrTy } );
+    StructType * const logChunkTy = StructType::get(C, { sizeTy, voidPtrTy, logTy } );
     PointerType * const traceTy = logChunkTy->getPointerTo();
     const auto fieldName = (makeKernelName(kernel) + suffix).str();
     const auto groupId = getCacheLineGroupId(kernel);
@@ -1924,25 +2027,37 @@ void PipelineCompiler::addItemCountDeltaProperties(KernelBuilder & b, const unsi
  * @brief printItemCountDeltas
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::printItemCountDeltas(KernelBuilder & b, const StringRef title, const StringRef suffix) const {
+#if 1
     IntegerType * const sizeTy = b.getSizeTy();
 
-    Constant * const ZERO = b.getInt32(0);
-    Constant * const ONE = b.getInt32(1);
 
-    ConstantInt * const SZ_ZERO = b.getSize(0);
-    ConstantInt * const SZ_ONE = b.getSize(1);
+    Constant * i32_ZERO = b.getInt32(0);
+    Constant * i32_ONE = b.getInt32(1);
+
+    ConstantInt * const sz_ZERO = b.getSize(0);
+    ConstantInt * const sz_ONE = b.getSize(1);
 
 
     // Print the title line
     Function * Dprintf = b.GetDprintf();
     FunctionType * fTy = Dprintf->getFunctionType();
 
+    Value * const maxSegNo = getMaxSegmentNumber(b);
+
     SmallVector<char, 100> buffer;
     raw_svector_ostream format(buffer);
     format << title << "\n\n"
               "SEG #";
 
+    size_t totalStreamSets = 0;
+
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
+
+        const auto n = out_degree(i, mBufferGraph);
+
+        if (n == 0) {
+            continue;
+        }
 
         const Kernel * const kernel = getKernel(i);
         std::string kernelName = kernel->getName();
@@ -1955,6 +2070,8 @@ void PipelineCompiler::printItemCountDeltas(KernelBuilder & b, const StringRef t
                    << " " << kernelName
                    << '.' << out.getName();
         }
+
+        totalStreamSets += n;
     }
 
     format << "\n";
@@ -1970,16 +2087,14 @@ void PipelineCompiler::printItemCountDeltas(KernelBuilder & b, const StringRef t
     // Generate line format string
     buffer.clear();
 
-    const auto inputStreamSets = out_degree(PipelineInput, mBufferGraph);
-
     format << "%" PRIu64; // seg #
-    for (auto i = FirstStreamSet + inputStreamSets; i <= LastStreamSet; ++i) {
+    for (auto c = totalStreamSets; c; --c) {
         format << ",%" PRIu64; // processed item count delta
     }
     format << "\n";
 
     // Print each kernel line
-    SmallVector<Value *, 64> args(LastStreamSet - (FirstStreamSet + inputStreamSets) + 4);
+    SmallVector<Value *, 64> args(totalStreamSets + 3);
     args[0] = STDERR;
     args[1] = b.GetString(format.str());
 
@@ -1989,6 +2104,8 @@ void PipelineCompiler::printItemCountDeltas(KernelBuilder & b, const StringRef t
     LLVMContext & C = b.getContext();
     PointerType * const voidPtrTy = b.getVoidPtrTy();
 
+    size_t maxOutputPorts = 0;
+
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         const auto n = out_degree(i, mBufferGraph);
         if (LLVM_UNLIKELY(n == 0)) {
@@ -1996,132 +2113,143 @@ void PipelineCompiler::printItemCountDeltas(KernelBuilder & b, const StringRef t
             traceLogType[i] = nullptr;
         } else {
             const auto fieldName = (makeKernelName(i) + suffix).str();
-            traceLogArray[i] = b.getScalarFieldPtr(fieldName).first;
+            traceLogArray[i] = b.getScalarField(fieldName);
             ArrayType * const logTy = ArrayType::get(ArrayType::get(sizeTy, n), ITEM_COUNT_DELTA_CHUNK_LENGTH);
-            traceLogType[i] = StructType::get(C, { logTy, voidPtrTy } );
+            traceLogType[i] = StructType::get(C, { sizeTy, voidPtrTy, logTy } );
+            maxOutputPorts = std::max(maxOutputPorts, n);
         }
     }
 
     Constant * const CHUNK_LENGTH = b.getSize(ITEM_COUNT_DELTA_CHUNK_LENGTH);
-    Value * const chunkCount = b.CreateCeilUDiv(mSegNo, CHUNK_LENGTH);
-    if (LLVM_UNLIKELY(CheckAssertions)) {
-        b.CreateAssert(mSegNo, "final segment number cannot be zero");
-    }
+
+
 
     // Start printing the data lines
     BasicBlock * const loopEntry = b.GetInsertBlock();
     BasicBlock * const loopStart = b.CreateBasicBlock("reportStridesPerSegment");
-    BasicBlock * const getNextLogChunk = b.CreateBasicBlock("getNextLogChunk");
-    BasicBlock * const selectLogChunk = b.CreateBasicBlock("getNextLogChunk");
-    BasicBlock * const printLogEntry = b.CreateBasicBlock("getNextLogChunk");
+    BasicBlock * const printLogEntryLoop = b.CreateBasicBlock("printLogEntryLoop");
+
+    BasicBlock * const printLogEntryLoopExit = b.CreateBasicBlock("printLogEntryLoopExit");
+    SmallVector<Value *, 64> currentChunk(LastKernel + 1);
     b.CreateBr(loopStart);
 
     b.SetInsertPoint(loopStart);
-    PHINode * const segNo = b.CreatePHI(sizeTy, 2);
-    segNo->addIncoming(SZ_ZERO, loopEntry);
-    PHINode * const chunkIndex = b.CreatePHI(sizeTy, 2);
-    chunkIndex->addIncoming(chunkCount, loopEntry);
-    SmallVector<PHINode *, 64> currentChunk(LastKernel + 1);
-    for (auto i = PipelineInput; i <= LastKernel; ++i) {
-        if (LLVM_UNLIKELY(traceLogArray[i] == nullptr)) continue;
-        PointerType * logChunkPtrTy = traceLogType[i]->getPointerTo();
-        currentChunk[i] = b.CreatePHI(logChunkPtrTy, 2);
-        currentChunk[i]->addIncoming(ConstantPointerNull::get(logChunkPtrTy), loopEntry);
-    }
+    PHINode * const baseSegNoPhi = b.CreatePHI(sizeTy, 2);
+    baseSegNoPhi->addIncoming(sz_ZERO, loopEntry);
 
-    args[2] = segNo;
+    FixedArray<Value *, 2> offset;
+    offset[0] = i32_ZERO;
 
-    Value * const offset = b.CreateURem(segNo, CHUNK_LENGTH);
-    b.CreateCondBr(b.CreateIsNull(offset), getNextLogChunk, printLogEntry);
-
-    b.SetInsertPoint(getNextLogChunk);
-    PHINode * const nextChunkIndexPhi = b.CreatePHI(sizeTy, 2);
-    nextChunkIndexPhi->addIncoming(SZ_ZERO, loopStart);
-    SmallVector<PHINode *, 64> subsequentChunk(LastKernel + 1);
-    SmallVector<Value *, 64> nextChunk(LastKernel + 1);
-    for (auto i = PipelineInput; i <= LastKernel; ++i) {
-        if (LLVM_UNLIKELY(traceLogArray[i] == nullptr)) continue;
-        subsequentChunk[i] = b.CreatePHI(traceLogArray[i]->getType(), 2);
-        subsequentChunk[i]->addIncoming(traceLogArray[i], loopStart);
-    }
-
-
-    FixedArray<Value *, 2> nextChunkIndices;
-    nextChunkIndices[0] = ZERO;
-    nextChunkIndices[1] = ONE;
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
-        if (LLVM_UNLIKELY(subsequentChunk[i] == nullptr)) continue;
-        nextChunk[i] = b.CreateLoad(voidPtrTy, subsequentChunk[i]);
-        Value * subsequentChunk2 = b.CreateGEP(traceLogType[i], nextChunk[i], nextChunkIndices);
-        subsequentChunk2 = b.CreatePointerCast(subsequentChunk2, subsequentChunk[i]->getType());
-        subsequentChunk[i]->addIncoming(subsequentChunk2, getNextLogChunk);
-    }
-    Value * const nextChunkIndex = b.CreateAdd(nextChunkIndexPhi, SZ_ONE);
-    nextChunkIndexPhi->addIncoming(nextChunkIndex, getNextLogChunk);
 
-    Value * const foundCorrectChunk = b.CreateICmpEQ(nextChunkIndex, chunkIndex);
-    b.CreateCondBr(foundCorrectChunk, selectLogChunk, getNextLogChunk);
-
-    b.SetInsertPoint(selectLogChunk);
-    for (auto i = FirstKernel; i <= LastKernel; ++i) {
-        if (LLVM_UNLIKELY(nextChunk[i] == nullptr)) continue;
-        Value * spentLog = b.CreateLoad(voidPtrTy, b.CreateGEP(traceLogType[i], nextChunk[i], nextChunkIndices));
-        b.CreateFree(spentLog);
-    }
-    b.CreateBr(printLogEntry);
-
-    b.SetInsertPoint(printLogEntry);
-    PHINode * const nextChunkIndexPhi2 = b.CreatePHI(sizeTy, 2);
-    nextChunkIndexPhi2->addIncoming(chunkIndex, loopStart);
-    nextChunkIndexPhi2->addIncoming(nextChunkIndexPhi, selectLogChunk);
-    SmallVector<PHINode *, 64> currentChunkPhi(LastKernel + 1);
-    for (auto i = PipelineInput; i <= LastKernel; ++i) {
-        if (LLVM_UNLIKELY(nextChunk[i] == nullptr)) continue;
-        Type * const ty = nextChunk[i]->getType();
-        currentChunkPhi[i] = b.CreatePHI(ty, 2);
-        currentChunkPhi[i]->addIncoming(currentChunk[i], loopStart);
-        currentChunkPhi[i]->addIncoming(nextChunk[i], selectLogChunk);
-    }
-
-    FixedArray<Value *, 4> indices;
-    indices[0] = ZERO;
-    indices[1] = ZERO;
-    indices[2] = offset;
-    for (auto i = FirstKernel; i <= LastKernel; ++i) {
-        if (LLVM_UNLIKELY(currentChunkPhi[i] == nullptr)) {
-            for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
-                const auto streamSet = target(e, mBufferGraph);
-                assert (streamSet >= FirstStreamSet && streamSet <= LastStreamSet);
-                const auto idx = (streamSet - (FirstStreamSet + inputStreamSets)) + 3;
-                assert (args[idx] == nullptr);
-                args[idx] = SZ_ZERO;
-            }
-        } else {
-            for (const auto e : make_iterator_range(out_edges(i, mBufferGraph))) {
-                const auto streamSet = target(e, mBufferGraph);
-                assert (streamSet >= FirstStreamSet && streamSet <= LastStreamSet);
-                const auto idx = (streamSet - (FirstStreamSet + inputStreamSets)) + 3;
-                const BufferPort & out = mBufferGraph[e];
-                indices[3] = b.getInt32(out.Port.Number);
-                assert (args[idx] == nullptr);
-                args[idx] = b.CreateLoad(sizeTy, b.CreateGEP(traceLogType[i], currentChunkPhi[i], indices));
-            }
+        if (out_degree(i, mBufferGraph) == 0) {
+            continue;
         }
+
+        BasicBlock * const entry = b.GetInsertBlock();
+        BasicBlock * const loop = b.CreateBasicBlock("getNextLogChunk", printLogEntryLoop);
+        BasicBlock * const exit = b.CreateBasicBlock("getNextLogChunkExit", printLogEntryLoop);
+        PointerType * logChunkPtrTy = traceLogType[i]->getPointerTo();
+        Constant * nullPtr = ConstantPointerNull::get(logChunkPtrTy);
+        b.CreateBr(loop);
+
+        b.SetInsertPoint(loop);
+        PHINode * current = b.CreatePHI(logChunkPtrTy, 2);
+        current->addIncoming(traceLogArray[i], entry);
+        offset[1] = i32_ZERO;
+        Value * const chunkStart = b.CreateLoad(sizeTy, b.CreateGEP(traceLogType[i], current, offset));
+        Value * const A = b.CreateICmpULE(chunkStart, baseSegNoPhi);
+        Value * const B = b.CreateICmpULT(baseSegNoPhi, b.CreateAdd(chunkStart, CHUNK_LENGTH));
+        Value * const found = b.CreateAnd(A, B);
+        offset[1] = i32_ONE;
+        Value * const nextChunkPtr = b.CreateLoad(logChunkPtrTy, b.CreateGEP(traceLogType[i], current, offset));
+        Value * const noMore = b.CreateICmpEQ(nextChunkPtr, nullPtr);
+        current->addIncoming(nextChunkPtr, loop);
+        currentChunk[i] = b.CreateSelect(noMore, nullPtr, current);
+        b.CreateCondBr(b.CreateOr(found, noMore), exit, loop);
+
+        b.SetInsertPoint(exit);
     }
+
+    BasicBlock * const printLogLoopEntry = b.GetInsertBlock();
+
+    b.CreateBr(printLogEntryLoop);
+
+    b.SetInsertPoint(printLogEntryLoop);
+// #error logic  not right
+    PHINode * const indexPhi = b.CreatePHI(sizeTy, 2);
+    indexPhi->addIncoming(sz_ZERO, printLogLoopEntry);
+
+    size_t argIndex = 3;
+
+    SmallVector<Value *, 16> dataVal(maxOutputPorts);
+
+    offset[1] = b.getInt32(2);
+
+    FixedArray<Value *, 3> dataValOffset;
+
+    dataValOffset[0] = b.getSize(0);
+    dataValOffset[1] = indexPhi;
+
+    for (auto i = FirstKernel; i <= LastKernel; ++i) {
+
+        const auto m = out_degree(i, mBufferGraph);
+        if (m == 0) {
+            continue;
+        }
+
+        BasicBlock * const printLogEntryLoopHasData = b.CreateBasicBlock("printLogEntryLoopHasData", printLogEntryLoopExit);
+        BasicBlock * const printLogEntryLoopNextKernel = b.CreateBasicBlock("printLogEntryLoopNextKernel", printLogEntryLoopExit);
+
+        b.CreateLikelyCondBr(b.CreateIsNotNull(currentChunk[i]), printLogEntryLoopHasData, printLogEntryLoopNextKernel);
+
+        BasicBlock * const entry = b.GetInsertBlock();
+
+        b.SetInsertPoint(printLogEntryLoopHasData);
+        for (size_t j = 0; j < m; ++j) {
+            dataValOffset[2] = b.getSize(j);
+
+            Value * const ptr = b.CreateGEP(traceLogType[i], currentChunk[i], offset);
+
+            Value * const ptr2 = b.CreateGEP(traceLogType[i]->getStructElementType(2), ptr, dataValOffset);
+
+            dataVal[j] = b.CreateLoad(sizeTy, ptr2);
+        }
+        b.CreateBr(printLogEntryLoopNextKernel);
+
+        b.SetInsertPoint(printLogEntryLoopNextKernel);
+        for (size_t j = 0; j < m; ++j) {
+            PHINode * const argPhi = b.CreatePHI(sizeTy, 2);
+            argPhi->addIncoming(sz_ZERO, entry);
+            argPhi->addIncoming(dataVal[j], printLogEntryLoopHasData);
+            assert (args[argIndex + j] == nullptr);
+            args[argIndex + j] = argPhi;
+        }
+        argIndex += m;
+    }
+
+
+
+    Value * const actualSegNo = b.CreateAdd(baseSegNoPhi, indexPhi);
+
+    args[2] = actualSegNo;
 
     b.CreateCall(fTy, Dprintf, args);
 
-    BasicBlock * const loopExit = b.CreateBasicBlock("reportStridesPerSegmentExit");
-    BasicBlock * const loopEnd = b.GetInsertBlock();
-    Value * const nextSegNo = b.CreateAdd(segNo, SZ_ONE);
-    segNo->addIncoming(nextSegNo, loopEnd);
-    chunkIndex->addIncoming(nextChunkIndexPhi2, loopEnd);
-    for (auto i = FirstKernel; i <= LastKernel; ++i) {
-        if (LLVM_UNLIKELY(currentChunk[i] == nullptr)) continue;
-        currentChunk[i]->addIncoming(currentChunkPhi[i], loopEnd);
-    }
+    Value * notEndOfChunk = b.CreateICmpNE(indexPhi, CHUNK_LENGTH);
+    Value * notEndOfData = b.CreateICmpULE(actualSegNo, maxSegNo);
 
-    Value * const notDone = b.CreateICmpNE(nextSegNo, mSegNo);
+    indexPhi->addIncoming(b.CreateAdd(indexPhi, sz_ONE), b.GetInsertBlock());
+
+    b.CreateCondBr( b.CreateAnd(notEndOfChunk, notEndOfData), printLogEntryLoop, printLogEntryLoopExit);
+
+    b.SetInsertPoint(printLogEntryLoopExit);
+
+    Value * const nextBaseSegNo = b.CreateAdd(baseSegNoPhi, CHUNK_LENGTH);
+    baseSegNoPhi->addIncoming(nextBaseSegNo, printLogEntryLoopExit);
+    Value * const notDone = b.CreateICmpULT(nextBaseSegNo, maxSegNo);
+
+    BasicBlock * const loopExit = b.CreateBasicBlock("loopExit");
     b.CreateLikelyCondBr(notDone, loopStart, loopExit);
 
     b.SetInsertPoint(loopExit);
@@ -2130,11 +2258,34 @@ void PipelineCompiler::printItemCountDeltas(KernelBuilder & b, const StringRef t
     finalArgs[0] = STDERR;
     finalArgs[1] = b.GetString("\n");
     b.CreateCall(fTy, Dprintf, finalArgs);
-    for (auto i = PipelineInput; i <= LastKernel; ++i) {
-        if (LLVM_UNLIKELY(currentChunkPhi[i] == nullptr)) continue;
-        b.CreateFree(currentChunkPhi[i]);
-    }
+//    for (auto i = PipelineInput; i <= LastKernel; ++i) {
+//        if (LLVM_UNLIKELY(currentChunkPhi[i] == nullptr)) continue;
+//        b.CreateFree(currentChunkPhi[i]);
+//    }
+#endif
+}
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getMaxSegmentNumber
+ ** ------------------------------------------------------------------------------------------------------------- */
+Value * PipelineCompiler::getMaxSegmentNumber(KernelBuilder & b) const {
+    auto getKernelSegNo = [&](const size_t kernelId) {
+        const auto type = isDataParallel(kernelId) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        Value * const ptr = getSynchronizationLockPtrForKernel(b, kernelId, type);
+        return b.CreateLoad(b.getSizeTy(), ptr);
+    };
+    const auto firstComputeKernel = FirstKernelInPartition[FirstComputePartitionId];
+    Value * segNo = getKernelSegNo(firstComputeKernel);
+    if (firstComputeKernel != FirstKernel) {
+        segNo = b.CreateUMax(segNo, getKernelSegNo(firstComputeKernel - 1));
+    } else {
+        // TODO: this won't work yet
+        const auto afterLastComputePartitionId = FirstKernelInPartition[LastComputePartitionId + 1];
+        if (LLVM_UNLIKELY(afterLastComputePartitionId != PipelineOutput)) {
+            segNo = b.CreateUMax(segNo, getKernelSegNo(afterLastComputePartitionId));
+        }
+    }
+    return segNo;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
