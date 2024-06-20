@@ -3,7 +3,7 @@
 
 # module: idisa
 
-if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "arm64") 
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64") 
 parabix_add_module(
 NAME
     idisa

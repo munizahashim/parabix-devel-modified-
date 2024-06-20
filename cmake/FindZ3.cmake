@@ -60,7 +60,7 @@ unset(Z3_VERSION_STRING)
 
 # First, try to check it dynamically, by compiling a small program that
 # prints Z3's version
-if(Z3_INCLUDE_DIR AND Z3_LIBRARIES)
+if(Z3_INCLUDE_DIR AND Z3_LIBRARIES AND NOT CMAKE_CROSSCOMPILING)
   # We do not have the Z3 binary to query for a version. Try to use
   # a small C++ program to detect it via the Z3_get_version() API call.
   check_z3_version(${Z3_INCLUDE_DIR} ${Z3_LIBRARIES})
@@ -86,7 +86,7 @@ if(NOT Z3_VERSION_STRING AND (CMAKE_CROSSCOMPILING AND
 
   file(STRINGS "${Z3_INCLUDE_DIR}/z3_version.h"
        z3_version_str REGEX "^#define[\t ]+Z3_BUILD_NUMBER[\t ]+.*")
-  string(REGEX REPLACE "^.*Z3_BUILD_VERSION[\t ]+([0-9]).*$" "\\1"
+   string(REGEX REPLACE "^.*Z3_BUILD_(VERSION|NUMBER)[\t ]+([0-9]).*$" "\\2"
          Z3_BUILD "${z3_version_str}")
 
   set(Z3_VERSION_STRING ${Z3_MAJOR}.${Z3_MINOR}.${Z3_BUILD})

@@ -26,6 +26,7 @@ option(REPORT_PAPI_TESTS "Report PAPI testing results" OFF)
 option(LLVM_PATH "LLVM root directory")
 option(GENERATE_TOOLS "Controls whether or not it generate tools" ON)
 option(USE_LIBBACKTRACE "Allows framework to provide more detailed backtraces in JIT compiled code. Library available from github.com/ianlancetaylor/libbacktrace" OFF)
+option(SET_DEFAULT_OBJCACHE_DIR "Whether or not to set the default object cache directory at compile time" ON)
 
 # Build Artifact Configuration
 set(ARTIFACT_MODE "Multiple" CACHE STRING "Build framework into a single artifact (Single) or multiple artifacts (Multiple)")
@@ -66,9 +67,9 @@ endif()
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION} in: ${LLVM_DIR}")
 message(STATUS "Host Processor ${CMAKE_HOST_SYSTEM_PROCESSOR}")
 
-if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "arm64") 
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm64") 
 set(PARABIX_TARGETS_TO_BUILD AArch64 ARM)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -arch arm64 -DPARABIX_ARM_TARGET")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DPARABIX_ARM_TARGET")
 else()
 set(PARABIX_TARGETS_TO_BUILD X86)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DPARABIX_X86_TARGET")
@@ -197,7 +198,9 @@ if (NOT EXISTS "${PARABIX_OBJECT_CACHE}")
     message("Created: ${PARABIX_OBJECT_CACHE}")
 endif()
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DPARABIX_OBJECT_CACHE='\"${PARABIX_OBJECT_CACHE}\"'")
+if (SET_DEFAULT_OBJCACHE_DIR)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DPARABIX_OBJECT_CACHE='\"${PARABIX_OBJECT_CACHE}\"'")
+endif()
 
 # Use @rpath for dylibs on macOS
 set(CMAKE_MACOSX_RPATH ON)
