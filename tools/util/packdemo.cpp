@@ -29,6 +29,9 @@ using namespace codegen;
 static cl::OptionCategory PackDemoOptions("Pack Demo Options", "Pack demo options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(PackDemoOptions));
 
+static constexpr unsigned inputRate = 2;
+static constexpr unsigned outputRate = 1;
+
 class PackKernel final : public MultiBlockKernel {
 public:
     PackKernel(KernelBuilder & b,
@@ -36,11 +39,7 @@ public:
               StreamSet * const Packed);
 protected:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
-    static const unsigned inputRate = 2;
-    static const unsigned outputRate = 1;
-
 };
-
 
 PackKernel::PackKernel(KernelBuilder & b, StreamSet * const byteStream, StreamSet * const Packed)
 : MultiBlockKernel(b, "pack_kernel",
