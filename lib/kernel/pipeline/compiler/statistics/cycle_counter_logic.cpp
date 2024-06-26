@@ -1957,7 +1957,6 @@ void PipelineCompiler::recordItemCountDeltas(KernelBuilder & b,
 
         ConstantInt * const sz_ZERO = b.getSize(0);
         ConstantInt * const sz_ONE = b.getSize(1);
-        ConstantInt * const sz_TWO = b.getSize(2);
 
         b.SetInsertPoint(writeLogEntry);
         PHINode * const indexPhi = b.CreatePHI(sizeTy, 2);
@@ -2027,12 +2026,11 @@ void PipelineCompiler::addItemCountDeltaProperties(KernelBuilder & b, const unsi
  * @brief printItemCountDeltas
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::printItemCountDeltas(KernelBuilder & b, const StringRef title, const StringRef suffix) const {
-#if 1
+
     IntegerType * const sizeTy = b.getSizeTy();
 
-
-    Constant * i32_ZERO = b.getInt32(0);
-    Constant * i32_ONE = b.getInt32(1);
+    Constant * const i32_ZERO = b.getInt32(0);
+    Constant * const i32_ONE = b.getInt32(1);
 
     ConstantInt * const sz_ZERO = b.getSize(0);
     ConstantInt * const sz_ONE = b.getSize(1);
@@ -2176,7 +2174,6 @@ void PipelineCompiler::printItemCountDeltas(KernelBuilder & b, const StringRef t
     b.CreateBr(printLogEntryLoop);
 
     b.SetInsertPoint(printLogEntryLoop);
-// #error logic  not right
     PHINode * const indexPhi = b.CreatePHI(sizeTy, 2);
     indexPhi->addIncoming(sz_ZERO, printLogLoopEntry);
 
@@ -2258,11 +2255,33 @@ void PipelineCompiler::printItemCountDeltas(KernelBuilder & b, const StringRef t
     finalArgs[0] = STDERR;
     finalArgs[1] = b.GetString("\n");
     b.CreateCall(fTy, Dprintf, finalArgs);
-//    for (auto i = PipelineInput; i <= LastKernel; ++i) {
-//        if (LLVM_UNLIKELY(currentChunkPhi[i] == nullptr)) continue;
-//        b.CreateFree(currentChunkPhi[i]);
-//    }
-#endif
+
+    offset[1] = i32_ONE;
+
+    // and free any memory
+    for (auto i = FirstKernel; i <= LastKernel; ++i) {
+        if (LLVM_UNLIKELY(traceLogArray[i] == nullptr)) continue;
+        BasicBlock * const freeLoop = b.CreateBasicBlock("freeLoop");
+        BasicBlock * const freeExit = b.CreateBasicBlock("freeExit");
+
+        PointerType * const traceLogPtrTy = cast<PointerType>(traceLogType[i]->getPointerTo());
+        Constant * nil = ConstantPointerNull::get(traceLogPtrTy);
+
+        BasicBlock * const entry = b.GetInsertBlock();
+
+        b.CreateLikelyCondBr(b.CreateICmpNE(traceLogArray[i], nil), freeLoop, freeExit);
+
+        b.SetInsertPoint(freeLoop);
+        PHINode * logArray = b.CreatePHI(traceLogPtrTy, 2);
+        logArray->addIncoming(traceLogArray[i], entry);
+        Value * const nextArray = b.CreateLoad(traceLogPtrTy, b.CreateGEP(traceLogType[i], logArray, offset));
+        b.CreateFree(logArray);
+        logArray->addIncoming(nextArray, freeLoop);
+        b.CreateLikelyCondBr(b.CreateICmpNE(nextArray, nil), freeLoop, freeExit);
+
+        b.SetInsertPoint(freeExit);
+    }
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

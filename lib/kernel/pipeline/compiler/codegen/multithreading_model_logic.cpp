@@ -111,7 +111,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
     Function * const pthreadExitFn = m->getFunction("pthread_exit");
     Function * const pthreadJoinFn = m->getFunction("pthread_join");
 
-    Type * const pThreadTy = TypeBuilder<pthread_t, false>::get(b.getContext());
+    IntegerType * const pThreadTy = IntegerType::getIntNTy(b.getContext(), sizeof(pthread_t) * CHAR_BIT);
 
     Value * minimumNumOfThreads = nullptr;
 
@@ -725,7 +725,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(13, 0, 0)
             llvm::MaybeAlign align = Align(DL.getTypeStoreSize(b.getSizeTy()));
             #endif
-            Value * const updated = b.CreateAtomicCmpXchg(ref.first, b.getSize(0), terminated,
+            b.CreateAtomicCmpXchg(ref.first, b.getSize(0), terminated,
             #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(13, 0, 0)
                                                            *align,
             #endif
@@ -1037,9 +1037,9 @@ StructType * PipelineCompiler::getThreadStuctType(KernelBuilder & b, const std::
         fields[ACCUMULATED_SEGMENT_TIME] = emptyTy;
         fields[ACCUMULATED_SYNCHRONIZATION_TIME] = emptyTy;
     }
-    Type * const pthreadTy = TypeBuilder<pthread_t, false>::get(b.getContext());
-    assert (pthreadTy == b.getModule()->getFunction("pthread_self")->getReturnType());
-    fields[CURRENT_THREAD_ID] = pthreadTy;
+    IntegerType * const pThreadTy = IntegerType::getIntNTy(b.getContext(), sizeof(pthread_t) * CHAR_BIT);
+    assert (pThreadTy == b.getModule()->getFunction("pthread_self")->getReturnType());
+    fields[CURRENT_THREAD_ID] = pThreadTy;
     if (LLVM_LIKELY(!mIsNestedPipeline || PipelineHasTerminationSignal)) {
         fields[TERMINATION_SIGNAL] = sizeTy;
     } else {
@@ -1152,8 +1152,8 @@ Value * PipelineCompiler::isProcessThread(KernelBuilder & b, StructType * const 
     indices[0] = b.getInt32(0);
     indices[1] = b.getInt32(CURRENT_THREAD_ID);
     Value * const ptr = b.CreateInBoundsGEP(threadStateTy, threadState, indices);
-    Type * const pthreadTy = TypeBuilder<pthread_t, false>::get(b.getContext());
-    return b.CreateIsNull(b.CreateLoad(pthreadTy, ptr));
+    IntegerType * const pThreadTy = IntegerType::getIntNTy(b.getContext(), sizeof(pthread_t) * CHAR_BIT);
+    return b.CreateIsNull(b.CreateLoad(pThreadTy, ptr));
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1163,16 +1163,16 @@ void PipelineCompiler::linkPThreadLibrary(KernelBuilder & b) {
 
     Type * const voidPtrTy = b.getVoidPtrTy();
     IntegerType * const intTy = IntegerType::getIntNTy(b.getContext(), sizeof(int) * CHAR_BIT);
-    IntegerType * const pthreadTy = IntegerType::getIntNTy(b.getContext(), sizeof(pthread_t) * CHAR_BIT);
+    IntegerType * const pThreadTy = IntegerType::getIntNTy(b.getContext(), sizeof(pthread_t) * CHAR_BIT);
 
     BEGIN_SCOPED_REGION
-    FunctionType * funTy = FunctionType::get(pthreadTy, false);
+    FunctionType * funTy = FunctionType::get(pThreadTy, false);
     b.LinkFunction("pthread_self", funTy, (void*)&pthread_self);
     END_SCOPED_REGION
 
     BEGIN_SCOPED_REGION
     FixedArray<Type *, 4> params;
-    params[0] = pthreadTy->getPointerTo();
+    params[0] = pThreadTy->getPointerTo();
     params[1] = voidPtrTy;
     params[2] = voidPtrTy;
     params[3] = voidPtrTy;
@@ -1182,7 +1182,7 @@ void PipelineCompiler::linkPThreadLibrary(KernelBuilder & b) {
 
     BEGIN_SCOPED_REGION
     FixedArray<Type *, 2> params;
-    params[0] = pthreadTy;
+    params[0] = pThreadTy;
     params[1] = voidPtrTy->getPointerTo();
     FunctionType * funTy = FunctionType::get(intTy, params, false);
     b.LinkFunction("pthread_join", funTy, (void*)&pthread_join);
