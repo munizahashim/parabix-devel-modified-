@@ -437,6 +437,11 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
     if (mCurrentFixedRateFactor) {
         addNextArg(mCurrentFixedRateFactor);
     }
+    #ifdef ENABLE_PAPI
+    if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+        addNextArg(PAPIEventSetId);
+    }
+    #endif
 
     PointerType * const voidPtrTy = b.getVoidPtrTy();
 

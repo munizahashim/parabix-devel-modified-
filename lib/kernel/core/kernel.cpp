@@ -887,9 +887,10 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
         fields.push_back(getThreadLocalStateType()->getPointerTo());  // handle
     }
     const auto internallySynchronized = hasAttribute(AttrId::InternallySynchronized);
-    const auto isMainPipeline = (getTypeId() == TypeId::Pipeline) && !internallySynchronized;
+    const auto isPipeline = (getTypeId() == TypeId::Pipeline);
+    const auto isMainPipeline = isPipeline && !internallySynchronized;
 
-    if (LLVM_UNLIKELY(!isMainPipeline)) {
+    if (LLVM_LIKELY(!isMainPipeline)) {
         if (LLVM_UNLIKELY(internallySynchronized)) {
             fields.push_back(sizeTy); // external SegNo
         }
@@ -897,6 +898,11 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
         if (LLVM_LIKELY(hasFixedRateIO())) {
             fields.push_back(sizeTy); // fixed rate factor
         }
+        #ifdef ENABLE_PAPI
+        if (LLVM_UNLIKELY(!codegen::PapiCounterOptions.empty())) {
+            fields.push_back(b.getInt32Ty()); // eventSetId
+        }
+        #endif
     }
 
     PointerType * const voidPtrTy = b.getVoidPtrTy();
@@ -1006,7 +1012,8 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
             setNextArgName("threadLocal");
         }
         const auto internallySynchronized = hasAttribute(AttrId::InternallySynchronized);
-        const auto isMainPipeline = (getTypeId() == TypeId::Pipeline) && !internallySynchronized;
+        const auto isPipeline = (getTypeId() == TypeId::Pipeline);
+        const auto isMainPipeline = isPipeline && !internallySynchronized;
 
         if (LLVM_LIKELY(!isMainPipeline)) {
             if (LLVM_UNLIKELY(internallySynchronized)) {
@@ -1016,6 +1023,11 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
             if (hasFixedRateIO()) {
                 setNextArgName("fixedRateFactor");
             }
+            #ifdef ENABLE_PAPI
+            if (LLVM_UNLIKELY(!codegen::PapiCounterOptions.empty())) {
+                setNextArgName("eventSetId");
+            }
+            #endif
         }
 
         for (unsigned i = 0; i < mInputStreamSets.size(); ++i) {

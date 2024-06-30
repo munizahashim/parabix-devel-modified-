@@ -251,7 +251,6 @@ Kernel * PipelineBuilder::makeKernel() {
     #ifdef ENABLE_PAPI
     const auto & S = codegen::PapiCounterOptions;
     if (LLVM_UNLIKELY(S.compare(codegen::OmittedOption) != 0)) {
-        ADD_CL_SCALAR(STATISTICS_PAPI_EVENT_SET_CODE, PAPIEventSet);
         ADD_CL_SCALAR(STATISTICS_PAPI_EVENT_SET_LIST, PAPIEventList);
     }
     #endif

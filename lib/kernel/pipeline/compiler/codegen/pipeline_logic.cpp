@@ -36,6 +36,11 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
 
     mTarget->addInternalScalar(sizeTy, EXPECTED_NUM_OF_STRIDES_MULTIPLIER, 0);
 
+    #ifdef ENABLE_PAPI
+    if (LLVM_LIKELY(NumOfPAPIEvents > 0)) {
+        mTarget->addThreadLocalScalar(b.getInt32Ty(), STATISTICS_PAPI_EVENT_SET, 0);
+    }
+    #endif
     if (LLVM_LIKELY(RequiredThreadLocalStreamSetMemory > 0)) {
         PointerType * const int8PtrTy = b.getInt8PtrTy();
         mTarget->addThreadLocalScalar(int8PtrTy, BASE_THREAD_LOCAL_STREAMSET_MEMORY, 0);
