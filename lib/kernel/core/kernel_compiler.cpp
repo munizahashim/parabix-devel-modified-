@@ -435,7 +435,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             mFixedRateFactor = nextArg();
         }
         #ifdef ENABLE_PAPI
-        if (LLVM_UNLIKELY(!codegen::PapiCounterOptions.empty())) {
+        if (LLVM_UNLIKELY(codegen::PapiCounterOptions.compare(codegen::OmittedOption) != 0)) {
             mPAPIEventSetId = nextArg();
         }
         #endif
@@ -703,7 +703,7 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
             props.push_back(mFixedRateFactor);
         }
         #ifdef ENABLE_PAPI
-        if (LLVM_UNLIKELY(!codegen::PapiCounterOptions.empty())) {
+        if (LLVM_UNLIKELY(codegen::PapiCounterOptions.compare(codegen::OmittedOption) != 0)) {
             props.push_back(mPAPIEventSetId);
         }
         #endif
