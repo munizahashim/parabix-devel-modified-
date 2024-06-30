@@ -698,8 +698,8 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
         b.CreateBr(lastTestExit);
 
         b.SetInsertPoint(lastTestExit);
-        Value * hasEnough = enoughInputPhi; assert (enoughInputPhi);
-        return b.CreateAnd(hasEnough, nonFinal);
+     //   Value * hasEnough = enoughInputPhi; assert (enoughInputPhi);
+        return enoughInputPhi; // b.CreateAnd(hasEnough, nonFinal);
 
     } else {
         //  (final segment OR up<max) AND NOT final stride

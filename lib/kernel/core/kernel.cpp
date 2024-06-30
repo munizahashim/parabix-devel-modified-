@@ -899,7 +899,7 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
             fields.push_back(sizeTy); // fixed rate factor
         }
         #ifdef ENABLE_PAPI
-        if (LLVM_UNLIKELY(!codegen::PapiCounterOptions.empty())) {
+        if (LLVM_UNLIKELY(codegen::PapiCounterOptions.compare(codegen::OmittedOption) != 0)) {
             fields.push_back(b.getInt32Ty()); // eventSetId
         }
         #endif
@@ -1024,7 +1024,7 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
                 setNextArgName("fixedRateFactor");
             }
             #ifdef ENABLE_PAPI
-            if (LLVM_UNLIKELY(!codegen::PapiCounterOptions.empty())) {
+            if (LLVM_UNLIKELY(codegen::PapiCounterOptions.compare(codegen::OmittedOption) != 0)) {
                 setNextArgName("eventSetId");
             }
             #endif
