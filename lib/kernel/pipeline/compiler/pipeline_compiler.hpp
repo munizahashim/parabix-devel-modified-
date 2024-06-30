@@ -114,7 +114,7 @@ const static std::string STATISTICS_CYCLE_COUNT_TOTAL = "T" + STATISTICS_CYCLE_C
 #ifdef ENABLE_PAPI
 const static std::string STATISTICS_PAPI_COUNT_ARRAY_SUFFIX = ".PCS";
 const static std::string STATISTICS_PAPI_TOTAL_COUNT_ARRAY = "!PCS";
-const static std::string STATISTICS_PAPI_EVENT_SET_CODE = "PES";
+const static std::string STATISTICS_PAPI_EVENT_SET = "PES";
 const static std::string STATISTICS_PAPI_EVENT_SET_LIST = "PESL";
 #endif
 
@@ -504,19 +504,15 @@ public:
     ArrayType * getPAPIEventCounterType(KernelBuilder & b) const;
     void addPAPIEventCounterPipelineProperties(KernelBuilder & b);
     void addPAPIEventCounterKernelProperties(KernelBuilder & b, const unsigned kernel, const bool isRoot);
-    void initializePAPI(KernelBuilder & b) const;
-    void registerPAPIThread(KernelBuilder & b) const;
-    void getPAPIEventSet(KernelBuilder & b);
-    void createPAPIMeasurementArrays(KernelBuilder & b);
     void readPAPIMeasurement(KernelBuilder & b, Value * const measurementArray) const;
     void startPAPIMeasurement(KernelBuilder & b, const PAPIKernelCounter measurementType) const;
     void startPAPIMeasurement(KernelBuilder & b, const std::initializer_list<PAPIKernelCounter> types) const;
     void accumPAPIMeasurementWithoutReset(KernelBuilder & b, const size_t kernelId, const PAPIKernelCounter measurementType) const;
     void accumPAPIMeasurementWithoutReset(KernelBuilder & b, const size_t kernelId, Value * const cond, const PAPIKernelCounter ifTrue, const PAPIKernelCounter ifFalse) const;
     void recordTotalPAPIMeasurement(KernelBuilder & b) const;
-    void unregisterPAPIThread(KernelBuilder & b) const;
-    void startPAPI(KernelBuilder & b);
-    void stopPAPI(KernelBuilder & b);
+    void initPAPIOnCurrentThread(KernelBuilder & b);
+    void setupPAPIOnCurrentThread(KernelBuilder & b);
+    void stopPAPIOnCurrentThread(KernelBuilder & b) const;
     void printPAPIReportIfRequested(KernelBuilder & b);
     void checkPAPIRetValAndExitOnError(KernelBuilder & b, StringRef source, const int expected, Value * const retVal) const;
 
@@ -872,9 +868,7 @@ protected:
 
     // papi counter state
     #ifdef ENABLE_PAPI
-    //SmallVector<int, 8>                         PAPIEventList;
-    Value *                                     PAPIEventSet = nullptr;
-    Value *                                     PAPIEventSetVal = nullptr;
+    Value *                                     PAPIEventSetId = nullptr;
     FixedArray<Value *, NUM_OF_PAPI_COUNTERS>   PAPIEventCounterArray;
     Value *                                     PAPITempMeasurementArray = nullptr;
     #endif

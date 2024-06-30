@@ -198,7 +198,7 @@ enum class CommandLineScalarType {
     , ParabixIllustratorObject
     , BufferSegmentLength
     #ifdef ENABLE_PAPI
-    , PAPIEventSet
+    , PAPIEventCount
     , PAPIEventList
     #endif
     // --------------------

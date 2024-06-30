@@ -94,8 +94,6 @@ Scalar * BaseDriver::CreateCommandLineScalar(CommandLineScalarType type) noexcep
     switch (type) {
 
         #ifdef ENABLE_PAPI
-        case CommandLineScalarType::PAPIEventSet:
-            scalarTy = mBuilder->getInt32Ty(); break;
         case CommandLineScalarType::PAPIEventList:
             scalarTy = mBuilder->getInt32Ty()->getPointerTo(); break;
         #endif

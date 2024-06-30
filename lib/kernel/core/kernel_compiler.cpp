@@ -408,7 +408,8 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
     // however, in that we will not be able to optimize a single kernel program by having the main
     // function call it directly instead of a pipeline. Given that this is not a realistic use-case,
     // we're ignoring that limitation for now.
-    const auto isMainPipeline = (mTarget->getTypeId() == Kernel::TypeId::Pipeline) && !internallySynchronized;
+    const auto isPipeline = (mTarget->getTypeId() == Kernel::TypeId::Pipeline);
+    const auto isMainPipeline = isPipeline && !internallySynchronized;
 
     Rational fixedRateLCM{0};
     mFixedRateFactor = nullptr;
@@ -433,6 +434,11 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             fixedRateLCM = getLCMOfFixedRateInputs(mTarget);
             mFixedRateFactor = nextArg();
         }
+        #ifdef ENABLE_PAPI
+        if (LLVM_UNLIKELY(!codegen::PapiCounterOptions.empty())) {
+            mPAPIEventSetId = nextArg();
+        }
+        #endif
     }
 
     initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
@@ -684,7 +690,8 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
         props.push_back(mThreadLocalHandle); assert (mThreadLocalHandle);
     }
     const auto internallySynchronized = mTarget->hasAttribute(AttrId::InternallySynchronized);
-    const auto isMainPipeline = (mTarget->getTypeId() == Kernel::TypeId::Pipeline) && !internallySynchronized;
+    const auto isPipeline = (mTarget->getTypeId() == Kernel::TypeId::Pipeline);
+    const auto isMainPipeline = isPipeline && !internallySynchronized;
 
     if (LLVM_UNLIKELY(internallySynchronized)) {
         props.push_back(mExternalSegNo);
@@ -695,6 +702,11 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
         if (LLVM_LIKELY(mTarget->hasFixedRateIO())) {
             props.push_back(mFixedRateFactor);
         }
+        #ifdef ENABLE_PAPI
+        if (LLVM_UNLIKELY(!codegen::PapiCounterOptions.empty())) {
+            props.push_back(mPAPIEventSetId);
+        }
+        #endif
     }
 
     PointerType * const voidPtrTy = b.getVoidPtrTy();
@@ -1123,11 +1135,11 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
                                 BasicBlock * const entry = b.GetInsertBlock();
 
                                 if (idx == size) {
-                                    Value * const scalarVal = b.CreateLoad(elemTy, b.CreateGEP(scalarType, scalar, indices));
+                                    Value * const scalarPtr = b.CreateGEP(scalarType, scalar, indices);
+                                    Value * const scalarVal = b.CreateLoad(elemTy, scalarPtr);
                                     assert (scalarVal->getType()->isIntOrIntVectorTy());
                                     Value * const mainScalarPtr = b.CreateGEP(scalarType, mainScalar, indices);
                                     Value * mainScalarVal = b.CreateLoad(elemTy, mainScalarPtr);
-
                                     assert (scalarVal->getType() == mainScalarVal->getType());
                                     switch (binding.getAccumulationRule()) {
                                         case AccumRule::Sum:

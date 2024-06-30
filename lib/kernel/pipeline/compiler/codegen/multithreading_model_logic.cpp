@@ -237,8 +237,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
     debugInit(b);
     #endif
     #ifdef ENABLE_PAPI
-    createPAPIMeasurementArrays(b);
-    getPAPIEventSet(b);
+    setupPAPIOnCurrentThread(b);
     #endif
     Value * segmentStartTime = nullptr;
     if (mUseDynamicMultithreading) {
@@ -316,11 +315,9 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         }
 
         #ifdef ENABLE_PAPI
-        Value * PAPIPipelineStartMeasurementArray = nullptr;
         if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
-            createPAPIMeasurementArrays(b);
-            getPAPIEventSet(b);
-            registerPAPIThread(b);
+            initPAPIOnCurrentThread(b);
+            setupPAPIOnCurrentThread(b);
         }
         #endif
 
@@ -598,11 +595,13 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         }
         #endif
 
-        #ifdef ENABLE_PAPI
-        recordTotalPAPIMeasurement(b);
-        #endif
         updateTotalCycleCounterTime(b);
-
+        #ifdef ENABLE_PAPI
+        if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+            recordTotalPAPIMeasurement(b);
+            stopPAPIOnCurrentThread(b);
+        }
+        #endif
         mExpectedNumOfStridesMultiplier = nullptr;
         mThreadLocalStreamSetBaseAddress = nullptr;
         #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
@@ -622,9 +621,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         }
         b.CreateCondBr(isProcessThread(b, threadStructTy, threadStruct), exitFunction, exitThread);
         b.SetInsertPoint(exitThread);
-        #ifdef ENABLE_PAPI
-        unregisterPAPIThread(b);
-        #endif
         b.CreateCall(pthreadExitFn->getFunctionType(), pthreadExitFn, retVal);
         b.CreateBr(exitFunction);
         b.SetInsertPoint(exitFunction);
@@ -1035,7 +1031,7 @@ void PipelineCompiler::linkPThreadLibrary(KernelBuilder & b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
     assert (!mUseDynamicMultithreading);
-    if (LLVM_UNLIKELY(mIsNestedPipeline)) {
+    if (LLVM_LIKELY(mIsNestedPipeline)) {
         mSegNo = mExternalSegNo; assert (mExternalSegNo);
     } else {
         mSegNo = b.getSize(0);
@@ -1043,8 +1039,12 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
     mNumOfFixedThreads = b.getSize(1);
 
     #ifdef ENABLE_PAPI
-    createPAPIMeasurementArrays(b);
-    getPAPIEventSet(b);
+    if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+        if (LLVM_UNLIKELY(!mIsNestedPipeline)) {
+            initPAPIOnCurrentThread(b);
+        }
+        setupPAPIOnCurrentThread(b);
+    }
     #endif
     startCycleCounter(b, CycleCounter::FULL_PIPELINE_TIME);
     #ifdef ENABLE_PAPI
