@@ -1034,14 +1034,18 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
         if (codegen::EnableIllustrator) {
             E->captureBitstream("MatchedLineStarts", MatchedLineStarts);
         }
-        StreamSet * Filtered = E->CreateStreamSet(1, 8);
-        E->CreateKernelCall<MatchFilterKernel>(MatchedLineStarts, mLineBreakStream, ByteStream, Filtered);
-        if (codegen::EnableIllustrator) {
-            E->captureBixNum("Filtered", Filtered);
-        }
         StreamSet * MatchedLineSpans = E->CreateStreamSet(1, 1);
         E->CreateKernelCall<LineSpansKernel>(MatchedLineStarts, MatchedLineEnds, MatchedLineSpans);
 
+        StreamSet * Filtered = E->CreateStreamSet(1, 8);
+        if (UseByteFilterByMask) {
+            FilterByMask(E, MatchedLineSpans, ByteStream, Filtered, 0, 64, true);
+        } else {
+            E->CreateKernelCall<MatchFilterKernel>(MatchedLineStarts, mLineBreakStream, ByteStream, Filtered);
+        }
+        if (codegen::EnableIllustrator) {
+            E->captureBixNum("Filtered", Filtered);
+        }
         StreamSet * MatchSpans;
         MatchSpans = getMatchSpan(E, mRE, Matches);
         if (codegen::EnableIllustrator) {
