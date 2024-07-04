@@ -812,7 +812,7 @@ int __PAPI_start_on_thread(int * const eventList, const size_t n) {
     }
 
     return EventSet;
-};
+}
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief linkPAPILibrary

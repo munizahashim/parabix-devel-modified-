@@ -155,12 +155,17 @@ void PipelineCompiler::branchToInitialPartition(KernelBuilder & b) {
             startPAPIMeasurement(b, {PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION, PAPIKernelCounter::PAPI_KERNEL_TOTAL});
         }
         #endif
-        if (LLVM_UNLIKELY(EnableCycleCounter)) {
-            startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
+        if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+            if (EnableCycleCounter) {
+                startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
+            } else {
+                startCycleCounter(b, CycleCounter::KERNEL_SYNCHRONIZATION);
+            }
+
         }
         const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         acquireSynchronizationLock(b, FirstKernel, type, mSegNo);
-        if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
             updateCycleCounter(b, FirstKernel, CycleCounter::KERNEL_SYNCHRONIZATION);
         }
         #ifdef ENABLE_PAPI
