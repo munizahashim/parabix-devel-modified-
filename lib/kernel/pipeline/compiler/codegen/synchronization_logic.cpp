@@ -197,10 +197,11 @@ Value * PipelineCompiler::getSynchronizationLockPtrForKernel(KernelBuilder & b, 
  * @brief obtainNextSegmentNumber
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::obtainNextSegmentNumber(KernelBuilder & b) {
-    Value * const ptr = getScalarFieldPtr(b,
+    Value * ptr; Type * ty;
+    std::tie(ptr, ty) = getScalarFieldPtr(b,
         NESTED_LOGICAL_SEGMENT_NUMBER_PREFIX + std::to_string(mCurrentNestedSynchronizationVariable));
     // Value * const nextSegNo = b.CreateAtomicFetchAndAdd(b.getSize(1), ptr);
-    Value * const nextSegNo = b.CreateLoad(ptr);
+    Value * const nextSegNo = b.CreateLoad(ty, ptr);
     b.CreateStore(b.CreateAdd(nextSegNo, b.getSize(1)), ptr);
     #ifdef PRINT_DEBUG_MESSAGES
     const auto prefix = makeKernelName(mKernelId);
