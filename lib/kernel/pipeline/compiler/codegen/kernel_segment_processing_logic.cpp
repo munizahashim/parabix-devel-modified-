@@ -371,7 +371,28 @@ void PipelineCompiler::normalCompletionCheck(KernelBuilder & b) {
         }
     }
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
+        #ifdef ENABLE_PAPI
+        if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+            startPAPIMeasurement(b, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
+        }
+        #endif
+        #ifdef ENABLE_PAPI
+        if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+            startPAPIMeasurement(b, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
+        }
+        #endif
+        if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+            startCycleCounter(b, CycleCounter::KERNEL_SYNCHRONIZATION);
+        }
         acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+        if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+            updateCycleCounter(b, FirstKernel, CycleCounter::KERNEL_SYNCHRONIZATION);
+        }
+        #ifdef ENABLE_PAPI
+        if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+            accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
+        }
+        #endif
     }
     BasicBlock * const exitBlock = b.GetInsertBlock();
     // update KernelTerminated phi nodes
@@ -666,7 +687,23 @@ void PipelineCompiler::writeInsufficientIOExit(KernelBuilder & b) {
         hasBranchToLoopExit = true;
         if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
             releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
+            #ifdef ENABLE_PAPI
+            if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+                startPAPIMeasurement(b, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
+            }
+            #endif
+            if (LLVM_UNLIKELY(EnableCycleCounter)) {
+                startCycleCounter(b, CycleCounter::KERNEL_SYNCHRONIZATION);
+            }
             acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+            if (LLVM_UNLIKELY(EnableCycleCounter)) {
+                updateCycleCounter(b, FirstKernel, CycleCounter::KERNEL_SYNCHRONIZATION);
+            }
+            #ifdef ENABLE_PAPI
+            if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+                accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
+            }
+            #endif
         }
         b.CreateBr(mKernelLoopExit);
     }

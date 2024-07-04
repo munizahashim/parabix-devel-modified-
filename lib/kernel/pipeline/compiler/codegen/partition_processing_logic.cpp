@@ -149,16 +149,24 @@ void PipelineCompiler::branchToInitialPartition(KernelBuilder & b) {
     b.SetInsertPoint(entry);
     mCurrentPartitionId = -1U;
     setActiveKernel(b, FirstKernel, true);
-    #ifdef ENABLE_PAPI
-    startPAPIMeasurement(b, {PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION, PAPIKernelCounter::PAPI_KERNEL_TOTAL});
-    #endif
-    startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
     if (isMultithreaded()) {
+        #ifdef ENABLE_PAPI
+        if (NumOfPAPIEvents) {
+            startPAPIMeasurement(b, {PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION, PAPIKernelCounter::PAPI_KERNEL_TOTAL});
+        }
+        #endif
+        if (LLVM_UNLIKELY(EnableCycleCounter)) {
+            startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
+        }
         const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         acquireSynchronizationLock(b, FirstKernel, type, mSegNo);
-        updateCycleCounter(b, FirstKernel, CycleCounter::KERNEL_SYNCHRONIZATION);
+        if (LLVM_UNLIKELY(EnableCycleCounter)) {
+            updateCycleCounter(b, FirstKernel, CycleCounter::KERNEL_SYNCHRONIZATION);
+        }
         #ifdef ENABLE_PAPI
-        accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
+        if (NumOfPAPIEvents) {
+            accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
+        }
         #endif
     }
 
@@ -357,37 +365,6 @@ void PipelineCompiler::phiOutPartitionStateAndReleaseSynchronizationLocks(Kernel
 
     phiOutPartitionItemCounts(b, mKernelId, targetPartitionId, fromKernelEntryBlock);
 
-//    flat_set<size_t> consumed;
-//    for (auto kernel = targetKernelId; kernel <= PipelineOutput; ++kernel) {
-//        for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-//            const auto streamSet = getTruncatedStreamSetSourceId(source(input, mBufferGraph));
-//            const BufferNode & bn = mBufferGraph[streamSet];
-//            if (bn.isNonThreadLocal() && bn.isOwned() && bn.isInternal() && !bn.hasZeroElementsOrWidth()) {
-//                assert (!bn.isTruncated());
-//                consumed.insert(streamSet);
-//            }
-//        }
-//    }
-
-//    for (auto kernel = mKernelId; kernel < targetKernelId; ++kernel) {
-//        for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-//            const auto streamSet = getTruncatedStreamSetSourceId(target(output, mBufferGraph));
-//            if (consumed.count(streamSet)) {
-//                Value * consumed = readConsumedItemCount(b, streamSet);
-//                const BufferNode & bn = mBufferGraph[streamSet];
-//                const StreamSetBuffer * const buffer = bn.Buffer;
-//                assert ("buffer cannot be null!" && buffer);
-//                assert (isFromCurrentFunction(b, buffer->getHandle()));
-//                Value * const baseAddress = buffer->getBaseAddress(b);
-//                Value * const vba = buffer->getVirtualBasePtr(b, baseAddress, consumed);
-//                const BufferPort & rt = mBufferGraph[output];
-//                const auto handleName = makeBufferName(kernel, rt.Port);
-//                b.setScalarField(handleName + LAST_GOOD_VIRTUAL_BASE_ADDRESS, vba);
-//            }
-//        }
-//    }
-
-
     releaseAllSynchronizationLocksFor(b, mKernelId);
 
     assert (afterFirstSegNo);
@@ -395,17 +372,11 @@ void PipelineCompiler::phiOutPartitionStateAndReleaseSynchronizationLocks(Kernel
     Value * const curSegNo = mSegNo;
     mSegNo = afterFirstSegNo;
 
-
-
-
     for (auto kernel = mKernelId + 1; kernel < targetKernelId; ++kernel) {
         phiOutPartitionItemCounts(b, kernel, targetPartitionId, fromKernelEntryBlock);
         if (HasTerminationSignal.test(kernel)) {
             mKernelTerminationSignal[kernel] = readTerminationSignal(b, kernel);
         }
-
-
-
         releaseAllSynchronizationLocksFor(b, kernel);
     }
 
@@ -423,9 +394,13 @@ void PipelineCompiler::phiOutPartitionStateAndReleaseSynchronizationLocks(Kernel
 void PipelineCompiler::acquirePartitionSynchronizationLock(KernelBuilder & b, const unsigned firstKernelInTargetPartition, Value * const segNo) {
 
     #ifdef ENABLE_PAPI
-    startPAPIMeasurement(b, {PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION, PAPIKernelCounter::PAPI_PARTITION_JUMP_SYNCHRONIZATION});
+    if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+        startPAPIMeasurement(b, PAPIKernelCounter::PAPI_PARTITION_JUMP_SYNCHRONIZATION);
+    }
     #endif
-    startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION});
+    if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+        startCycleCounter(b, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
+    }
     assert (firstKernelInTargetPartition <= PipelineOutput);
 
     #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
@@ -440,15 +415,24 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(KernelBuilder & b, co
         acquireSynchronizationLock(b, firstKernelInTargetPartition, type, segNo);
     }
 
-    if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        const auto partId = KernelPartitionId[firstKernelInTargetPartition];
-        if (partId < (PartitionCount - 1)) {
-            updateCycleCounter(b, mKernelId, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
-            BasicBlock * const exitBlock = b.GetInsertBlock();
-            Value * const startTime = mCycleCounters[CycleCounter::PARTITION_JUMP_SYNCHRONIZATION];
-            mPartitionStartTimePhi[partId]->addIncoming(startTime, exitBlock);
+    if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+        updateCycleCounter(b, mKernelId, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
+        if (EnableCycleCounter) {
+            const auto partId = KernelPartitionId[firstKernelInTargetPartition];
+            if (partId < (PartitionCount - 1)) {
+                BasicBlock * const exitBlock = b.GetInsertBlock();
+                Value * const startTime = mCycleCounters[CycleCounter::PARTITION_JUMP_SYNCHRONIZATION];
+                mPartitionStartTimePhi[partId]->addIncoming(startTime, exitBlock);
+            }
         }
     }
+
+    #ifdef ENABLE_PAPI
+    if (NumOfPAPIEvents > 0) {
+        accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_PARTITION_JUMP_SYNCHRONIZATION);
+    }
+    #endif
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -505,11 +489,13 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(KernelBuilder & b) 
 
         zeroAnySkippedTransitoryConsumedItemCountsUntil(b, targetKernelId);
 
-        ensureAnyExternalProcessedAndProducedCountsAreUpdated(b, targetKernelId, true);
-
-        updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
+        if (LLVM_UNLIKELY(EnableCycleCounter)) {
+            updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
+        }
         #ifdef ENABLE_PAPI
-        accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
+        if (NumOfPAPIEvents) {
+            accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
+        }
         #endif
 
         #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
@@ -555,7 +541,23 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(KernelBuilder & b) 
 
         if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
             releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
+            #ifdef ENABLE_PAPI
+            if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+                startPAPIMeasurement(b, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
+            }
+            #endif
+            if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+                startCycleCounter(b, CycleCounter::KERNEL_SYNCHRONIZATION);
+            }
             acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+            if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+                updateCycleCounter(b, FirstKernel, CycleCounter::KERNEL_SYNCHRONIZATION);
+            }
+            #ifdef ENABLE_PAPI
+            if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+                accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
+            }
+            #endif
         }
         mKernelInitiallyTerminatedExit = b.GetInsertBlock();
         updateKernelExitPhisAfterInitiallyTerminated(b);
@@ -604,12 +606,13 @@ void PipelineCompiler::writeJumpToNextPartition(KernelBuilder & b) {
         phiOutPartitionStatusFlags(b, jumpPartitionId, false);
     }
     #endif
-
-    ensureAnyExternalProcessedAndProducedCountsAreUpdated(b, targetKernelId, false);
-
-    updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
+    }
     #ifdef ENABLE_PAPI
-    accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
+    if (NumOfPAPIEvents) {
+        accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
+    }
     #endif
 
     b.CreateBr(mPartitionEntryPoint[jumpPartitionId]);
@@ -632,25 +635,39 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
 
     // TODO: if any statefree kernel exists, swap counter accumulators to be thread local
     // and combine them at the end?
-    updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
+
+
     const auto type = isDataParallel(mKernelId) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
     releaseSynchronizationLock(b, mKernelId, type, mSegNo);
 
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
+    }
     #ifdef ENABLE_PAPI
-    accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
+    if (NumOfPAPIEvents) {
+        accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
+    }
     #endif
 
     const auto nextKernel = mKernelId + 1;
     if (LLVM_LIKELY(nextKernel < PipelineOutput)) {
         #ifdef ENABLE_PAPI
-        startPAPIMeasurement(b, {PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION, PAPIKernelCounter::PAPI_KERNEL_TOTAL});
+        if (NumOfPAPIEvents) {
+            startPAPIMeasurement(b, {PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION, PAPIKernelCounter::PAPI_KERNEL_TOTAL});
+        }
         #endif
-        startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
+        if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+            startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
+        }
         const auto type = isDataParallel(nextKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         acquireSynchronizationLock(b, nextKernel, type, nextSegNo);
-        updateCycleCounter(b, nextKernel, CycleCounter::KERNEL_SYNCHRONIZATION);
+        if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+            updateCycleCounter(b, nextKernel, CycleCounter::KERNEL_SYNCHRONIZATION);
+        }
         #ifdef ENABLE_PAPI
-        accumPAPIMeasurementWithoutReset(b, nextKernel, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
+        if (NumOfPAPIEvents) {
+            accumPAPIMeasurementWithoutReset(b, nextKernel, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
+        }
         #endif
     }
 
@@ -715,81 +732,6 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
             }
         }
     }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief ensureAnyExternalProcessedAndProducedCountsAreUpdated
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::ensureAnyExternalProcessedAndProducedCountsAreUpdated(KernelBuilder & b, const unsigned targetKernelId, const bool fromKernelEntry) {
-#if 0
-    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        const auto & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isExternal())) {
-            const auto output = in_edge(streamSet, mBufferGraph);
-            const auto producer = source(output, mBufferGraph);
-            assert (producer >= PipelineInput && producer <= LastKernel);
-
-            if (producer >= mKernelId && producer < targetKernelId) { // is output streamset
-
-                for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                    if (target(e, mBufferGraph) == PipelineOutput) {
-                        const BufferPort & outputPort = mBufferGraph[output];
-                        assert (outputPort.Port.Type == PortType::Output);
-
-
-                        const BufferPort & external = mBufferGraph[e];
-                        Value * const ptr = getProducedOutputItemsPtr(external.Port.Number); assert (ptr);
-                        Value * itemCount = nullptr;
-                        if (producer == mKernelId) {
-                            if (mMayLoopToEntry && fromKernelEntry) {
-                                if (LLVM_UNLIKELY(outputPort.isDeferred())) {
-                                    itemCount = mAlreadyProducedDeferredPhi[outputPort.Port]; assert (itemCount);
-                                } else {
-                                    itemCount = mAlreadyProducedPhi[outputPort.Port]; assert (itemCount);
-                                }
-                            } else {
-                                if (LLVM_UNLIKELY(outputPort.isDeferred())) {
-                                    itemCount = mInitiallyProducedDeferredItemCount[streamSet]; assert (itemCount);
-                                } else {
-                                    itemCount = mInitiallyProducedItemCount[streamSet]; assert (itemCount);
-                                }
-                            }
-                        } else {
-                            const auto prefix = makeBufferName(producer, outputPort.Port);
-                            if (LLVM_UNLIKELY(outputPort.isDeferred())) {
-                                itemCount = b.getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
-                            } else {
-                                itemCount = b.getScalarField(prefix + ITEM_COUNT_SUFFIX);
-                            }
-                        }
-
-                        b.CreateStore(itemCount, ptr);
-                    }
-                }
-            } else if (LLVM_UNLIKELY(producer == PipelineInput)) { // is input streamset
-                for (const auto e : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
-                    const auto consumer = target(e, mBufferGraph);
-                    assert (consumer >= FirstKernel && consumer <= LastKernel);
-                    if (consumer >= mKernelId && consumer < targetKernelId) {
-                        const BufferPort & external = mBufferGraph[output];
-                        Value * const ptr = getProcessedInputItemsPtr(external.Port.Number); assert (ptr);
-                        const auto prefix = makeBufferName(PipelineInput, external.Port);
-                        Value * alreadyConsumedPtr = b.getScalarFieldPtr(prefix + CONSUMED_ITEM_COUNT_SUFFIX);
-                        if (LLVM_UNLIKELY(mTraceIndividualConsumedItemCounts)) {
-                            FixedArray<Value *, 1> indices;
-                            indices[0] = b.getInt32(0);
-                            alreadyConsumedPtr = b.CreateGEP0(ptr, indices);
-                        }
-                        Value * const alreadyConsumed = b.CreateLoad(alreadyConsumedPtr);
-                        assert (ptr->getType()->getPointerElementType() == alreadyConsumed->getType());
-                        b.CreateStore(alreadyConsumed, ptr);
-                        break;
-                    }
-                }
-            }
-        }
-    }
-#endif
 }
 
 } // end of namespace kernel

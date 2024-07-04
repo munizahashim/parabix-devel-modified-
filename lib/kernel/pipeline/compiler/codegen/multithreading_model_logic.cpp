@@ -333,15 +333,18 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         }
 
         #ifdef ENABLE_PAPI
-        if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+        if (NumOfPAPIEvents) {
             initPAPIOnCurrentThread(b);
             setupPAPIOnCurrentThread(b);
         }
         #endif
-
-        startCycleCounter(b, CycleCounter::FULL_PIPELINE_TIME);
+        if (LLVM_UNLIKELY(EnableCycleCounter)) {
+            startCycleCounter(b, CycleCounter::FULL_PIPELINE_TIME);
+        }
         #ifdef ENABLE_PAPI
-        startPAPIMeasurement(b, PAPIKernelCounter::PAPI_FULL_PIPELINE_TIME);
+        if (NumOfPAPIEvents) {
+            startPAPIMeasurement(b, PAPIKernelCounter::PAPI_FULL_PIPELINE_TIME);
+        }
         #endif
 
         #ifdef PRINT_DEBUG_MESSAGES
@@ -612,8 +615,9 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             debugPrint(b, "================================================= END %" PRIx64, getHandle());
         }
         #endif
-
-        updateTotalCycleCounterTime(b);
+        if (LLVM_UNLIKELY(EnableCycleCounter)) {
+            updateTotalCycleCounterTime(b);
+        }
         #ifdef ENABLE_PAPI
         if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
             recordTotalPAPIMeasurement(b);
@@ -1057,16 +1061,20 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
     mNumOfFixedThreads = b.getSize(1);
 
     #ifdef ENABLE_PAPI
-    if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+    if (NumOfPAPIEvents) {
         if (LLVM_UNLIKELY(!mIsNestedPipeline)) {
             initPAPIOnCurrentThread(b);
         }
         setupPAPIOnCurrentThread(b);
     }
     #endif
-    startCycleCounter(b, CycleCounter::FULL_PIPELINE_TIME);
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        startCycleCounter(b, CycleCounter::FULL_PIPELINE_TIME);
+    }
     #ifdef ENABLE_PAPI
-    startPAPIMeasurement(b, PAPIKernelCounter::PAPI_FULL_PIPELINE_TIME);
+    if (NumOfPAPIEvents) {
+        startPAPIMeasurement(b, PAPIKernelCounter::PAPI_FULL_PIPELINE_TIME);
+    }
     #endif
     start(b);
 
@@ -1091,9 +1099,13 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
     updateExternalProducedItemCounts(b);
 
     #ifdef ENABLE_PAPI
-    recordTotalPAPIMeasurement(b);
+    if (NumOfPAPIEvents) {
+        recordTotalPAPIMeasurement(b);
+    }
     #endif
-    updateTotalCycleCounterTime(b);
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        updateTotalCycleCounterTime(b);
+    }
 
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         // TODO: this isn't fully correct when this is a nested pipeline

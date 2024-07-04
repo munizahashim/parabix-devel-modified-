@@ -35,8 +35,8 @@ void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsign
         fields[NUM_OF_INVOCATIONS] = int64Ty;
 
         StructType * const cycleCounterTy = StructType::get(b.getContext(), fields);
-        const auto prefix = makeKernelName(kernelId) + STATISTICS_CYCLE_COUNT_SUFFIX;
-        mTarget->addInternalScalar(cycleCounterTy, prefix, groupId);
+        const auto name = makeKernelName(kernelId) + STATISTICS_CYCLE_COUNT_SUFFIX;
+        mTarget->addInternalScalar(cycleCounterTy, name, groupId);
     }
 
     if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableBlockingIOCounter))) {
@@ -89,148 +89,131 @@ void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsign
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief trackCycleCounter
- ** ------------------------------------------------------------------------------------------------------------- */
-inline bool PipelineCompiler::trackCycleCounter(const CycleCounter type) const {
-    if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        return true;
-    }
-    if (mUseDynamicMultithreading) {
-        switch (type) {
-            case KERNEL_SYNCHRONIZATION:
-            case PARTITION_JUMP_SYNCHRONIZATION:
-//            case TOTAL_TIME:
-                return true;
-            default: break;
-        }
-    }
-    return false;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief startCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::startCycleCounter(KernelBuilder & b, const CycleCounter type) {
-    if (trackCycleCounter(type)) {
-        Value * const counter = b.CreateReadCycleCounter();
-        mCycleCounters[(unsigned)type] = counter;
-    }
+    assert (EnableCycleCounter || mUseDynamicMultithreading);
+    assert (type == KERNEL_SYNCHRONIZATION || type == PARTITION_JUMP_SYNCHRONIZATION || !mUseDynamicMultithreading);
+    Value * const counter = b.CreateReadCycleCounter();
+    mCycleCounters[(unsigned)type] = counter;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief startCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::startCycleCounter(KernelBuilder & b, const std::initializer_list<CycleCounter> types) {
+    assert (EnableCycleCounter || mUseDynamicMultithreading);
     Value * counter = nullptr;
     for (auto type : types) {
-        if (trackCycleCounter(type)) {
-            if (counter == nullptr) {
-                counter = b.CreateReadCycleCounter();
-            }
-            mCycleCounters[(unsigned)type] = counter;
+        if (counter == nullptr) {
+            counter = b.CreateReadCycleCounter();
         }
+        assert (type == KERNEL_SYNCHRONIZATION || type == PARTITION_JUMP_SYNCHRONIZATION || !mUseDynamicMultithreading);
+        mCycleCounters[(unsigned)type] = counter;
     }
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief updateOptionalCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kernelId, const CycleCounter type) const {
-    if (trackCycleCounter(type)) {
-        assert (FirstKernel <= kernelId && kernelId <= LastKernel);
-        Value * const end = b.CreateReadCycleCounter();
-        Value * const start = mCycleCounters[(unsigned)type]; assert (start);
-        Value * const duration = b.CreateSub(end, start);
+void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kernelId, const CycleCounter type) {
+    assert (FirstKernel <= kernelId && kernelId <= LastKernel);
+    Value * const end = b.CreateReadCycleCounter();
+    Value * const start = mCycleCounters[(unsigned)type]; assert (start);
+    Value * const duration = b.CreateSub(end, start);
 
-        IntegerType * sizeTy = b.getSizeTy();
+    IntegerType * sizeTy = b.getSizeTy();
 
-        if (mUseDynamicMultithreading) {
-            Value * const cur = b.CreateLoad(sizeTy, mAccumulatedSynchronizationTimePtr);
-            Value * const accum = b.CreateAdd(cur, duration);
-            b.CreateStore(accum, mAccumulatedSynchronizationTimePtr);
-        }
+    assert (EnableCycleCounter || mUseDynamicMultithreading);
+    assert (type == KERNEL_SYNCHRONIZATION || type == PARTITION_JUMP_SYNCHRONIZATION || !mUseDynamicMultithreading);
 
-        if (EnableCycleCounter) {
-
-            const auto prefix = makeKernelName(kernelId);
-            Value * ptr; Type * ty;
-            std::tie(ptr, ty) = b.getScalarFieldPtr(prefix  + STATISTICS_CYCLE_COUNT_SUFFIX);
-            FixedArray<Value *, 2> index;
-            index[0] = b.getInt32(0);
-            index[1] = b.getInt32(type);
-            Value * const sumCounterPtr = b.CreateGEP(ty, ptr, index);
-            Value * const sumRunningCount = b.CreateLoad(sizeTy, sumCounterPtr);
-            Value * const sumUpdatedCount = b.CreateAdd(sumRunningCount, duration);
-            b.CreateStore(sumUpdatedCount, sumCounterPtr);
-
-            if (type == CycleCounter::TOTAL_TIME) {
-                index[1] = b.getInt32(SQ_SUM_TOTAL_TIME);
-                Value * const sqSumCounterPtr = b.CreateGEP(ty, ptr, index);
-                Value * const sqSumRunningCount = b.CreateLoad(sizeTy, sqSumCounterPtr);
-                Value * sqDuration = b.CreateZExt(duration, sqSumRunningCount->getType());
-                sqDuration = b.CreateMul(sqDuration, sqDuration);
-                Value * const sqSumUpdatedCount = b.CreateAdd(sqSumRunningCount, sqDuration);
-                b.CreateStore(sqSumUpdatedCount, sqSumCounterPtr);
-                if (mIsPartitionRoot) {
-                    index[1] = b.getInt32(NUM_OF_INVOCATIONS);
-                    Value * const invokePtr = b.CreateGEP(ty, ptr, index);
-                    Value * const invoked = b.CreateLoad(sizeTy, invokePtr);
-                    Value * const invoked2 = b.CreateAdd(invoked, b.getSize(1));
-                    b.CreateStore(invoked2, invokePtr);
-                }
-            }
-
-        }
-
+    if (mUseDynamicMultithreading) {
+        Value * const cur = b.CreateLoad(sizeTy, mAccumulatedSynchronizationTimePtr);
+        Value * const accum = b.CreateAdd(cur, duration);
+        b.CreateStore(accum, mAccumulatedSynchronizationTimePtr);
     }
-}
 
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief updateOptionalCycleCounter
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kernelId, Value * const cond, const CycleCounter ifTrue, const CycleCounter ifFalse) const {
     if (EnableCycleCounter) {
-        Value * const end = b.CreateReadCycleCounter();
-        Value * const start = mCycleCounters[(unsigned)ifTrue]; assert (start);
-        assert (mCycleCounters[(unsigned)ifFalse] == start);
-        Value * const duration = b.CreateSub(end, start);
+
         const auto prefix = makeKernelName(kernelId);
         Value * ptr; Type * ty;
         std::tie(ptr, ty) = b.getScalarFieldPtr(prefix  + STATISTICS_CYCLE_COUNT_SUFFIX);
-        assert (ty->isStructTy());
         FixedArray<Value *, 2> index;
         index[0] = b.getInt32(0);
-        index[1] = b.getInt32(ifTrue);
-        Value * const sumCounterPtrA = b.CreateGEP(ty, ptr, index);
-        index[1] = b.getInt32(ifFalse);
-        Value * const sumCounterPtrB = b.CreateGEP(ty, ptr, index);
-        Value * const sumCounterPtr = b.CreateSelect(cond, sumCounterPtrA, sumCounterPtrB);
-
-        Value * const sumRunningCount = b.CreateLoad(b.getSizeTy(), sumCounterPtr);
+        index[1] = b.getInt32(type);
+        Value * const sumCounterPtr = b.CreateGEP(ty, ptr, index);
+        Value * const sumRunningCount = b.CreateLoad(sizeTy, sumCounterPtr);
         Value * const sumUpdatedCount = b.CreateAdd(sumRunningCount, duration);
         b.CreateStore(sumUpdatedCount, sumCounterPtr);
+
+        if (type == CycleCounter::TOTAL_TIME) {
+            index[1] = b.getInt32(SQ_SUM_TOTAL_TIME);
+            Value * const sqSumCounterPtr = b.CreateGEP(ty, ptr, index);
+            Value * const sqSumRunningCount = b.CreateLoad(sizeTy, sqSumCounterPtr);
+            Value * sqDuration = b.CreateZExt(duration, sqSumRunningCount->getType());
+            sqDuration = b.CreateMul(sqDuration, sqDuration);
+            Value * const sqSumUpdatedCount = b.CreateAdd(sqSumRunningCount, sqDuration);
+            b.CreateStore(sqSumUpdatedCount, sqSumCounterPtr);
+            if (mIsPartitionRoot) {
+                index[1] = b.getInt32(NUM_OF_INVOCATIONS);
+                Value * const invokePtr = b.CreateGEP(ty, ptr, index);
+                Value * const invoked = b.CreateLoad(sizeTy, invokePtr);
+                Value * const invoked2 = b.CreateAdd(invoked, b.getSize(1));
+                b.CreateStore(invoked2, invokePtr);
+            }
+        }
     }
+
+    #ifdef NDEBUG
+    mCycleCounters[(unsigned)type] = nullptr;
+    #endif
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief updateOptionalCycleCounter
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kernelId, Value * const cond, const CycleCounter ifTrue, const CycleCounter ifFalse) {
+    assert (EnableCycleCounter || mUseDynamicMultithreading);
+    Value * const end = b.CreateReadCycleCounter();
+    Value * const start = mCycleCounters[(unsigned)ifTrue]; assert (start);
+    assert (mCycleCounters[(unsigned)ifFalse] == start);
+    Value * const duration = b.CreateSub(end, start);
+    const auto prefix = makeKernelName(kernelId);
+    Value * ptr; Type * ty;
+    std::tie(ptr, ty) = b.getScalarFieldPtr(prefix  + STATISTICS_CYCLE_COUNT_SUFFIX);
+    assert (ty->isStructTy());
+    FixedArray<Value *, 2> index;
+    index[0] = b.getInt32(0);
+    index[1] = b.getInt32(ifTrue);
+    Value * const sumCounterPtrA = b.CreateGEP(ty, ptr, index);
+    index[1] = b.getInt32(ifFalse);
+    Value * const sumCounterPtrB = b.CreateGEP(ty, ptr, index);
+    Value * const sumCounterPtr = b.CreateSelect(cond, sumCounterPtrA, sumCounterPtrB);
+
+    Value * const sumRunningCount = b.CreateLoad(b.getSizeTy(), sumCounterPtr);
+    Value * const sumUpdatedCount = b.CreateAdd(sumRunningCount, duration);
+    b.CreateStore(sumUpdatedCount, sumCounterPtr);
+    #ifdef NDEBUG
+    mCycleCounters[(unsigned)ifTrue] = nullptr;
+    mCycleCounters[(unsigned)ifFalse] = nullptr;
+    #endif
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief updateOptionalCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateTotalCycleCounterTime(KernelBuilder & b) const {
-    if (trackCycleCounter(FULL_PIPELINE_TIME)) {
-        Value * const end = b.CreateReadCycleCounter();
-        Value * const start = mCycleCounters[(unsigned)FULL_PIPELINE_TIME];
-        if (LLVM_UNLIKELY(CheckAssertions)) {
-            b.CreateAssert (b.CreateICmpULT(start, end), "???");
-        }
-
-
-        Value * const duration = b.CreateSub(end, mCycleCounters[(unsigned)FULL_PIPELINE_TIME]);
-        // total is thread local but gets summed at the end; no need to worry about
-        // multiple threads updating it.
-        Value * const ptr = getScalarFieldPtr(b, STATISTICS_CYCLE_COUNT_TOTAL).first;
-        Value * const updated = b.CreateAdd(b.CreateLoad(b.getSizeTy(), ptr), duration);
-        b.CreateStore(updated, ptr);
-    }
+    assert (EnableCycleCounter);
+    Value * const end = b.CreateReadCycleCounter();
+    Value * const start = mCycleCounters[(unsigned)FULL_PIPELINE_TIME];
+    Value * const duration = b.CreateSub(end, start);
+    // total is thread local but gets summed at the end; no need to worry about
+    // multiple threads updating it.
+    Value * const ptr = getScalarFieldPtr(b, STATISTICS_CYCLE_COUNT_TOTAL).first;
+    Value * const updated = b.CreateAdd(b.CreateLoad(b.getSizeTy(), ptr), duration);
+    b.CreateStore(updated, ptr);
 }
 
 

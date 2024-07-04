@@ -1508,6 +1508,12 @@ std::string Kernel::getFamilyName() const {
     if (LLVM_UNLIKELY(codegen::FreeCallBisectLimit >= 0)) {
         buffer << "_FreeLimit";
     }
+    #ifdef ENABLE_PAPI
+    const auto & S = codegen::PapiCounterOptions;
+    if (LLVM_UNLIKELY(S.compare(codegen::OmittedOption) != 0)) {
+        buffer << "+PAPI";
+    }
+    #endif
     buffer.flush();
     return name;
 }
