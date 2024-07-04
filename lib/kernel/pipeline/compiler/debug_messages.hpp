@@ -1,11 +1,9 @@
+#include "pipeline_compiler.hpp"
+
 #if defined(PRINT_DEBUG_MESSAGES) && !defined(DEBUG_MESSAGES_HPP)
 #define DEBUG_MESSAGES_HPP
 
-#include "pipeline_compiler.hpp"
-
 namespace kernel {
-
-#ifdef PRINT_DEBUG_MESSAGES
 
 #define NEW_FILE (O_WRONLY | O_APPEND | O_CREAT | O_EXCL)
 
@@ -64,8 +62,6 @@ BOOST_NOINLINE void PipelineCompiler::debugPrint(KernelBuilder & b, Twine format
 #undef NEW_FILE
 #undef APPEND_FILE
 #undef MODE
-
-#endif
 
 }
 

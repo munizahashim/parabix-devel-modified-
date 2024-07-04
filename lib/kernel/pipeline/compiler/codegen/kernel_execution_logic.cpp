@@ -231,9 +231,13 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
     buildKernelCallArgumentList(b, args);
 
     #ifdef ENABLE_PAPI
-    startPAPIMeasurement(b, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
+    if (NumOfPAPIEvents) {
+        startPAPIMeasurement(b, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
+    }
     #endif
-    startCycleCounter(b, CycleCounter::KERNEL_EXECUTION);
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        startCycleCounter(b, CycleCounter::KERNEL_EXECUTION);
+    }
     Value * doSegmentRetVal = nullptr;
     if (mRethrowException) {
         const auto prefix = makeKernelName(mKernelId);
@@ -247,10 +251,13 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
     } else {
         doSegmentRetVal = b.CreateCall(doSegFuncType, doSegment, args);
     }
-
-    updateCycleCounter(b, mKernelId, CycleCounter::KERNEL_EXECUTION);
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        updateCycleCounter(b, mKernelId, CycleCounter::KERNEL_EXECUTION);
+    }
     #ifdef ENABLE_PAPI
-    accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
+    if (NumOfPAPIEvents) {
+        accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
+    }
     #endif
 
     if (mKernelCanTerminateEarly) {

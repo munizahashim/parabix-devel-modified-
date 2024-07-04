@@ -2,7 +2,7 @@
 
 // #define PRINT_DEBUG_MESSAGES
 
-// #define PRINT_DEBUG_MESSAGES_FOR_KERNEL_NUM 22
+// #define PRINT_DEBUG_MESSAGES_FOR_KERNEL_NUM 19
 
 // #define PRINT_DEBUG_MESSAGES_FOR_NESTED_PIPELINE_ONLY
 
@@ -59,6 +59,4 @@
 // #define PIN_THREADS_TO_INDIVIDUAL_CORES
 
 // #define USE_LOOKBEHIND_FOR_LAST_VALUE // must match pipeline/internal/popcount_kernel.h
-
-#define OVERRIDE_BLOCK_WIDTH (512)
 

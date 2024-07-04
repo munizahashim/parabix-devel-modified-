@@ -832,9 +832,13 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
 
     b.SetInsertPoint(expandBuffer);
     #ifdef ENABLE_PAPI
-    startPAPIMeasurement(b, {PAPIKernelCounter::PAPI_BUFFER_EXPANSION, PAPIKernelCounter::PAPI_BUFFER_COPY});
+    if (NumOfPAPIEvents) {
+        startPAPIMeasurement(b, {PAPIKernelCounter::PAPI_BUFFER_EXPANSION, PAPIKernelCounter::PAPI_BUFFER_COPY});
+    }
     #endif
-    startCycleCounter(b, {CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY});
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        startCycleCounter(b, {CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY});
+    }
     Value * priorBufferPtr = nullptr;
     Value * priorCapacityPtr = nullptr;
     if (isa<DynamicBuffer>(buffer) && isMultithreaded()) {
@@ -855,9 +859,24 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     // we can proceed.
 
     // TODO: can we determine which locks will always dominate another?
-
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
+        #ifdef ENABLE_PAPI
+        if (NumOfPAPIEvents) {
+            startPAPIMeasurement(b, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
+        }
+        #endif
+        if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+            startCycleCounter(b, CycleCounter::KERNEL_SYNCHRONIZATION);
+        }
         acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+        if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+            updateCycleCounter(b, FirstKernel, CycleCounter::KERNEL_SYNCHRONIZATION);
+        }
+        #ifdef ENABLE_PAPI
+        if (NumOfPAPIEvents) {
+            accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
+        }
+        #endif
     }
 
     Value * const produced = mCurrentProducedItemCountPhi[outputPort]; assert (produced);
@@ -917,17 +936,22 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     b.CreateBr(afterCopyBackOrExpand);
 
     b.SetInsertPoint(afterCopyBackOrExpand);
-    if (mustExpand) {
-        updateCycleCounter(b, mKernelId, mustExpand, CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY);
-        #ifdef ENABLE_PAPI
-        accumPAPIMeasurementWithoutReset(b, mKernelId, mustExpand, PAPI_BUFFER_EXPANSION, PAPI_BUFFER_COPY);
-        #endif
-    } else {
-        updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_EXPANSION);
-        #ifdef ENABLE_PAPI
-        accumPAPIMeasurementWithoutReset(b, mKernelId, PAPI_BUFFER_EXPANSION);
-        #endif
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        if (mustExpand) {
+            updateCycleCounter(b, mKernelId, mustExpand, CycleCounter::BUFFER_EXPANSION, CycleCounter::BUFFER_COPY);
+        } else {
+            updateCycleCounter(b, mKernelId, CycleCounter::BUFFER_EXPANSION);
+        }
     }
+    #ifdef ENABLE_PAPI
+    if (NumOfPAPIEvents) {
+        if (mustExpand) {
+            accumPAPIMeasurementWithoutReset(b, mKernelId, mustExpand, PAPI_BUFFER_EXPANSION, PAPI_BUFFER_COPY);
+        } else {
+            accumPAPIMeasurementWithoutReset(b, mKernelId, PAPI_BUFFER_EXPANSION);
+        }
+    }
+    #endif
 
     Value * const afterExpansion = getWritableOutputItems(b, port, true);
 

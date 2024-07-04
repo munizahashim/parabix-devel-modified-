@@ -204,7 +204,23 @@ void PipelineCompiler::checkPropagatedTerminationSignals(KernelBuilder & b) {
         b.CreateUnlikelyCondBr(allConsumersFinished, caughtPropagatedTerminationSignal, np);
         if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
             b.SetInsertPoint(caughtPropagatedTerminationSignal);
+            #ifdef ENABLE_PAPI
+            if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+                startPAPIMeasurement(b, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
+            }
+            #endif
+            if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+                startCycleCounter(b, CycleCounter::KERNEL_SYNCHRONIZATION);
+            }
             acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+            if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+                updateCycleCounter(b, FirstKernel, CycleCounter::KERNEL_SYNCHRONIZATION);
+            }
+            #ifdef ENABLE_PAPI
+            if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+                accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
+            }
+            #endif
             b.CreateBr(mKernelTerminated);
         }
         BasicBlock * const entryPoint = b.GetInsertBlock();

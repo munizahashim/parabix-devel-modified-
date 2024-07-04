@@ -256,8 +256,6 @@ public:
     void writeInitiallyTerminatedPartitionExit(KernelBuilder & b);
     void checkForPartitionExit(KernelBuilder & b);
 
-    void ensureAnyExternalProcessedAndProducedCountsAreUpdated(KernelBuilder & b, const unsigned targetKernelId, const bool fromKernelEntry);
-
 // flow control functions
 
     void addSegmentLengthSlidingWindowKernelProperties(KernelBuilder & b, const size_t kernelId, const size_t groupId);
@@ -427,12 +425,10 @@ public:
 // cycle counter functions
 
     void addCycleCounterProperties(KernelBuilder & b, const unsigned kernel, const bool isRoot);
-
-    bool trackCycleCounter(const CycleCounter type) const;
     void startCycleCounter(KernelBuilder & b, const CycleCounter type);
     void startCycleCounter(KernelBuilder & b, const std::initializer_list<CycleCounter> types);
-    void updateCycleCounter(KernelBuilder & b, const unsigned kernelId, const CycleCounter type) const;
-    void updateCycleCounter(KernelBuilder & b, const unsigned kernelId, Value * const cond, const CycleCounter ifTrue, const CycleCounter ifFalse) const;
+    void updateCycleCounter(KernelBuilder & b, const unsigned kernelId, const CycleCounter type);
+    void updateCycleCounter(KernelBuilder & b, const unsigned kernelId, Value * const cond, const CycleCounter ifTrue, const CycleCounter ifFalse);
     void updateTotalCycleCounterTime(KernelBuilder & b) const;
 
     static void linkInstrumentationFunctions(KernelBuilder & b);

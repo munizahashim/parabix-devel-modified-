@@ -895,10 +895,10 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     const auto & S = codegen::PapiCounterOptions;
     if (LLVM_UNLIKELY(S.compare(codegen::OmittedOption) != 0)) {
         out << "+PAPI";
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
-            out << "TT";
-        }
         out << (std::count_if(S.begin(), S.end(), [](std::string::value_type c){return c == ',';}) + 1);
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
+            out << "+T";
+        }
     }
     #endif
     out.flush();
