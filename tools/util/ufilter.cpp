@@ -126,7 +126,6 @@ int main(int argc, char *argv[]) {
     re::RE * CC_re = re::simplifyRE(re::RE_Parser::parse(CC_expr));
     CC_re = UCD::linkAndResolve(CC_re);
     CC_re = UCD::externalizeProperties(CC_re);
-    std::cerr << Printer_RE::PrintRE(CC_re) << "\n";
     if (re::Name * UCD_property_name = dyn_cast<re::Name>(CC_re)) {
         fnPtr = pipelineGen(pxDriver, UCD_property_name);
     } else if (re::CC * CC_ast = dyn_cast<re::CC>(CC_re)) {
