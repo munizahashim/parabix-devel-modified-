@@ -1,5 +1,5 @@
 #include <unicode/utf/utf_compiler.h>
-
+#include <unicode/utf/utf_encoder.h>
 #include <array>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
@@ -14,8 +14,9 @@
 #include <re/adt/re_name.h>
 #include <re/adt/re_cc.h>
 #include <unicode/core/unicode_set.h>
-
 #include <pablo/pabloverifier.hpp>
+#include <toolchain/toolchain.h>
+#include <llvm/Support/CommandLine.h>
 
 using namespace cc;
 using namespace re;
@@ -25,6 +26,11 @@ using namespace boost::container;
 
 namespace UTF {
 
+static cl::opt<bool> UseComputedUTFHierarchy("UseComputedUTFHierarchy", cl::init(false), cl::cat(codegen::CodeGenOptions));
+static cl::opt<unsigned> BinaryLogicCostPerByte("BinaryLogicCostPerByte", cl::init(2), cl::cat(codegen::CodeGenOptions));
+static cl::opt<unsigned> TernaryLogicCostPerByte("TernaryLogicCostPerByte", cl::init(1), cl::cat(codegen::CodeGenOptions));
+static cl::opt<unsigned> ShiftCostFactor("ShiftCostFactor", cl::init(10), cl::cat(codegen::CodeGenOptions));
+static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", cl::init(25), cl::cat(codegen::CodeGenOptions));
 
 const UTF_Compiler::RangeList UTF_Compiler::defaultIfHierachy = {
     // Non-ASCII
@@ -114,6 +120,95 @@ const UTF_Compiler::RangeList UTF_Compiler::defaultIfHierachy = {
     {0x10000, 0x10FFFF}};
 
 const UTF_Compiler::RangeList UTF_Compiler::noIfHierachy = {{0x80, 0x10FFFF}};
+
+class CostModel {
+
+public:
+    CostModel(UTF_Encoder & e, bool useTernaryLogic);
+    unsigned incrementalCost(codepoint_t cp);
+    UTF_Compiler::RangeList computeExpensiveRanges(UCD::UnicodeSet endpoints);
+
+private:
+    UTF_Encoder & mEncoder;
+    unsigned mCodeUnitLogicCost;
+    std::vector<unsigned> mCurrentCodeUnits;
+};
+
+CostModel::CostModel(UTF_Encoder & e, bool useTernaryLogic) : mEncoder(e) {
+    unsigned codeUnitSize = e.getCodeUnitBits();
+    unsigned octets = (codeUnitSize + 7)/8;
+    if (useTernaryLogic) {
+        mCodeUnitLogicCost = octets * TernaryLogicCostPerByte;
+    } else {
+        mCodeUnitLogicCost = octets * BinaryLogicCostPerByte;
+    }
+}
+
+unsigned CostModel::incrementalCost(codepoint_t cp) {
+    unsigned units = mEncoder.encoded_length(cp);
+    if (units != mCurrentCodeUnits.size()) {
+        mCurrentCodeUnits.resize(units);
+        for (unsigned i = 0; i < units; i++) {
+            mCurrentCodeUnits[i] = mEncoder.nthCodeUnit(cp, i);
+        }
+        return (units - 1) * ShiftCostFactor + units * mCodeUnitLogicCost;
+    } else {
+        unsigned common_units = 0;
+        for (unsigned i = 0; i < units - 1; i++) {
+            if (mEncoder.nthCodeUnit(cp, i) == mCurrentCodeUnits[i]) {
+                common_units++;
+            } else {
+                break;
+            }
+        }
+        unsigned new_units = units - common_units;
+        return (new_units - 1) * ShiftCostFactor + new_units * mCodeUnitLogicCost;
+    }
+}
+
+UTF_Compiler::RangeList CostModel::computeExpensiveRanges(UCD::UnicodeSet endpoints) {
+    UTF_Compiler::RangeList expensiveRanges;
+    bool base_cp_found = false;
+    bool limit_cp_found = false;
+    codepoint_t base_cp = 0;
+    codepoint_t limit_cp = 0;
+    unsigned range_cost = 0;
+    for (const auto & range : endpoints) {
+        for (codepoint_t endpt = lo_codepoint(range); endpt <= hi_codepoint(range); endpt++) {
+            if (limit_cp_found && (endpt < limit_cp)) continue;
+            if (!base_cp_found) {
+                base_cp = endpt & ~ 0x3F;  // mask off low 6 dynamic_bits
+                base_cp_found = true;
+                limit_cp_found = false;
+                range_cost = 0;
+            }
+            if (!limit_cp_found) {
+                range_cost += incrementalCost(endpt);
+                if (range_cost > IfEmbeddingCostThreshhold) {
+                    limit_cp = endpt | 0x3F;
+                    limit_cp_found = true;
+                    expensiveRanges.push_back(interval_t{base_cp, limit_cp});
+                    base_cp_found = false;
+                }
+            }
+        }
+    }
+    return expensiveRanges;
+}
+
+UCD::UnicodeSet computeEndpoints(const std::vector<const re::CC *> & CCs) {
+    UCD::UnicodeSet endpoints;
+    for (unsigned i = 0; i < CCs.size(); i++) {
+        for (const auto range : *CCs[i]) {
+            const auto lo = re::lo_codepoint(range);
+            const auto hi = re::hi_codepoint(range);
+            endpoints.insert(lo);
+            endpoints.insert(hi);
+        }
+    }
+    return endpoints;
+}
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateRange
@@ -461,7 +556,16 @@ void UTF_Compiler::addTarget(Var * theVar, const CC * theCC) {
 
 void UTF_Compiler::compile(IfHierarchy h) {
     if (h == IfHierarchy::None) generateRange(noIfHierachy, mPb);
-    else generateRange(defaultIfHierachy, mPb);
+    //else if (h == IfHierarchy::Default) generateRange(defaultIfHierachy, mPb);
+    else {
+        std::vector<const CC *> CCs;
+        for (auto & f: mTargetValue) {
+            CCs.push_back(f.first);
+        }
+        UCD::UnicodeSet endpoints = computeEndpoints(CCs);
+        RangeList computed = CostModel(mEncoder, false).computeExpensiveRanges(endpoints);
+        generateRange(computed, mPb);
+    }
 
     PabloVerifier::verify(mPb.getPabloBlock()->getParent(), "after utf compiler");
 }

@@ -26,6 +26,7 @@ namespace UTF {
 class UnicodeSet;
 
 class UTF_Compiler {
+public:
 
     using CC = re::CC;
     using PabloBuilder = pablo::PabloBuilder;
@@ -39,8 +40,7 @@ class UTF_Compiler {
     static const RangeList defaultIfHierachy;
     static const RangeList noIfHierachy;
 
-public:
-    enum class IfHierarchy {None, Default};
+    enum class IfHierarchy {None, Default, Computed};
     using NameMap = boost::container::flat_map<re::Name *, PabloAST *>;
 
     UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb, unsigned lookAhead = 0, PabloAST * mask = nullptr);
