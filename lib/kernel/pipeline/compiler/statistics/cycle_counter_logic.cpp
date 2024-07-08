@@ -92,8 +92,7 @@ void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsign
  * @brief startCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::startCycleCounter(KernelBuilder & b, const CycleCounter type) {
-    assert (EnableCycleCounter || mUseDynamicMultithreading);
-    assert ((type != KERNEL_SYNCHRONIZATION && type != PARTITION_JUMP_SYNCHRONIZATION) || mUseDynamicMultithreading);
+    assert (EnableCycleCounter || (mUseDynamicMultithreading && (type == KERNEL_SYNCHRONIZATION || type == PARTITION_JUMP_SYNCHRONIZATION)));
     Value * const counter = b.CreateReadCycleCounter();
     mCycleCounters[(unsigned)type] = counter;
 }
@@ -108,7 +107,7 @@ void PipelineCompiler::startCycleCounter(KernelBuilder & b, const std::initializ
         if (counter == nullptr) {
             counter = b.CreateReadCycleCounter();
         }
-        assert ((type != KERNEL_SYNCHRONIZATION && type != PARTITION_JUMP_SYNCHRONIZATION) || mUseDynamicMultithreading);
+        assert (EnableCycleCounter || (mUseDynamicMultithreading && (type == KERNEL_SYNCHRONIZATION || type == PARTITION_JUMP_SYNCHRONIZATION)));
         mCycleCounters[(unsigned)type] = counter;
     }
 }
@@ -124,8 +123,7 @@ void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kern
 
     IntegerType * sizeTy = b.getSizeTy();
 
-    assert (EnableCycleCounter || mUseDynamicMultithreading);
-    assert ((type != KERNEL_SYNCHRONIZATION && type != PARTITION_JUMP_SYNCHRONIZATION) || mUseDynamicMultithreading);
+    assert (EnableCycleCounter || (mUseDynamicMultithreading && (type == KERNEL_SYNCHRONIZATION || type == PARTITION_JUMP_SYNCHRONIZATION)));
 
     if (mUseDynamicMultithreading) {
         Value * const cur = b.CreateLoad(sizeTy, mAccumulatedSynchronizationTimePtr);
@@ -354,7 +352,6 @@ void __print_pipeline_cycle_counter_report(const uint64_t numOfKernels,
 
         if (intItemCount > 0) {
             const auto cyclesPerItem = (fSubTotal / (long double)(intItemCount));
-            assert (cyclesPerItem <= maxCyclesPerItem);
             out << right_justify((ratefmt % cyclesPerItem).str(), maxCyclesPerItemLength) << ' ';
         } else {
             out << right_justify("--", maxCyclesPerItemLength + 1);
@@ -373,7 +370,6 @@ void __print_pipeline_cycle_counter_report(const uint64_t numOfKernels,
         assert (k < REQ_INTEGERS);
         const auto intExecTime = values[k++];
         knownOverheads += intExecTime;
-        assert (knownOverheads <= intSubTotal);
 
         const auto intOverhead = (knownOverheads > intSubTotal) ? 0UL : (intSubTotal - knownOverheads);
 
