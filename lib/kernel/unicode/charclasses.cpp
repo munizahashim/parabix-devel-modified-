@@ -38,6 +38,7 @@ std::string makeSignature(const StreamSet * const basis, const std::vector<re::C
         }
         out << ']';
     }
+    out << UTF::kernelAnnotation();
     out.flush();
     return tmp;
 }

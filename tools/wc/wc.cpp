@@ -106,7 +106,7 @@ protected:
 };
 
 WordCountKernel::WordCountKernel (KernelBuilder & b, StreamSet * const countable)
-: PabloKernel(b, "wc_" + wc_modes,
+: PabloKernel(b, "wc_" + wc_modes + UTF::kernelAnnotation(),
     {Bind("countable", countable, Principal())},
     {},
     {},

@@ -32,6 +32,17 @@ static cl::opt<unsigned> TernaryLogicCostPerByte("TernaryLogicCostPerByte", cl::
 static cl::opt<unsigned> ShiftCostFactor("ShiftCostFactor", cl::init(10), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", cl::init(25), cl::cat(codegen::CodeGenOptions));
 
+std::string kernelAnnotation() {
+    if (UseComputedUTFHierarchy) {
+        std::string a = "+b" + std::to_string(BinaryLogicCostPerByte);
+        a += "t" + std::to_string(TernaryLogicCostPerByte);
+        a += "s" + std::to_string(ShiftCostFactor);
+        a += "i" + std::to_string(IfEmbeddingCostThreshhold);
+        return a;
+    }
+    return "+defaultIf";
+}
+
 const UTF_Compiler::RangeList UTF_Compiler::defaultIfHierachy = {
     // Non-ASCII
     {0x80, 0x10FFFF},

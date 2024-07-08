@@ -25,6 +25,8 @@ namespace UTF {
 
 class UnicodeSet;
 
+std::string kernelAnnotation();
+
 class UTF_Compiler {
 public:
 
