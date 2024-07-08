@@ -137,7 +137,7 @@ class CostModel {
 public:
     CostModel(UTF_Encoder & e, bool useTernaryLogic);
     unsigned incrementalCost(codepoint_t cp);
-    UTF_Compiler::RangeList computeExpensiveRanges(UCD::UnicodeSet endpoints);
+    void addExpensiveSubranges(UCD::UnicodeSet endpoints, codepoint_t lo_base, codepoint_t hi_ceil, UTF_Compiler::RangeList & r);
 
 private:
     UTF_Encoder & mEncoder;
@@ -177,7 +177,7 @@ unsigned CostModel::incrementalCost(codepoint_t cp) {
     }
 }
 
-UTF_Compiler::RangeList CostModel::computeExpensiveRanges(UCD::UnicodeSet endpoints) {
+void CostModel::addExpensiveSubranges(UCD::UnicodeSet endpoints, codepoint_t lo_base, codepoint_t hi_ceil, UTF_Compiler::RangeList & r) {
     UTF_Compiler::RangeList expensiveRanges;
     bool base_cp_found = false;
     bool limit_cp_found = false;
@@ -185,7 +185,12 @@ UTF_Compiler::RangeList CostModel::computeExpensiveRanges(UCD::UnicodeSet endpoi
     codepoint_t limit_cp = 0;
     unsigned range_cost = 0;
     for (const auto & range : endpoints) {
-        for (codepoint_t endpt = lo_codepoint(range); endpt <= hi_codepoint(range); endpt++) {
+        codepoint_t range_lo = lo_codepoint(range);
+        codepoint_t range_hi = hi_codepoint(range);
+        if (range_hi < lo_base) continue;  // Ignore everthing below lo_base.
+        if (range_lo < lo_base) range_lo = lo_base;
+        if (range_hi > hi_ceil) range_hi = hi_ceil;
+        for (codepoint_t endpt = range_lo; endpt <= range_hi; endpt++) {
             if (limit_cp_found && (endpt < limit_cp)) continue;
             if (!base_cp_found) {
                 base_cp = endpt & ~ 0x3F;  // mask off low 6 dynamic_bits
@@ -198,13 +203,12 @@ UTF_Compiler::RangeList CostModel::computeExpensiveRanges(UCD::UnicodeSet endpoi
                 if (range_cost > IfEmbeddingCostThreshhold) {
                     limit_cp = endpt | 0x3F;
                     limit_cp_found = true;
-                    expensiveRanges.push_back(interval_t{base_cp, limit_cp});
+                    r.push_back(interval_t{base_cp, limit_cp});
                     base_cp_found = false;
                 }
             }
         }
     }
-    return expensiveRanges;
 }
 
 UCD::UnicodeSet computeEndpoints(const std::vector<const re::CC *> & CCs) {
@@ -573,8 +577,15 @@ void UTF_Compiler::compile() {
             CCs.push_back(f.first);
         }
         UCD::UnicodeSet endpoints = computeEndpoints(CCs);
-        RangeList computed = CostModel(mEncoder, false).computeExpensiveRanges(endpoints);
-        generateRange(computed, mPb);
+        CostModel m(mEncoder, false);
+        
+        RangeList rgs = {{0x80, 0x10FFFF}, {0x80, 0x7FF}};
+        m.addExpensiveSubranges(endpoints, 0x80, 0x7FF, rgs);
+        rgs.push_back({0x800, 0xFFFF});
+        m.addExpensiveSubranges(endpoints, 0x800, 0xFFFF, rgs);
+        rgs.push_back({0x10000, 0x10FFFF});
+        m.addExpensiveSubranges(endpoints, 0x10000, 0x10FFFF, rgs);
+        generateRange(rgs, mPb);
     }
 
     PabloVerifier::verify(mPb.getPabloBlock()->getParent(), "after utf compiler");
