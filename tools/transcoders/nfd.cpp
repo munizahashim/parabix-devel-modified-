@@ -196,11 +196,7 @@ void NFD_Translation::generatePabloMethod() {
         NFD4_Vars.push_back(v);
         unicodeCompiler.addTarget(v, re::makeCC(NFD4[i], &cc::Unicode));
     }
-    if (LLVM_UNLIKELY(re::AlgorithmOptionIsSet(re::DisableIfHierarchy))) {
-        unicodeCompiler.compile(UTF::UTF_Compiler::IfHierarchy::None);
-    } else {
-        unicodeCompiler.compile();
-    }
+    unicodeCompiler.compile();
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     Var * outputVar = getOutputStreamVar("Output");
     std::vector<PabloAST *> output_basis(basis.size());

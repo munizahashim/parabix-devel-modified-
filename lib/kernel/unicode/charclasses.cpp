@@ -69,11 +69,7 @@ void CharClassesKernel::generatePabloMethod() {
         mpx.push_back(pb.createVar("mpx_basis" + std::to_string(i), pb.createZeroes()));
         unicodeCompiler.addTarget(mpx[i], mCCs[i]);
     }
-    if (LLVM_UNLIKELY(AlgorithmOptionIsSet(DisableIfHierarchy))) {
-        unicodeCompiler.compile(UTF_Compiler::IfHierarchy::None);
-    } else {
-        unicodeCompiler.compile();
-    }
+    unicodeCompiler.compile();
     for (unsigned i = 0; i < mpx.size(); i++) {
         Extract * const r = pb.createExtract(getOutput(0), pb.getInteger(i));
         pb.createAssign(r, pb.createInFile(mpx[i]));

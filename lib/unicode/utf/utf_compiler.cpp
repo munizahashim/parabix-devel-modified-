@@ -554,9 +554,8 @@ void UTF_Compiler::addTarget(Var * theVar, const CC * theCC) {
     mTargetValue.emplace(theCC, mPb.createZeroes());
 }
 
-void UTF_Compiler::compile(IfHierarchy h) {
-    if (h == IfHierarchy::None) generateRange(noIfHierachy, mPb);
-    //else if (h == IfHierarchy::Default) generateRange(defaultIfHierachy, mPb);
+void UTF_Compiler::compile() {
+    if (!UseComputedUTFHierarchy) generateRange(defaultIfHierachy, mPb);
     else {
         std::vector<const CC *> CCs;
         for (auto & f: mTargetValue) {

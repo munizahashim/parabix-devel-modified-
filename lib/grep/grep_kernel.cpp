@@ -892,11 +892,7 @@ void CodePointMatchKernel::generatePabloMethod() {
             xfrm_vars.push_back(pb.createVar("xfrm_cc_" + std::to_string(i), pb.createZeroes()));
             unicodeCompiler.addTarget(xfrm_vars[i], xfrm_ccs[i]);
         }
-        if (LLVM_UNLIKELY(AlgorithmOptionIsSet(DisableIfHierarchy))) {
-            unicodeCompiler.compile(UTF::UTF_Compiler::IfHierarchy::None);
-        } else {
-            unicodeCompiler.compile();
-        }
+        unicodeCompiler.compile();
         std::vector<PabloAST *> basis = getInputStreamSet("Basis");
         std::vector<PabloAST *> transformed(basis.size());
         for (unsigned i = 0; i < basis.size(); i++) {
@@ -1187,11 +1183,7 @@ void MaskCC::generatePabloMethod() {
     UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
     Var * maskVar = pb.createVar("maskVar", pb.createZeroes());
     unicodeCompiler.addTarget(maskVar, mCC_to_mask);
-    if (LLVM_UNLIKELY(AlgorithmOptionIsSet(DisableIfHierarchy))) {
-        unicodeCompiler.compile(UTF::UTF_Compiler::IfHierarchy::None);
-    } else {
-        unicodeCompiler.compile();
-    }
+    unicodeCompiler.compile();
     PabloAST * mask = pb.createNot(maskVar);
     if (mIndexStrm) {
         PabloAST * idx = getInputStreamSet("index")[0];

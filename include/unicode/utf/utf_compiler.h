@@ -47,7 +47,7 @@ public:
 
     void addTarget(pablo::Var * theVar, const re::CC * theCC);
 
-    void compile(IfHierarchy h = IfHierarchy::Default);
+    void compile();
 
 protected:
 
