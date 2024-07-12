@@ -45,20 +45,12 @@ void PipelineCompiler::obtainCurrentSegmentNumber(KernelBuilder & b, BasicBlock 
         // fetches a number before the prior one to fetch the same number updates it.
         mSegNo = b.CreateAtomicFetchAndAdd(b.getSize(1), segNoPtr);
     } else {
-        Value * initialSegNo = nullptr;
-//        if (mNumOfThreads == 1) {
-//            initialSegNo = b.getSize(0);
-//        } else {
-            initialSegNo = mSegNo; assert (mSegNo);
-//        }
+        Value * initialSegNo = mSegNo;
         PHINode * const segNo = b.CreatePHI(initialSegNo->getType(), 2, "segNo");
         segNo->addIncoming(initialSegNo, entryBlock);
         mSegNo = segNo;
     }
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     mBaseSegNo = mSegNo;
-    mCurrentNestedSynchronizationVariable = 0;
-    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -66,13 +58,9 @@ void PipelineCompiler::obtainCurrentSegmentNumber(KernelBuilder & b, BasicBlock 
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::incrementCurrentSegNo(KernelBuilder & b, BasicBlock * const exitBlock) {
     assert (!mIsNestedPipeline && !mUseDynamicMultithreading);
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    Value * const segNo = mBaseSegNo; assert (mBaseSegNo);
-    #else
-    Value * const segNo = mSegNo; assert (mSegNo);
-    #endif
-    assert (mNumOfFixedThreads);
-    Value * const nextSegNo = b.CreateAdd(segNo, mNumOfFixedThreads);
+    Value * segNo = mBaseSegNo;  assert (mBaseSegNo);
+    assert (mBaseSegNo == mSegNo || UseJumpGuidedSynchronization);
+    Value * const nextSegNo = b.CreateAdd(segNo, mNumOfFixedThreads); assert (mNumOfFixedThreads);
     cast<PHINode>(segNo)->addIncoming(nextSegNo, exitBlock);
 }
 
@@ -192,24 +180,31 @@ Value * PipelineCompiler::getSynchronizationLockPtrForKernel(KernelBuilder & b, 
     return ptr;
 }
 
-#ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief obtainNextSegmentNumber
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::obtainNextSegmentNumber(KernelBuilder & b) {
+Value * PipelineCompiler::obtainNextSegmentNumber(KernelBuilder & b, const unsigned kernelId) {
+    assert (UseJumpGuidedSynchronization);
     Value * ptr; Type * ty;
     std::tie(ptr, ty) = getScalarFieldPtr(b,
-        NESTED_LOGICAL_SEGMENT_NUMBER_PREFIX + std::to_string(mCurrentNestedSynchronizationVariable));
+        NEXT_LOGICAL_SEGMENT_NUMBER + std::to_string(kernelId));
     // Value * const nextSegNo = b.CreateAtomicFetchAndAdd(b.getSize(1), ptr);
     Value * const nextSegNo = b.CreateLoad(ty, ptr);
     b.CreateStore(b.CreateAdd(nextSegNo, b.getSize(1)), ptr);
     #ifdef PRINT_DEBUG_MESSAGES
     const auto prefix = makeKernelName(mKernelId);
     debugPrint(b, prefix + ": obtained %" PRIu64 "-th next segment number %" PRIu64,
-               b.getSize(mCurrentNestedSynchronizationVariable), nextSegNo);
+               b.getSize(kernelId), nextSegNo);
     #endif
+    if (LLVM_UNLIKELY(CheckAssertions)) {
+        SmallVector<char, 256> tmp;
+        raw_svector_ostream out(tmp);
+        out << "%s: nested-segment number is %" PRIu64
+               " but was expected to less than %" PRIu64;
+        Value * const success = b.CreateICmpULE(nextSegNo, mSegNo);
+        b.CreateAssert(success, out.str(), mKernelName[mKernelId], nextSegNo, mSegNo);
+    }
     return nextSegNo;
 }
-#endif
 
 }

@@ -92,9 +92,8 @@ void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsign
  * @brief startCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::startCycleCounter(KernelBuilder & b, const CycleCounter type) {
-    assert (EnableCycleCounter || mUseDynamicMultithreading);
-    assert ((type != KERNEL_SYNCHRONIZATION && type != PARTITION_JUMP_SYNCHRONIZATION) || mUseDynamicMultithreading);
     Value * const counter = b.CreateReadCycleCounter();
+    assert (EnableCycleCounter || (mUseDynamicMultithreading && (type == KERNEL_SYNCHRONIZATION || type == PARTITION_JUMP_SYNCHRONIZATION)));
     mCycleCounters[(unsigned)type] = counter;
 }
 
@@ -102,13 +101,12 @@ void PipelineCompiler::startCycleCounter(KernelBuilder & b, const CycleCounter t
  * @brief startCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::startCycleCounter(KernelBuilder & b, const std::initializer_list<CycleCounter> types) {
-    assert (EnableCycleCounter || mUseDynamicMultithreading);
     Value * counter = nullptr;
     for (auto type : types) {
         if (counter == nullptr) {
             counter = b.CreateReadCycleCounter();
         }
-        assert ((type != KERNEL_SYNCHRONIZATION && type != PARTITION_JUMP_SYNCHRONIZATION) || mUseDynamicMultithreading);
+        assert (EnableCycleCounter || (mUseDynamicMultithreading && (type == KERNEL_SYNCHRONIZATION || type == PARTITION_JUMP_SYNCHRONIZATION)));
         mCycleCounters[(unsigned)type] = counter;
     }
 }
@@ -124,8 +122,7 @@ void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kern
 
     IntegerType * sizeTy = b.getSizeTy();
 
-    assert (EnableCycleCounter || mUseDynamicMultithreading);
-    assert ((type != KERNEL_SYNCHRONIZATION && type != PARTITION_JUMP_SYNCHRONIZATION) || mUseDynamicMultithreading);
+    assert (EnableCycleCounter || (mUseDynamicMultithreading && (type == KERNEL_SYNCHRONIZATION || type == PARTITION_JUMP_SYNCHRONIZATION)));
 
     if (mUseDynamicMultithreading) {
         Value * const cur = b.CreateLoad(sizeTy, mAccumulatedSynchronizationTimePtr);
@@ -337,9 +334,7 @@ void __print_pipeline_cycle_counter_report(const uint64_t numOfKernels,
 
         assert ((k + TOTAL_TIME + 1) < REQ_INTEGERS);
         const uint64_t intItemCount = values[k++];
-        assert (intItemCount <= maxItemCount);
         const uint64_t intSubTotal = values[k + TOTAL_TIME];
-        assert (intSubTotal <= maxCycleCount);
 
         out << right_justify(std::to_string(i + 1), maxKernelIdLength)
             << ' '
@@ -373,7 +368,6 @@ void __print_pipeline_cycle_counter_report(const uint64_t numOfKernels,
         assert (k < REQ_INTEGERS);
         const auto intExecTime = values[k++];
         knownOverheads += intExecTime;
-        assert (knownOverheads <= intSubTotal);
 
         const auto intOverhead = (knownOverheads > intSubTotal) ? 0UL : (intSubTotal - knownOverheads);
 

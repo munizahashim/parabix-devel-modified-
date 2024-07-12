@@ -60,14 +60,14 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
     auto currentPartitionId = -1U;
     addBufferHandlesToPipelineKernel(b, PipelineInput, 0);
     addConsumerKernelProperties(b, PipelineInput);
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    unsigned nestedSynchronizationVariableCount = 0;
-    #endif
+    if (mUseDynamicMultithreading || UseJumpGuidedSynchronization) {
+        mTarget->addInternalScalar(sizeTy, NEXT_LOGICAL_SEGMENT_NUMBER, getCacheLineGroupId(PipelineInput));
+    }
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
         // Is this the start of a new partition?
         const auto partitionId = KernelPartitionId[i];
         const bool isRoot = (partitionId != currentPartitionId);
-        currentPartitionId = partitionId;
+        currentPartitionId = partitionId;        
         addInternalKernelProperties(b, i, isRoot);
         addCycleCounterProperties(b, i, isRoot);
         #ifdef ENABLE_PAPI
@@ -75,12 +75,15 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
         #endif
         addProducedItemCountDeltaProperties(b, i);
         addUnconsumedItemCountProperties(b, i);
-        #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-        if (isRoot && PartitionJumpTargetId[partitionId] == (PartitionCount - 1)) {
-            mTarget->addInternalScalar(sizeTy,
-                NESTED_LOGICAL_SEGMENT_NUMBER_PREFIX + std::to_string(++nestedSynchronizationVariableCount), getCacheLineGroupId(i));
+
+        if (LLVM_UNLIKELY(UseJumpGuidedSynchronization && isRoot)) {
+            if (LLVM_UNLIKELY(PartitionJumpTargetId[partitionId] == (PartitionCount - 1))) {
+                // add this to the state of the *next* kernel
+                mTarget->addInternalScalar(sizeTy,
+                    NEXT_LOGICAL_SEGMENT_NUMBER + std::to_string(i + 1), getCacheLineGroupId(i + 1));
+            }
         }
-        #endif
+
     }
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         mTarget->addThreadLocalScalar(b.getInt64Ty(), STATISTICS_CYCLE_COUNT_TOTAL,
@@ -92,7 +95,6 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
     addPAPIEventCounterPipelineProperties(b);
     #endif
     if (mUseDynamicMultithreading) {
-        mTarget->addInternalScalar(sizeTy, NEXT_LOGICAL_SEGMENT_NUMBER, getCacheLineGroupId(PipelineOutput));
         if (LLVM_UNLIKELY(TraceDynamicMultithreading)) {
             addDynamicThreadingReportProperties(b, getCacheLineGroupId(PipelineOutput + 1));
         }

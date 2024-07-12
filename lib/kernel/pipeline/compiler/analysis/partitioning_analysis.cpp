@@ -1093,7 +1093,6 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
 
     using PartitionGraph = adjacency_list<hash_setS, vecS, bidirectionalS, no_property, no_property, no_property>;
 
-
     std::vector<BitSet> rateDomSet(PartitionCount);
 
     unsigned nextRateId = 0;
@@ -1218,25 +1217,5 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
 
 #endif
 }
-
-#ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief identifyPartitionGuidedSynchronizationVariables
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::identifyPartitionGuidedSynchronizationVariables() {
-
-    unsigned nestedSynchronizationVariableCount = 0;
-    unsigned currentPartitionId = -1U;
-    for (auto i = FirstKernel; i < LastKernel; ++i) {
-        // Is this the start of a new partition?
-        const auto partitionId = KernelPartitionId[i];
-        const bool isRoot = (partitionId != currentPartitionId);
-        if (isRoot && PartitionJumpTargetId[partitionId] == (PartitionCount - 1)) {
-            ++nestedSynchronizationVariableCount;
-        }
-    }
-
-}
-#endif
 
 } // end of namespace kernel

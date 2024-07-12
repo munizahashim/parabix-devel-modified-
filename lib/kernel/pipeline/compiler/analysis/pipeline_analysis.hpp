@@ -77,10 +77,6 @@ public:
 
         P.determinePartitionJumpIndices();
 
-        #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-        P.identifyPartitionGuidedSynchronizationVariables();
-        #endif
-
         P.annotateBufferGraphWithAddAttributes();
 
         // Finish annotating the buffer graph
@@ -101,6 +97,8 @@ public:
         P.identifyPortsThatModifySegmentLength();
 
         P.mapInternallyGeneratedStreamSets();
+
+        P.identifySynchronizationVariableLevels();
 
         // Finish the buffer graph
 
@@ -127,7 +125,6 @@ private:
     PipelineAnalysis(PipelineKernel * const pipelineKernel)
     : PipelineCommonGraphFunctions(mStreamGraph, mBufferGraph)
     , mPipelineKernel(pipelineKernel)
-//    , mNumOfThreads(pipelineKernel->getNumOfThreads())
     , mKernels(pipelineKernel->mKernels)
     , mTraceProcessedProducedItemCounts(codegen::DebugOptionIsSet(codegen::TraceCounts))
     , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
@@ -164,10 +161,6 @@ private:
     PartitionGraph identifyKernelPartitions();
 
     void determinePartitionJumpIndices();
-
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    void identifyPartitionGuidedSynchronizationVariables();
-    #endif
 
     // simple scheduling analysis
 
@@ -263,6 +256,10 @@ private:
 
     void mapInternallyGeneratedStreamSets();
 
+    // Synchronization Level Analysis
+
+    void identifySynchronizationVariableLevels();
+
 public:
 
     // Debug functions
@@ -329,6 +326,7 @@ public:
     TerminationPropagationGraph         mTerminationPropagationGraph;
     InternallyGeneratedStreamSetGraph   mInternallyGeneratedStreamSetGraph;
     BitVector                           HasTerminationSignal;
+    std::vector<unsigned>               SynchronizationVariableNumber;
 
     FamilyScalarGraph               mFamilyScalarGraph;
     ZeroInputGraph                  mZeroInputGraph;

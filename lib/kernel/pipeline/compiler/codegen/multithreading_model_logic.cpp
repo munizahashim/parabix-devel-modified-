@@ -626,9 +626,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         #endif
         mExpectedNumOfStridesMultiplier = nullptr;
         mThreadLocalStreamSetBaseAddress = nullptr;
-        #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
         mSegNo = mBaseSegNo;
-        #endif
 
         BasicBlock * exitThread  = nullptr;
         BasicBlock * exitFunction  = nullptr;
@@ -1131,11 +1129,11 @@ void PipelineCompiler::end(KernelBuilder & b) {
     // TODO: if we determine that all of the pipeline I/O is consumed in one invocation of the
     // pipeline, we can avoid testing at the end whether its terminated.
 
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    b.CreateBr(mPartitionEntryPoint[PartitionCount]);
+    if (UseJumpGuidedSynchronization) {
+        b.CreateBr(mPartitionEntryPoint[PartitionCount]);
 
-    b.SetInsertPoint(mPartitionEntryPoint[PartitionCount]);
-    #endif
+        b.SetInsertPoint(mPartitionEntryPoint[PartitionCount]);
+    }
     Value * terminated = nullptr;
     if (mIsNestedPipeline || mUseDynamicMultithreading) {
         if (PipelineHasTerminationSignal) {
@@ -1172,9 +1170,7 @@ void PipelineCompiler::end(KernelBuilder & b) {
 
     mExpectedNumOfStridesMultiplier = nullptr;
     mThreadLocalStreamSetBaseAddress = nullptr;
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     mSegNo = mBaseSegNo;
-    #endif
 
 }
 
