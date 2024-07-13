@@ -143,7 +143,7 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     args[0] = readableBuffer;
     args[1] = consumedPageOffset;
     args[2] = b.getInt32(MADV_DONTNEED);
-    Value * const r0 = b.CreateCall(MAdviseFunc, args);
+    b.CreateCall(MAdviseFunc, args);
     #endif
     b.CreateBr(checkRemaining);
 
