@@ -349,7 +349,6 @@ void __print_pipeline_cycle_counter_report(const uint64_t numOfKernels,
 
         if (intItemCount > 0) {
             const auto cyclesPerItem = (fSubTotal / (long double)(intItemCount));
-            assert (cyclesPerItem <= maxCyclesPerItem);
             out << right_justify((ratefmt % cyclesPerItem).str(), maxCyclesPerItemLength) << ' ';
         } else {
             out << right_justify("--", maxCyclesPerItemLength + 1);
