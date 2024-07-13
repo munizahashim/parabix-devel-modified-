@@ -48,3 +48,21 @@ DEPS
     kernel.util
     toolchain
 )
+
+parabix_add_executable(
+NAME
+    ufilter
+SRC
+    ufilter.cpp
+DEPS
+    grep
+    kernel.basis
+    kernel.io
+    kernel.pipeline
+    kernel.streamutils
+    kernel.util
+    toolchain
+    re.cc
+    re.parse
+)
+
