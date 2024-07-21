@@ -844,16 +844,14 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
             break;
     }
 
-
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableAnonymousMMapedDynamicLinearBuffers))) {
-        out << "+AML";
-    }
-
     if (codegen::EnableDynamicMultithreading) {
         out << "+DM";
     }
     if (codegen::EnableJumpGuidedSynchronizationVariables) {
         out << "+JGS";
+    }
+    if (codegen::UseProcessThreadForIO) {
+        out << "+IOT";
     }
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         if (DebugOptionIsSet(codegen::EnableCycleCounter)) {
@@ -888,9 +886,6 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         }
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisableThreadLocalStreamSets))) {
             out << "-TL";
-        }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableAnonymousMMapedDynamicLinearBuffers))) {
-            out << "+AML";
         }
     }
     #ifdef ENABLE_PAPI

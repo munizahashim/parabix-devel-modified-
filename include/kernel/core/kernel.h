@@ -58,8 +58,6 @@ class Kernel : public AttributeSet {
     friend class BaseDriver;
 public:
 
-   // using KernelBuilder & = const std::unique_ptr<KernelBuilder> &;
-
     using Relationships = std::vector<const Relationship *>;
 
     enum class TypeId {

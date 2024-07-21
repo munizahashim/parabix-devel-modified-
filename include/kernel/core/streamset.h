@@ -12,6 +12,10 @@ namespace IDISA { class IDISA_Builder; }
 namespace llvm { class Value; }
 namespace llvm { class Constant; }
 
+uint8_t * make_circular_buffer(const size_t size, const size_t hasUnderflow);
+
+void destroy_circular_buffer(uint8_t * base, const size_t size, const size_t hasUnderflow);
+
 namespace kernel {
 
 class Kernel;

@@ -535,7 +535,7 @@ XfrmFunctionType generateU21_pipeline(CPUDriver & pxDriver,
     SHOW_BIXNUM(OutputBasis);
 
     P->CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
-    //P->CreateKernelCall<StdOutKernel>(OutputBytes);
+    P->CreateKernelCall<StdOutKernel>(OutputBytes);
     return reinterpret_cast<XfrmFunctionType>(P->compile());
 }
 
@@ -630,7 +630,7 @@ XfrmFunctionType generateUTF8_pipeline(CPUDriver & pxDriver,
     }
 
     P->CreateKernelCall<P2SKernel>(Translated, OutputBytes);
-    //P->CreateKernelCall<StdOutKernel>(OutputBytes);
+    P->CreateKernelCall<StdOutKernel>(OutputBytes);
     return reinterpret_cast<XfrmFunctionType>(P->compile());
 }
 

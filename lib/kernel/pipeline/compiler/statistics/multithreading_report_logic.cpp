@@ -190,7 +190,7 @@ void PipelineCompiler::printDynamicThreadingReport(KernelBuilder & b) const {
     FixedArray<Value *, 3> args;
     args[0] = b.CreatePointerCast(dataPtr, b.getVoidPtrTy());
     args[1] = b.CreateTrunc(b.getScalarField(MAXIMUM_NUM_OF_THREADS), b.getInt32Ty());
-    args[2] = mSegNo;
+    args[2] = getMaxSegmentNumber(b);
 
     b.CreateCall(printFn->getFunctionType(), printFn, args);
 }

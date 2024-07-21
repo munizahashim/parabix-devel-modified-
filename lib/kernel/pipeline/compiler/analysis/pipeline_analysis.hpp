@@ -69,6 +69,8 @@ public:
 
         P.identifyInterPartitionSymbolicRates();
 
+        P.addFlowControlAnnotations();
+
         P.identifyTerminationChecks();
 
         P.makeTerminationPropagationGraph();
@@ -97,6 +99,8 @@ public:
         P.identifyPortsThatModifySegmentLength();
 
         P.mapInternallyGeneratedStreamSets();
+
+        P.markNestedSegmentNumbers();
 
         // Finish the buffer graph
 
@@ -203,6 +207,10 @@ private:
 
     void buildZeroInputGraph();
 
+    void addFlowControlAnnotations();
+
+    void markNestedSegmentNumbers();
+
     // thread local analysis
 
     void determineInitialThreadLocalBufferLayout(KernelBuilder & b, pipeline_random_engine & rng);
@@ -285,7 +293,10 @@ public:
     unsigned                        FirstScalar = 0;
     unsigned                        LastScalar = 0;
     unsigned                        PartitionCount = 0;
-    unsigned                        NumOfThreads = 0;
+    unsigned                        FirstComputePartitionId = 0;
+    unsigned                        LastComputePartitionId = 0;
+    bool                            AllowIOProcessThread = false;
+
     bool                            HasZeroExtendedStream = false;
 
     size_t                          RequiredThreadLocalStreamSetMemory = 0;
@@ -303,6 +314,8 @@ public:
     std::vector<unsigned>           StrideRepetitionVector;
     std::vector<Rational>           PartitionRootStridesPerThreadLocalPage;
     std::vector<Rational>           NumOfPartialOverflowStridesPerPartitionRootStride;
+
+    BitVector                       HasNestedSegmentNumber;
 
     BufferGraph                     mBufferGraph;
 

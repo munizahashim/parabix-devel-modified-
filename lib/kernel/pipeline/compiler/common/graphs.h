@@ -265,8 +265,8 @@ enum BufferType : unsigned {
     , Shared = 4
     , Returned = 8
     , Truncated = 16
-
-// ------------------
+    , CrossThreaded = 32
+    // ------------------
     , HasIllustratedStreamset = 512
 };
 
@@ -278,6 +278,10 @@ enum BufferLocality {
     , GloballyShared
     , ConstantShared
     , ZeroElementsOrWidth
+};
+
+enum KernelFlags {
+    PermitSegmentSizeSlidingWindowing = 1
 };
 
 struct BufferNode {
@@ -299,6 +303,11 @@ struct BufferNode {
     unsigned PartialSumSpanLength = 0;
 
     unsigned OutputItemCountId = 0;
+
+
+    bool permitSlidingWindow() const {
+        return (Type & KernelFlags::PermitSegmentSizeSlidingWindowing) != 0;
+    }
 
     bool isOwned() const {
         return (Type & BufferType::Unowned) == 0;
@@ -326,6 +335,10 @@ struct BufferNode {
 
     bool isTruncated() const {
         return (Type & BufferType::Truncated) != 0;
+    }
+
+    bool isCrossThreaded() const {
+        return (Type & BufferType::CrossThreaded) != 0;
     }
 
     bool isThreadLocal() const {
@@ -357,7 +370,8 @@ enum BufferPortType : unsigned {
     IsShared = 16,
     IsManaged = 32,
     CanModifySegmentLength = 64,
-    Illustrated = 128
+    IsCrossThreaded = 128,
+    Illustrated = 256
 };
 
 struct BufferPort {
@@ -384,6 +398,10 @@ struct BufferPort {
 
     bool isPrincipal() const {
         return (Flags & BufferPortType::IsPrincipal) != 0;
+    }
+
+    bool isCrossThreaded() const {
+        return (Flags & BufferPortType::IsCrossThreaded) != 0;
     }
 
     bool isFixed() const {

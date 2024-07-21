@@ -352,36 +352,112 @@ void PipelineCompiler::constructStreamSetBuffers(KernelBuilder & /* b */) {
  * @brief readAvailableItemCounts
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::readAvailableItemCounts(KernelBuilder & b) {
+    mKernelIsClosed.reset(FirstKernel, LastKernel);
 
-    for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
-        const auto streamSet = source(e, mBufferGraph);
-        if (mLocallyAvailableItems[streamSet] == nullptr) {
-            const BufferNode & bn = mBufferGraph[streamSet];
-            Value * produced = nullptr;
-            if (LLVM_UNLIKELY(bn.isConstant())) {
-                produced = ConstantInt::getAllOnesValue(b.getSizeTy());
-            } else {
-                const auto f = in_edge(streamSet, mBufferGraph);
-                const auto producer = source(f, mBufferGraph);
-                const BufferPort & outputPort = mBufferGraph[f];
-                assert (outputPort.Port.Type == PortType::Output);
-                if (LLVM_UNLIKELY(producer == PipelineInput)) {
-                    assert (bn.isExternal());
-                    // the output port of the pipeline input is an input streamset of the pipeline kernel.
-                    produced = getAvailableInputItems(outputPort.Port.Number);
-                    writeTransitoryConsumedItemCount(b, streamSet, produced);
-                } else {
-                    const auto prefix = makeBufferName(producer, outputPort.Port);
-                    if (LLVM_UNLIKELY(outputPort.isDeferred())) {
-                        produced = b.getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
-                    } else {
-                        produced = b.getScalarField(prefix + ITEM_COUNT_SUFFIX);
-                    }
-                }
+    Constant * const sz_ZERO = b.getSize(0);
+    Constant * const sz_MAXINT = ConstantInt::getAllOnesValue(b.getSizeTy());
+
+    Value * maxClosedSegNum = sz_ZERO;
+    Value * minOpenSegNum = sz_MAXINT;
+
+
+
+    bool crossThreadedInputs = false;
+
+    for (const auto input : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
+        const BufferPort & port = mBufferGraph[input];
+        const auto streamSet = source(input, mBufferGraph);
+        if (LLVM_UNLIKELY(port.isCrossThreaded())) {
+            // We need to check the terminated signal *before* the item count or we risk getting
+            // an old available count and new termination signal. Do not rearrange this order.
+            const auto producer = parent(streamSet, mBufferGraph);
+            if (producer != PipelineInput && mKernelIsClosed[producer] == nullptr) {
+                assert (HasTerminationSignal.test(producer));
+                Value * closed = readTerminationSignal(b, producer);
+                mKernelIsClosed[producer] = closed;
+                Value * const isClosed = b.CreateICmpNE(closed, sz_ZERO);
+
+                // There is a small window (i.e., a single store) in which termSegNum won't be 0 and the kernel
+                // won't be marked as terminated.
+                Value * termSegNum = b.getScalarField(CROSS_THREADED_TERMINATION_SEGMENT_NUMBER_PREFIX + std::to_string(producer));
+                maxClosedSegNum = b.CreateUMax(b.CreateSelect(isClosed, termSegNum, maxClosedSegNum), maxClosedSegNum);
+                const auto type = isDataParallel(producer) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
+                Value * const syncSegNumPtr = getSynchronizationLockPtrForKernel(b, producer, type);
+                Value * const syncSegNum = b.CreateAtomicLoadAcquire(b.getSizeTy(), syncSegNumPtr);
+                minOpenSegNum = b.CreateUMin(b.CreateSelect(isClosed, minOpenSegNum, syncSegNum), minOpenSegNum);
+
+                crossThreadedInputs = true;
             }
-            mLocallyAvailableItems[streamSet] = produced; assert (produced);
+            mLocallyAvailableItems[streamSet] = readAvailableItemCount(b, streamSet);
+        } else if (mLocallyAvailableItems[streamSet] == nullptr) {
+            assert (mBufferGraph[streamSet].isExternal() || mBufferGraph[streamSet].isConstant());
+            mLocallyAvailableItems[streamSet] = readAvailableItemCount(b, streamSet);
         }
     }
+
+    // The impact we have here is subtle. If we have an output kernel
+
+    if (LLVM_UNLIKELY(crossThreadedInputs)) {
+//        Function * const pthreadSelfFn = b.getModule()->getFunction("pthread_self");
+//        Value * threadId = b.CreateCall(pthreadSelfFn->getFunctionType(), pthreadSelfFn, {});
+
+//        FixedArray<Value *, 6> argVals;
+//        argVals[0] = b.getInt32(STDERR_FILENO);
+//        argVals[1] = b.GetString("%016" PRIx64 " %s  maxClosedSegNum=%" PRIu64 "  minOpenSegNum=%" PRIu64 "\n" );
+//        argVals[2] = threadId;
+//        argVals[3] = b.GetString(mKernel->getName());
+//        argVals[4] = maxClosedSegNum;
+//        argVals[5] = minOpenSegNum;
+//        Function * Dprintf = b.GetDprintf();
+//        b.CreateCall(Dprintf->getFunctionType(), Dprintf, argVals);
+
+        // max closed will be the segnum of the termination, but min open will be after the segment has finished.
+        Value * acceptClosedSignal = b.CreateICmpULT(maxClosedSegNum, minOpenSegNum);
+        for (auto k = FirstKernel; k <= LastKernel; ++k) {
+            if (mKernelIsClosed[k]) {
+                mKernelIsClosed[k] = b.CreateSelect(acceptClosedSignal, mKernelIsClosed[k], sz_ZERO);
+            }
+        }
+        if (mIsIOProcessThread) {
+            if (LLVM_LIKELY(mIOThreadAcceptedAllTerminationSignals == nullptr)) {
+                mIOThreadAcceptedAllTerminationSignals = acceptClosedSignal;
+            } else {
+                mIOThreadAcceptedAllTerminationSignals = b.CreateAnd(mIOThreadAcceptedAllTerminationSignals, acceptClosedSignal);
+            }
+        }
+    }
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief readAvailableItemCount
+ ** ------------------------------------------------------------------------------------------------------------- */
+Value * PipelineCompiler::readAvailableItemCount(KernelBuilder & b, const size_t streamSet) {
+    const BufferNode & bn = mBufferGraph[streamSet];
+    Value * produced = nullptr;
+    if (LLVM_UNLIKELY(bn.isConstant())) {
+        produced = ConstantInt::getAllOnesValue(b.getSizeTy());
+    } else {
+        const auto f = in_edge(streamSet, mBufferGraph);
+        const auto producer = source(f, mBufferGraph);
+        const BufferPort & outputPort = mBufferGraph[f];
+        assert (outputPort.Port.Type == PortType::Output);
+        if (LLVM_UNLIKELY(producer == PipelineInput)) {
+            assert (bn.isExternal());
+            // the output port of the pipeline input is an input streamset of the pipeline kernel.
+            produced = getAvailableInputItems(outputPort.Port.Number);
+            writeTransitoryConsumedItemCount(b, streamSet, produced);
+        } else {
+            const auto prefix = makeBufferName(producer, outputPort.Port);
+            if (LLVM_UNLIKELY(outputPort.isDeferred())) {
+                produced = b.getScalarField(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+            } else {
+                produced = b.getScalarField(prefix + ITEM_COUNT_SUFFIX);
+            }
+        }
+    }
+    assert (produced);
+    return produced;
 }
 
 
@@ -513,6 +589,27 @@ void PipelineCompiler::writeUpdatedItemCounts(KernelBuilder & b) {
         }
     }
 }
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief writeCrossThreadedProducedItemCountAfterTermination
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineCompiler::writeCrossThreadedProducedItemCountAfterTermination(KernelBuilder & b) {
+    for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
+        const auto streamSet = target(e, mBufferGraph);
+        const BufferNode & bn = mBufferGraph[streamSet];
+        if (bn.isCrossThreaded()) {
+            assert (bn.isInternal());
+            assert (bn.isNonThreadLocal());
+            assert (HasTerminationSignal.test(mKernelId));
+            const BufferPort & br = mBufferGraph[e];
+            const auto outputPort = br.Port;
+            Value * const produced = mProducedAtTermination[outputPort];
+            b.CreateStore(produced, mProducedItemCountPtr[outputPort]);
+        }
+    }
+}
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief recordFinalProducedItemCounts

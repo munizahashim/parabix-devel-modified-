@@ -17,6 +17,9 @@
 #include <kernel/core/streamsetptr.h>
 #include <codegen/TypeBuilder.h>
 #include <kernel/illustrator/illustrator.h>
+#ifndef NDEBUG
+#include <llvm/IR/Verifier.h>
+#endif
 
 using namespace llvm;
 using namespace boost;
@@ -90,6 +93,16 @@ void KernelCompiler::generateKernel(KernelBuilder & b) {
 
     // What is the cost of generating a pass manager instance for each compiled kernel vs.
     // the complexity of using a factory?
+
+    #ifndef NDEBUG
+    SmallVector<char, 256> tmp;
+    raw_svector_ostream msg(tmp);
+    bool BrokenDebugInfo = false;
+    if (LLVM_UNLIKELY(llvm::verifyModule(*b.getModule(), &msg, &BrokenDebugInfo))) {
+        b.getModule()->print(errs(), nullptr);
+        report_fatal_error(StringRef(msg.str()));
+    }
+    #endif
 
     runInternalOptimizationPasses(b.getModule());
     mTarget->runOptimizationPasses(b);

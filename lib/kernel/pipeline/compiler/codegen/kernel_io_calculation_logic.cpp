@@ -372,22 +372,15 @@ void PipelineCompiler::checkForSufficientInputData(KernelBuilder & b, const Buff
     // simply have to trust that the root determined the correct number or we'd be forced to have an
     // under/overflow capable of containing an entire segment rather than a single stride.
 
-    Value * const closed = isClosed(b, streamSet);
-
     Value * const strideLength = calculateStrideLength(b, port, mCurrentProcessedItemCountPhi[port.Port], mStrideStepSize, "hasSufficient");
 
     const auto prefix = makeBufferName(mKernelId, inputPort);
 
     Value * const accessible = getAccessibleInputItems(b, port); assert (accessible);
 
+    Value * closed = isClosed(b, streamSet);
     Value * minimum = strideLength;
-//    if (mPrincipalFixedRateFactor && port.isFixed()) {
-//        assert (!port.isPrincipal());
-//        const Binding & input = port.Binding;
-//        const ProcessingRate & rate = input.getRate();
-//        const auto factor = rate.getRate() / mFixedRateLCM;
-//        minimum = b.CreateCeilUMulRational(mPrincipalFixedRateFactor, factor);
-//    }
+
     Value * const required = addLookahead(b, port, minimum); assert (required);
 
     #ifdef PRINT_DEBUG_MESSAGES
@@ -626,7 +619,7 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
 
         for (auto ei = ei_begin; ei != ei_end; ++ei) {
             const BufferPort & port =  mBufferGraph[*ei];
-            if (port.canModifySegmentLength()) {
+            if (port.canModifySegmentLength() || port.isCrossThreaded()) {
                 const auto streamSet = source(*ei, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[streamSet];
                 if (LLVM_UNLIKELY(bn.isConstant())) {
@@ -654,10 +647,9 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
                 }
 
                 Value * const closed = isClosed(b, streamSet);
-
                 Value * hasEnough = closed;
 
-                if (anyNonCountable) {
+                if (anyNonCountable || port.isCrossThreaded()) {
 
                     if (LLVM_UNLIKELY(port.isZeroExtended())) {
                         avail = b.CreateSelect(closed, MAX_INT, avail);
@@ -682,6 +674,7 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
                     Value * const remaining = b.CreateSub(avail, processed, "remaining");
                     Value * const nextStrideLength = calculateStrideLength(b, port, processed, nextStrideIndex, "hasMoreInput");
                     Value * const required = addLookahead(b, port, nextStrideLength); assert (required);
+
                     hasEnough = b.CreateOr(closed, b.CreateICmpUGE(remaining, required));
                 }
 
@@ -711,7 +704,7 @@ Value * PipelineCompiler::hasMoreInput(KernelBuilder & b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getAccessibleInputItems
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::getAccessibleInputItems(KernelBuilder & b, const BufferPort & port, const bool useOverflow1) {
+Value * PipelineCompiler::getAccessibleInputItems(KernelBuilder & b, const BufferPort & port) {
 
     const auto inputPort = port.Port;
     assert (inputPort.Type == PortType::Input);
@@ -735,8 +728,8 @@ Value * PipelineCompiler::getAccessibleInputItems(KernelBuilder & b, const Buffe
     }
 
     const StreamSetBuffer * const buffer = bn.Buffer;
-    Value * const available = mLocallyAvailableItems[streamSet]; assert (available);
     Value * const processed = mCurrentProcessedItemCountPhi[inputPort];
+    Value * const available = mLocallyAvailableItems[streamSet]; assert (available);
     #ifdef PRINT_DEBUG_MESSAGES
     const auto prefix = makeBufferName(mKernelId, inputPort);
     debugPrint(b, prefix + "_available = %" PRIu64, available);
@@ -860,23 +853,8 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
 
     // TODO: can we determine which locks will always dominate another?
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-        #ifdef ENABLE_PAPI
-        if (NumOfPAPIEvents) {
-            startPAPIMeasurement(b, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
-        }
-        #endif
-        if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
-            startCycleCounter(b, CycleCounter::KERNEL_SYNCHRONIZATION);
-        }
-        acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
-        if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
-            updateCycleCounter(b, FirstKernel, CycleCounter::KERNEL_SYNCHRONIZATION);
-        }
-        #ifdef ENABLE_PAPI
-        if (NumOfPAPIEvents) {
-            accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
-        }
-        #endif
+        assert (!mIsIOProcessThread);
+        acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
     }
 
     Value * const produced = mCurrentProducedItemCountPhi[outputPort]; assert (produced);
@@ -1139,7 +1117,7 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
             if (LLVM_UNLIKELY(port.isPrincipal())) {
                 mPrincipalFixedRateFactor = nullptr;
             }
-            accessible = b.CreateSelect(isClosedNormally(b, port.Port), selected, accessible, "accessible");
+            accessible = b.CreateSelect(isClosed(b, port.Port, true), selected, accessible, "accessible");
         }
         accessibleItems[port.Port.Number] = accessible;
     }
@@ -1238,7 +1216,7 @@ void PipelineCompiler::calculateFinalItemCounts(KernelBuilder & b,
 
                     const Rational r{factor.numerator(), factor.denominator() * stride}; // := factor / Rational{stride};
                     Value * const z = b.CreateCeilUMulRational(y, r);
-                    calculated = b.CreateSelect(isClosedNormally(b, inputPort), z, calculated);
+                    calculated = b.CreateSelect(isClosed(b, inputPort, true), z, calculated);
                 }
 
                 accessibleItems[inputPort.Number] = calculated;
