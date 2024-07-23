@@ -96,26 +96,6 @@ void PipelineAnalysis::addFlowControlAnnotations() {
         }
     }
 
-
-}
-
-void PipelineAnalysis::markNestedSegmentNumbers() {
-
-    HasNestedSegmentNumber.resize(PipelineOutput);
-
-    const auto UseJumpGuidedSynchronization = !IsNestedPipeline && codegen::EnableJumpGuidedSynchronizationVariables;
-
-    if (LLVM_UNLIKELY(UseJumpGuidedSynchronization)) {
-        for (auto partId = FirstComputePartitionId; partId <= LastComputePartitionId; ++partId) {
-            if (LLVM_UNLIKELY(PartitionJumpTargetId[partId] == (PartitionCount - 1))) {
-                const auto kernelId = FirstKernelInPartition[partId];
-                HasNestedSegmentNumber.set(kernelId);
-            }
-        }
-        HasNestedSegmentNumber.reset(LastKernel);
-    }
-
-
 }
 
 

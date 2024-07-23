@@ -323,7 +323,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
 
                 waitUntilCurrentSegmentNumberIsLessThan(b, firstComputeKernel, numOfActiveThreads);
                 for (auto i = FirstKernel; i < firstComputeKernel; ++i) {
-                    errs() << "IO: " << i << "\n";
                     setActiveKernel(b, i, true);
                     executeKernel(b);
                 }
@@ -332,7 +331,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             assert (firstComputeKernel < afterLastComputeKernel);
             if (LLVM_LIKELY(afterLastComputeKernel < PipelineOutput)) {
                 for (auto i = afterLastComputeKernel; i <= LastKernel; ++i) {
-                    errs() << "IO: " << i << "\n";
                     setActiveKernel(b, i, true);
                     executeKernel(b);
                 }
@@ -345,7 +343,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             const auto lastComputeKernel = FirstKernelInPartition[LastComputePartitionId + 1] - 1;
             assert (AllowIOProcessThread || lastComputeKernel == LastKernel);
             for (auto i = firstComputeKernel; i <= lastComputeKernel; ++i) {
-                errs() << "Process: " << i << "\n";
                 setActiveKernel(b, i, true);
                 executeKernel(b);
             }
@@ -690,19 +687,18 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             }
         }
 
+        BasicBlock * const exitBlock = b.GetInsertBlock();
+        incrementCurrentSegNo(b, exitBlock);
+
         if (mIsNestedPipeline) {
             b.CreateBr(mPipelineEnd);
         } else {
-            BasicBlock * const exitBlock = b.GetInsertBlock();
             if (LLVM_UNLIKELY(CheckAssertions)) {
                 mMadeProgressInLastSegment->addIncoming(madeProgress, exitBlock);
             }
             if (mUseDynamicMultithreading && generateProcessThread) {
                 nextCheckSegmentPhi->addIncoming(startOfNextPeriodPhi, exitBlock);
                 activeThreadsPhi->addIncoming(currentNumOfThreadsPhi, exitBlock);
-                if (AllowIOProcessThread) {
-                    incrementCurrentSegNo(b, exitBlock);
-                }
             } else if (mUseDynamicMultithreading) {
                 FixedArray<Value *, 2> indices2;
                 indices2[0] = sz_ZERO;
@@ -710,8 +706,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
                 Value * const statusFlagPtr = b.CreateGEP(threadStructTy, threadStruct, indices2);
                 Value * const cancelled = b.CreateLoad(sizeTy, statusFlagPtr);
                 done = b.CreateOr(done, b.CreateICmpEQ(cancelled, sz_TWO));
-            } else if (!UseJumpGuidedSynchronization) {
-                incrementCurrentSegNo(b, exitBlock);
             }
             assert (hasTermSignal);
             b.CreateUnlikelyCondBr(done, mPipelineEnd, mPipelineLoop);
@@ -752,7 +746,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         #endif
         mExpectedNumOfStridesMultiplier = nullptr;
         mThreadLocalStreamSetBaseAddress = nullptr;
-        mSegNo = mBaseSegNo;
 
         if (LLVM_LIKELY(hasTermSignal)) {
             writeTerminationSignalToLocalState(b, threadStructTy, threadStruct, terminated);
@@ -1275,7 +1268,7 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
         }
         BasicBlock * const exitBlock = b.GetInsertBlock();
         mMadeProgressInLastSegment->addIncoming(mPipelineProgress, exitBlock);
-        if (!UseJumpGuidedSynchronization) {
+        if (!UseJumpGuidedSynchronization || mIsIOProcessThread) {
             incrementCurrentSegNo(b, exitBlock);
         }
         b.CreateUnlikelyCondBr(done, mPipelineEnd, mPipelineLoop);
@@ -1297,7 +1290,6 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
 
     mExpectedNumOfStridesMultiplier = nullptr;
     mThreadLocalStreamSetBaseAddress = nullptr;
-    mSegNo = mBaseSegNo;
 
     updateExternalConsumedItemCounts(b);
     updateExternalProducedItemCounts(b);

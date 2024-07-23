@@ -268,6 +268,7 @@ enum BufferType : unsigned {
     , CrossThreaded = 32
     // ------------------
     , HasIllustratedStreamset = 512
+    , StartsNestedSynchronizationRegion = 1024
 };
 
 ENABLE_ENUM_FLAGS(BufferType)
@@ -339,6 +340,10 @@ struct BufferNode {
 
     bool isCrossThreaded() const {
         return (Type & BufferType::CrossThreaded) != 0;
+    }
+
+    bool startsNestedSynchronizationRegion() const {
+        return (Type & BufferType::StartsNestedSynchronizationRegion) != 0;
     }
 
     bool isThreadLocal() const {

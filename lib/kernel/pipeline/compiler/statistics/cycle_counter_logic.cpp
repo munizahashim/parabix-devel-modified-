@@ -93,7 +93,6 @@ void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsign
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::startCycleCounter(KernelBuilder & b, const CycleCounter type) {
     Value * const counter = b.CreateReadCycleCounter();
-    assert (EnableCycleCounter || (mUseDynamicMultithreading && (type == KERNEL_SYNCHRONIZATION || type == PARTITION_JUMP_SYNCHRONIZATION)));
     mCycleCounters[(unsigned)type] = counter;
 }
 
@@ -106,7 +105,6 @@ void PipelineCompiler::startCycleCounter(KernelBuilder & b, const std::initializ
         if (counter == nullptr) {
             counter = b.CreateReadCycleCounter();
         }
-        assert (EnableCycleCounter || (mUseDynamicMultithreading && (type == KERNEL_SYNCHRONIZATION || type == PARTITION_JUMP_SYNCHRONIZATION)));
         mCycleCounters[(unsigned)type] = counter;
     }
 }
@@ -121,8 +119,6 @@ void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kern
     Value * const duration = b.CreateSub(end, start);
 
     IntegerType * sizeTy = b.getSizeTy();
-
-    assert (EnableCycleCounter || (mUseDynamicMultithreading && (type == KERNEL_SYNCHRONIZATION || type == PARTITION_JUMP_SYNCHRONIZATION)));
 
     if (mUseDynamicMultithreading) {
         Value * const cur = b.CreateLoad(sizeTy, mAccumulatedSynchronizationTimePtr);

@@ -216,18 +216,20 @@ void PipelineCompiler::branchToInitialPartition(KernelBuilder & b) {
 
     b.SetInsertPoint(entry);
     mCurrentPartitionId = -1U;
-    setActiveKernel(b, FirstKernel, true);
-    assert (mKernelId == FirstKernel);
+    const auto firstKernel = FirstKernelInPartition[firstPartition];
+    setActiveKernel(b, firstKernel, true);
+    assert (mKernelId == firstKernel);
     if (isMultithreaded()) {
         #ifdef ENABLE_PAPI
         if (NumOfPAPIEvents) {
             startPAPIMeasurement(b, {PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION, PAPIKernelCounter::PAPI_KERNEL_TOTAL});
         }
         #endif
-        if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+        if (LLVM_UNLIKELY(EnableCycleCounter || (mUseDynamicMultithreading && !mIsIOProcessThread))) {
             if (EnableCycleCounter) {
                 startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
             } else {
+                assert (!mIsIOProcessThread);
                 startCycleCounter(b, CycleCounter::KERNEL_SYNCHRONIZATION);
             }
         }
@@ -287,7 +289,7 @@ void PipelineCompiler::checkForPartitionEntry(KernelBuilder & b) {
         assert (FirstKernelInPartition[partitionId] == mKernelId);
         mNextPartitionEntryPoint = getPartitionExitPoint(b);
         determinePartitionStrideRateScalingFactor();
-        mUsesNestedSynchronizationVariable = HasNestedSegmentNumber.test(mKernelId);
+        mUsesNestedSynchronizationVariable = mBufferGraph[mKernelId].startsNestedSynchronizationRegion();
         assert (!mUsesNestedSynchronizationVariable || !mIsIOProcessThread);
         if (LLVM_UNLIKELY(mUsesNestedSynchronizationVariable && (partitionId < LastComputePartitionId))) {
             mPartitionExitSegNoPhi = PHINode::Create(b.getSizeTy(), 2, "regionedSegNo", mNextPartitionEntryPoint);
@@ -298,7 +300,7 @@ void PipelineCompiler::checkForPartitionEntry(KernelBuilder & b) {
         debugPrint(b, "  *** entering partition %" PRIu64, b.getSize(mCurrentPartitionId));
         #endif
     } else {
-        assert (!HasNestedSegmentNumber.test(mKernelId));
+        assert (!mBufferGraph[mKernelId].startsNestedSynchronizationRegion());
     }
 }
 
@@ -753,7 +755,6 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
         releaseSynchronizationLock(b, mKernelId, type, mSegNo);
         assert (FirstKernelInPartition[FirstComputePartitionId] <= mKernelId && mKernelId < FirstKernelInPartition[LastComputePartitionId + 1]);
         if (nextKernel == FirstKernelInPartition[LastComputePartitionId + 1]) {
-            assert (!mUsesNestedSynchronizationVariable);
             nextKernel = PipelineOutput;
         }
         mSegNo = nextSegNo;

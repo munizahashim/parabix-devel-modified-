@@ -100,8 +100,6 @@ public:
 
         P.mapInternallyGeneratedStreamSets();
 
-        P.markNestedSegmentNumbers();
-
         // Finish the buffer graph
 
         P.determineInitialThreadLocalBufferLayout(b, rng);
@@ -209,8 +207,6 @@ private:
 
     void addFlowControlAnnotations();
 
-    void markNestedSegmentNumbers();
-
     // thread local analysis
 
     void determineInitialThreadLocalBufferLayout(KernelBuilder & b, pipeline_random_engine & rng);
@@ -314,8 +310,6 @@ public:
     std::vector<unsigned>           StrideRepetitionVector;
     std::vector<Rational>           PartitionRootStridesPerThreadLocalPage;
     std::vector<Rational>           NumOfPartialOverflowStridesPerPartitionRootStride;
-
-    BitVector                       HasNestedSegmentNumber;
 
     BufferGraph                     mBufferGraph;
 

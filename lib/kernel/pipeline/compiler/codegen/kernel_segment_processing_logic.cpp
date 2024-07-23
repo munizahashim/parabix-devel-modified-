@@ -212,6 +212,10 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, "** " + prefix + ".terminated at segment %" PRIu64, mSegNo);
     #endif
+    if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
+        assert (!mIsIOProcessThread);
+        acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+    }
     clearUnwrittenOutputData(b);
     splatMultiStepPartialSumValues(b);
     if (LLVM_UNLIKELY(mCurrentKernelIsStateFree)) {
@@ -239,10 +243,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     // We do not release the pre-invocation synchronization lock in the execution phase
     // when a kernel is terminating.
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-        assert (!mIsIOProcessThread);
-        assert (initSegNo == mSegNo);
         releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
-        acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
     }
     updatePhisAfterTermination(b);
     b.CreateBr(mKernelLoopExit);

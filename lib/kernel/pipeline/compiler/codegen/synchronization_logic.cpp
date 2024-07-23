@@ -38,6 +38,7 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::obtainCurrentSegmentNumber(KernelBuilder & b, BasicBlock * const entryBlock) {
     if (mIsNestedPipeline) {
+        assert (!mIsIOProcessThread);
         assert (mSegNo == mExternalSegNo && mSegNo);
     } else if ((mUseDynamicMultithreading || UseJumpGuidedSynchronization) && !mIsIOProcessThread) {
         Value * const segNoPtr = b.getScalarFieldPtr(NEXT_LOGICAL_SEGMENT_NUMBER).first;
@@ -50,16 +51,19 @@ void PipelineCompiler::obtainCurrentSegmentNumber(KernelBuilder & b, BasicBlock 
         segNo->addIncoming(initialSegNo, entryBlock);
         mSegNo = segNo;
     }
-    mBaseSegNo = mSegNo;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief incrementCurrentSegNo
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::incrementCurrentSegNo(KernelBuilder & b, BasicBlock * const exitBlock) {
-    assert (!mIsNestedPipeline && !mUseDynamicMultithreading);
-    Value * segNo = mBaseSegNo;  assert (mBaseSegNo);
-    assert (mBaseSegNo == mSegNo || UseJumpGuidedSynchronization);
+    if (mIsNestedPipeline) {
+        return;
+    }
+    if ((mUseDynamicMultithreading || UseJumpGuidedSynchronization) && !mIsIOProcessThread) {
+        return;
+    }
+    Value * segNo = mSegNo;  assert (mSegNo);
     Value * const nextSegNo = b.CreateAdd(segNo, mNumOfFixedThreads); assert (mNumOfFixedThreads);
     cast<PHINode>(segNo)->addIncoming(nextSegNo, exitBlock);
 }
@@ -252,7 +256,7 @@ Value * PipelineCompiler::obtainNextSegmentNumber(KernelBuilder & b) {
     b.CreateStore(b.CreateAdd(nextSegNo, b.getSize(1)), ptr);
     #ifdef PRINT_DEBUG_MESSAGES
     debugPrint(b, prefix + ": obtained %" PRIu64 "-th next segment number %" PRIu64,
-               b.getSize(kernelId), nextSegNo);
+               b.getSize(mKernelId), nextSegNo);
     #endif
     if (LLVM_UNLIKELY(CheckAssertions)) {
         SmallVector<char, 256> tmp;

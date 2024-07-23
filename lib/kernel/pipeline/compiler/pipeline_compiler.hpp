@@ -668,7 +668,6 @@ protected:
     const FamilyScalarGraph                     mFamilyScalarGraph;
     const IllustratedStreamSetMap               mIllustratedStreamSetBindings;
     const ZeroInputGraph                        mZeroInputGraph;
-    const BitVector                             HasNestedSegmentNumber;
 
     // pipeline state
     bool                                        mIsIOProcessThread = false;
@@ -680,7 +679,6 @@ protected:
     Value *                                     mSegNo = nullptr;
     Value *                                     mNumOfFixedThreads = nullptr;
 
-    Value *                                     mBaseSegNo = nullptr;
     PHINode *                                   mPartitionExitSegNoPhi = nullptr;
 
     PHINode *                                   mMadeProgressInLastSegment = nullptr;
@@ -990,8 +988,6 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 
 , mIllustratedStreamSetBindings(std::move(P.mIllustratedStreamSetBindings))
 , mZeroInputGraph(std::move(P.mZeroInputGraph))
-
-, HasNestedSegmentNumber(std::move(P.HasNestedSegmentNumber))
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mKernelIsClosed(FirstKernel, LastKernel, mAllocator)

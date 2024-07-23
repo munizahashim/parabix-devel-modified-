@@ -75,9 +75,10 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
         #endif
         addProducedItemCountDeltaProperties(b, i);
         addUnconsumedItemCountProperties(b, i);
-        if (LLVM_UNLIKELY(HasNestedSegmentNumber.test(i))) {
+        if (LLVM_UNLIKELY(mBufferGraph[i].startsNestedSynchronizationRegion())) {
             assert (isRoot);
             assert (UseJumpGuidedSynchronization);
+            assert (FirstComputePartitionId <= partitionId && partitionId <= LastComputePartitionId);
             mTarget->addInternalScalar(sizeTy,
                 NEXT_LOGICAL_SEGMENT_NUMBER + std::to_string(i), getCacheLineGroupId(i));
         }

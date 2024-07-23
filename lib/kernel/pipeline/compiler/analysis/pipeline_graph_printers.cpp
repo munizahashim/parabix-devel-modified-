@@ -432,6 +432,12 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
             out << "<Family>\\n";
         }
 
+        const auto & bn = mBufferGraph[kernel];
+
+        if (bn.Type & StartsNestedSynchronizationRegion) {
+            out << "<NewSegmentRegion>\\n";
+        }
+
         out << "\" shape=rect,style=rounded,peripheries=" << borders;
         #ifndef USE_SIMPLE_BUFFER_GRAPH
         if (kernelObj->requiresExplicitPartialFinalStride()) {
