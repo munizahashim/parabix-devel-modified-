@@ -37,6 +37,7 @@
 #include <toolchain/toolchain.h>
 #include <pablo/pablo_toolchain.h>
 #include <fcntl.h>
+#include <unistd.h>
 #include <iostream>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <unicode/data/PropertyAliases.h>
@@ -686,8 +687,8 @@ int main(int argc, char *argv[]) {
         llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
         fn(xlated, fd);
-        llvm::errs() << "xlated buffer length: " << xlated.length() << "\n";
         close(fd);
+        write(STDOUT_FILENO, xlated.data(), xlated.length());
     }
     return 0;
 }
