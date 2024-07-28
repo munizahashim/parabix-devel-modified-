@@ -87,6 +87,7 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
         mTarget->addThreadLocalScalar(b.getInt64Ty(), STATISTICS_CYCLE_COUNT_TOTAL,
                                       getCacheLineGroupId(PipelineOutput), ThreadLocalScalarAccumulationRule::Sum);
     }
+    addCycleCounterProperties(b, PipelineOutput, true);
     addRepeatingStreamSetBufferProperties(b);
     generateMetaDataForRepeatingStreamSets(b);
     #ifdef ENABLE_PAPI

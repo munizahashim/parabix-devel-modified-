@@ -225,13 +225,10 @@ void PipelineCompiler::branchToInitialPartition(KernelBuilder & b) {
             startPAPIMeasurement(b, {PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION, PAPIKernelCounter::PAPI_KERNEL_TOTAL});
         }
         #endif
-        if (LLVM_UNLIKELY(EnableCycleCounter || (mUseDynamicMultithreading && !mIsIOProcessThread))) {
-            if (EnableCycleCounter) {
-                startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
-            } else {
-                assert (!mIsIOProcessThread);
-                startCycleCounter(b, CycleCounter::KERNEL_SYNCHRONIZATION);
-            }
+        if (LLVM_UNLIKELY(EnableCycleCounter)) {
+            startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
+        } else if (LLVM_UNLIKELY(mUseDynamicMultithreading && !mIsIOProcessThread)) {
+            startCycleCounter(b, CycleCounter::KERNEL_SYNCHRONIZATION);
         }
         if (LLVM_LIKELY(!mIsIOProcessThread)) {
             const auto type = isDataParallel(mKernelId) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
@@ -496,46 +493,100 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(KernelBuilder & b, co
 
     assert (!mIsIOProcessThread);
 
-    #ifdef ENABLE_PAPI
-    if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
-        startPAPIMeasurement(b, PAPIKernelCounter::PAPI_PARTITION_JUMP_SYNCHRONIZATION);
-    }
-    #endif
-    if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
-        startCycleCounter(b, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
-    }
-    assert (firstKernelInTargetPartition <= PipelineOutput);
+    // TODO: fix me
+
 
     const auto afterLastComputeKernel = FirstKernelInPartition[LastComputePartitionId + 1];
     if (firstKernelInTargetPartition >= afterLastComputeKernel) {
         const auto lastComputeKernel = afterLastComputeKernel - 1U;
         const auto type = isDataParallel(lastComputeKernel) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
+
+        assert (firstKernelInTargetPartition <= PipelineOutput);
+
+        if (LLVM_LIKELY(mKernelId != lastComputeKernel)) {
+            #ifdef ENABLE_PAPI
+            if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+                accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
+            }
+            #endif
+            if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+                updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
+            }
+        }
+
         if (LLVM_LIKELY(mKernelId != lastComputeKernel || type == SYNC_LOCK_POST_INVOCATION)) {
             assert (mKernelId <= lastComputeKernel);
+
+            #ifdef ENABLE_PAPI
+            if (NumOfPAPIEvents) {
+                startPAPIMeasurement(b, PAPIKernelCounter::PAPI_PARTITION_JUMP_SYNCHRONIZATION);
+            }
+            #endif
+            if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+                startCycleCounter(b, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
+            }
             acquireSynchronizationLock(b, lastComputeKernel, type, segNo);
+            if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+                updateCycleCounter(b, firstKernelInTargetPartition, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
+            }
+            #ifdef ENABLE_PAPI
+            if (NumOfPAPIEvents) {
+                accumPAPIMeasurementWithoutReset(b, firstKernelInTargetPartition, PAPIKernelCounter::PAPI_PARTITION_JUMP_SYNCHRONIZATION);
+            }
+            #endif
         }
+
+        if (LLVM_UNLIKELY(mKernelId == lastComputeKernel)) {
+            assert (type == SYNC_LOCK_POST_INVOCATION);
+            #ifdef ENABLE_PAPI
+            if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+                accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
+            }
+            #endif
+            if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+                updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
+            }
+        }
+
     } else {
+
+        assert (firstKernelInTargetPartition > mKernelId);
+        assert (firstKernelInTargetPartition < PipelineOutput);
+
+        #ifdef ENABLE_PAPI
+        if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+            accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
+            startPAPIMeasurement(b, PAPIKernelCounter::PAPI_PARTITION_JUMP_SYNCHRONIZATION);
+        }
+        #endif
+        if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+            updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
+            startCycleCounter(b, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
+        }
+
         const auto type = isDataParallel(firstKernelInTargetPartition) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         acquireSynchronizationLock(b, firstKernelInTargetPartition, type, segNo);
-    }
 
-    if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
-        updateCycleCounter(b, mKernelId, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
-        if (EnableCycleCounter) {
-            const auto partId = KernelPartitionId[firstKernelInTargetPartition];
-            if (partId < (PartitionCount - 1)) {
+        if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+            if (EnableCycleCounter) {
+                const auto partId = KernelPartitionId[firstKernelInTargetPartition];
+                assert (partId < (PartitionCount - 1));
                 BasicBlock * const exitBlock = b.GetInsertBlock();
                 Value * const startTime = mCycleCounters[CycleCounter::PARTITION_JUMP_SYNCHRONIZATION];
                 mPartitionStartTimePhi[partId]->addIncoming(startTime, exitBlock);
             }
+            // TODO: this fails because it could be summing the pipeline output but there isn't a slot for it
+            updateCycleCounter(b, firstKernelInTargetPartition, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
         }
+
+        #ifdef ENABLE_PAPI
+        if (NumOfPAPIEvents > 0) {
+            accumPAPIMeasurementWithoutReset(b, firstKernelInTargetPartition, PAPIKernelCounter::PAPI_PARTITION_JUMP_SYNCHRONIZATION);
+        }
+        #endif
     }
 
-    #ifdef ENABLE_PAPI
-    if (NumOfPAPIEvents > 0) {
-        accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_PARTITION_JUMP_SYNCHRONIZATION);
-    }
-    #endif
+
 
 }
 
@@ -591,8 +642,6 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(KernelBuilder & b) 
 
     if (LLVM_LIKELY((nextPartitionId != jumpTargetId) && mIsPartitionRoot) && (!mIsIOProcessThread)) {
 
-
-
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, "** " + makeKernelName(mKernelId) + ".initiallyTerminated (seqexit) = %" PRIu64, mSegNo);
         #endif
@@ -610,18 +659,14 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(KernelBuilder & b) 
             nextSegNo = obtainNextSegmentNumber(b);
         }
 
+        if (targetKernelId == LastKernel) {
+            b.CallPrintInt("term", mSegNo);
+        }
+
         acquirePartitionSynchronizationLock(b, targetKernelId, nextSegNo);
         phiOutPartitionStateAndReleaseSynchronizationLocks(b, targetKernelId, nextPartitionId, true);
         zeroAnySkippedTransitoryConsumedItemCountsUntil(b, targetKernelId);
 
-        if (LLVM_UNLIKELY(EnableCycleCounter)) {
-            updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
-        }
-        #ifdef ENABLE_PAPI
-        if (NumOfPAPIEvents) {
-            accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
-        }
-        #endif
 
         mKernelInitiallyTerminatedExit = b.GetInsertBlock();
         if (LLVM_UNLIKELY(mPartitionExitSegNoPhi)) {
@@ -708,17 +753,18 @@ void PipelineCompiler::writeJumpToNextPartition(KernelBuilder & b) {
         } else {
             releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_FULL, mSegNo);
         }
+
+        #ifdef ENABLE_PAPI
+        if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+            accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
+        }
+        #endif
+        if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+            updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
+        }
+
         phiOutPartitionStatusFlags(b, jumpPartitionId, false);
     }
-
-    if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
-    }
-    #ifdef ENABLE_PAPI
-    if (NumOfPAPIEvents) {
-        accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
-    }
-    #endif
 
     b.CreateBr(mPartitionEntryPoint[jumpPartitionId]);
 }
@@ -745,7 +791,7 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
             assert (!isDataParallel(mKernelId));
             releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_FULL, mSegNo);
         }
-    } else if (!mIsIOProcessThread) {
+    } else {
         Value * nextSegNo = mSegNo;
         if (LLVM_UNLIKELY(mUsesNestedSynchronizationVariable)) {
             assert (mIsPartitionRoot);
@@ -759,6 +805,18 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
         }
         mSegNo = nextSegNo;
     }
+
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
+        if (mKernelId == LastKernel) {
+            b.CallPrintInt("ex", mSegNo);
+        }
+    }
+    #ifdef ENABLE_PAPI
+    if (NumOfPAPIEvents) {
+        accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
+    }
+    #endif
 
     if (LLVM_LIKELY(nextKernel < PipelineOutput)) {
         #ifdef ENABLE_PAPI

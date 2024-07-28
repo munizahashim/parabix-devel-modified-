@@ -301,7 +301,9 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         debugInit(b);
         #endif
         #ifdef ENABLE_PAPI
-        setupPAPIOnCurrentThread(b);
+        if (NumOfPAPIEvents) {
+            setupPAPIOnCurrentThread(b);
+        }
         #endif
         Value * segmentStartTime = nullptr;
         if (mUseDynamicMultithreading) {
@@ -735,15 +737,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             debugPrint(b, "================================================= END %" PRIx64, getHandle());
         }
         #endif
-        if (LLVM_UNLIKELY(EnableCycleCounter)) {
-            updateTotalCycleCounterTime(b);
-        }
-        #ifdef ENABLE_PAPI
-        if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
-            recordTotalPAPIMeasurement(b);
-            stopPAPIOnCurrentThread(b);
-        }
-        #endif
+
         mExpectedNumOfStridesMultiplier = nullptr;
         mThreadLocalStreamSetBaseAddress = nullptr;
 
@@ -758,6 +752,16 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         } else {
             retVal = ConstantPointerNull::getNullValue(voidPtrTy);
         }
+
+        if (LLVM_UNLIKELY(EnableCycleCounter)) {
+            updateTotalCycleCounterTime(b);
+        }
+        #ifdef ENABLE_PAPI
+        if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+            recordTotalPAPIMeasurement(b);
+            stopPAPIOnCurrentThread(b);
+        }
+        #endif
 
         if (AllowIOProcessThread) {
             assert (!mIsNestedPipeline);
@@ -1294,71 +1298,10 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
     updateExternalConsumedItemCounts(b);
     updateExternalProducedItemCounts(b);
 
-    #ifdef ENABLE_PAPI
-    if (NumOfPAPIEvents) {
-        recordTotalPAPIMeasurement(b);
-    }
-    #endif
-    if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        updateTotalCycleCounterTime(b);
-    }
-
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         // TODO: this isn't fully correct when this is a nested pipeline
         concludeStridesPerSegmentRecording(b);
     }
-}
-
-#if 0
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief generateSingleThreadKernelMethod
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
-    assert (!mUseDynamicMultithreading);
-    if (LLVM_LIKELY(mIsNestedPipeline)) {
-        mSegNo = mExternalSegNo; assert (mExternalSegNo);
-    } else {
-        mSegNo = b.getSize(0);
-    }
-    mNumOfFixedThreads = b.getSize(1);
-
-    #ifdef ENABLE_PAPI
-    if (NumOfPAPIEvents) {
-        if (LLVM_UNLIKELY(!mIsNestedPipeline)) {
-            initPAPIOnCurrentThread(b);
-        }
-        setupPAPIOnCurrentThread(b);
-    }
-    #endif
-    if (LLVM_UNLIKELY(EnableCycleCounter)) {
-        startCycleCounter(b, CycleCounter::FULL_PIPELINE_TIME);
-    }
-    #ifdef ENABLE_PAPI
-    if (NumOfPAPIEvents) {
-        startPAPIMeasurement(b, PAPIKernelCounter::PAPI_FULL_PIPELINE_TIME);
-    }
-    #endif
-    start(b);
-
-    BasicBlock * const mPipelineLoop = b.CreateBasicBlock("PipelineLoop");
-    BasicBlock * const mPipelineEnd = b.CreateBasicBlock("PipelineEnd");
-    BasicBlock * const entryBlock = b.GetInsertBlock();
-    b.CreateBr(mPipelineLoop);
-
-    b.SetInsertPoint(mPipelineLoop);
-    mMadeProgressInLastSegment = b.CreatePHI(b.getInt1Ty(), 2, "madeProgressInLastSegment");
-    mMadeProgressInLastSegment->addIncoming(b.getTrue(), entryBlock);
-    obtainCurrentSegmentNumber(b, entryBlock);
-
-    branchToInitialPartition(b);
-    for (auto i = FirstKernel; i <= LastKernel; ++i) {
-        setActiveKernel(b, i, true);
-        executeKernel(b);
-    }
-    end(b);
-
-    updateExternalConsumedItemCounts(b);
-    updateExternalProducedItemCounts(b);
 
     #ifdef ENABLE_PAPI
     if (NumOfPAPIEvents) {
@@ -1368,88 +1311,7 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         updateTotalCycleCounterTime(b);
     }
-
-    if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
-        // TODO: this isn't fully correct when this is a nested pipeline
-        concludeStridesPerSegmentRecording(b);
-    }
 }
-
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief end
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::end(KernelBuilder & b) {
-
-    // A pipeline will end for one or two reasons:
-
-    // 1) Process has *halted* due to insufficient external I/O.
-
-    // 2) All pipeline sinks have terminated (i.e., any kernel that writes
-    // to a pipeline output, is marked as having a side-effect, or produces
-    // an input for some call in which no dependent kernels is a pipeline
-    // sink).
-
-    // TODO: if we determine that all of the pipeline I/O is consumed in one invocation of the
-    // pipeline, we can avoid testing at the end whether its terminated.
-
-    if (UseJumpGuidedSynchronization) {
-        b.CreateBr(mPartitionEntryPoint[PartitionCount]);
-
-        b.SetInsertPoint(mPartitionEntryPoint[PartitionCount]);
-    }
-    Value * terminated = nullptr;
-    if (mIsNestedPipeline || mUseDynamicMultithreading) {
-        if (PipelineHasTerminationSignal) {
-            terminated = hasPipelineTerminated(b);
-        }
-        b.CreateBr(mPipelineEnd);
-    } else {
-        terminated = hasPipelineTerminated(b);
-        Value * const done = b.CreateIsNotNull(terminated);
-        if (LLVM_UNLIKELY(CheckAssertions && !AllowIOProcessThread)) {
-            Value * const progressedOrFinished = b.CreateOr(mPipelineProgress, done);
-            Value * const live = b.CreateOr(mMadeProgressInLastSegment, progressedOrFinished);
-            b.CreateAssert(live, "Dead lock detected: pipeline could not progress after two iterations");
-        }
-        BasicBlock * const exitBlock = b.GetInsertBlock();
-        mMadeProgressInLastSegment->addIncoming(mPipelineProgress, exitBlock);
-        incrementCurrentSegNo(b, exitBlock);
-        b.CreateUnlikelyCondBr(done, mPipelineEnd, mPipelineLoop);
-    }
-    b.SetInsertPoint(mPipelineEnd);
-
-    if (PipelineHasTerminationSignal) {
-        Value * const ptr = getTerminationSignalPtr();
-        b.CreateStore(terminated, ptr);
-    }
-
-    #ifdef PRINT_DEBUG_MESSAGES
-    if (mIsNestedPipeline) {
-        debugPrint(b, "------------------------------------------------- END %" PRIx64, getHandle());
-    } else {
-        debugPrint(b, "================================================= END %" PRIx64, getHandle());
-    }
-    #endif
-
-    mExpectedNumOfStridesMultiplier = nullptr;
-    mThreadLocalStreamSetBaseAddress = nullptr;
-    mSegNo = mBaseSegNo;
-
-    updateExternalConsumedItemCounts(b);
-    updateExternalProducedItemCounts(b);
-
-    #ifdef ENABLE_PAPI
-    recordTotalPAPIMeasurement(b);
-    #endif
-    updateTotalCycleCounterTime(b);
-
-    if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
-        // TODO: this isn't fully correct when this is a nested pipeline
-        concludeStridesPerSegmentRecording(b);
-    }
-}
-#endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readTerminationSignalFromLocalState

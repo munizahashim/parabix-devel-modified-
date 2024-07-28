@@ -155,7 +155,7 @@ void PipelineCompiler::acquireSynchronizationLockWithTimingInstrumentation(Kerne
     }
     #ifdef ENABLE_PAPI
     if (NumOfPAPIEvents) {
-        accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
+        accumPAPIMeasurementWithoutReset(b, kernelId, PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION);
     }
     #endif
 }

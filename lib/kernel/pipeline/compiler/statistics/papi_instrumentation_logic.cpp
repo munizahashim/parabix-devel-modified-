@@ -114,16 +114,15 @@ void PipelineCompiler::readPAPIMeasurement(KernelBuilder & b, Value * const meas
  * @brief initPAPIOnCurrentThread
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initPAPIOnCurrentThread(KernelBuilder & b) {
-    if (LLVM_UNLIKELY(NumOfPAPIEvents)) {
-        Module * m = b.getModule();
-        Value * const eventSetList = b.getScalarField(STATISTICS_PAPI_EVENT_SET_LIST);
-        Function * fStartOnThread = m->getFunction("__PAPI_start_on_thread");
-        FixedArray<Value *, 2> args2;
-        args2[0] = eventSetList;
-        args2[1] = b.getSize(NumOfPAPIEvents);
-        PAPIEventSetId = b.CreateCall(fStartOnThread, args2);
-        b.setScalarField(STATISTICS_PAPI_EVENT_SET, PAPIEventSetId);
-    }
+    assert (NumOfPAPIEvents > 0);
+    Module * m = b.getModule();
+    Value * const eventSetList = b.getScalarField(STATISTICS_PAPI_EVENT_SET_LIST);
+    Function * fStartOnThread = m->getFunction("__PAPI_start_on_thread");
+    FixedArray<Value *, 2> args2;
+    args2[0] = eventSetList;
+    args2[1] = b.getSize(NumOfPAPIEvents);
+    PAPIEventSetId = b.CreateCall(fStartOnThread, args2);
+    b.setScalarField(STATISTICS_PAPI_EVENT_SET, PAPIEventSetId);
 }
 
 
@@ -131,19 +130,18 @@ void PipelineCompiler::initPAPIOnCurrentThread(KernelBuilder & b) {
  * @brief setupPAPIOnCurrentThread
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::setupPAPIOnCurrentThread(KernelBuilder & b) {
-    if (LLVM_UNLIKELY(NumOfPAPIEvents)) {
-        // PAPI_start starts counting all of the hardware events contained in the previously defined EventSet.
-        // All counters are implicitly set to zero before counting.
-        ArrayType * const papiCounterArrayTy = getPAPIEventCounterType(b);
-        Constant * nil = Constant::getNullValue(papiCounterArrayTy);
-        for (unsigned i = 0; i < NUM_OF_PAPI_COUNTERS; ++i) {
-            Value * ptr = b.CreateAllocaAtEntryPoint(papiCounterArrayTy);
-            b.CreateStore(nil, ptr);
-            PAPIEventCounterArray[i] = ptr;
-        }
-        PAPITempMeasurementArray = b.CreateAllocaAtEntryPoint(papiCounterArrayTy);
-        PAPIEventSetId = b.getScalarField(STATISTICS_PAPI_EVENT_SET);
+    assert (NumOfPAPIEvents > 0);
+    // PAPI_start starts counting all of the hardware events contained in the previously defined EventSet.
+    // All counters are implicitly set to zero before counting.
+    ArrayType * const papiCounterArrayTy = getPAPIEventCounterType(b);
+    Constant * nil = Constant::getNullValue(papiCounterArrayTy);
+    for (unsigned i = 0; i < NUM_OF_PAPI_COUNTERS; ++i) {
+        Value * ptr = b.CreateAllocaAtEntryPoint(papiCounterArrayTy);
+        b.CreateStore(nil, ptr);
+        PAPIEventCounterArray[i] = ptr;
     }
+    PAPITempMeasurementArray = b.CreateAllocaAtEntryPoint(papiCounterArrayTy);
+    PAPIEventSetId = b.getScalarField(STATISTICS_PAPI_EVENT_SET);
 }
 
 
