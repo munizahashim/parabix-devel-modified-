@@ -509,7 +509,7 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(KernelBuilder & b, co
                 accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
             }
             #endif
-            if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+            if (LLVM_UNLIKELY(EnableCycleCounter)) {
                 updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
             }
         }
@@ -537,13 +537,12 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(KernelBuilder & b, co
         }
 
         if (LLVM_UNLIKELY(mKernelId == lastComputeKernel)) {
-            assert (type == SYNC_LOCK_POST_INVOCATION);
             #ifdef ENABLE_PAPI
             if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
                 accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
             }
             #endif
-            if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+            if (LLVM_UNLIKELY(EnableCycleCounter)) {
                 updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
             }
         }
@@ -560,7 +559,9 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(KernelBuilder & b, co
         }
         #endif
         if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
-            updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
+            if (EnableCycleCounter) {
+                updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
+            }
             startCycleCounter(b, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
         }
 
@@ -759,7 +760,7 @@ void PipelineCompiler::writeJumpToNextPartition(KernelBuilder & b) {
             accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_TOTAL);
         }
         #endif
-        if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
+        if (LLVM_UNLIKELY(EnableCycleCounter)) {
             updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
         }
 

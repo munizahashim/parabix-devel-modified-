@@ -93,10 +93,8 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
     #ifdef ENABLE_PAPI
     addPAPIEventCounterPipelineProperties(b);
     #endif
-    if (mUseDynamicMultithreading) {
-        if (LLVM_UNLIKELY(TraceDynamicMultithreading)) {
-            addDynamicThreadingReportProperties(b, getCacheLineGroupId(PipelineOutput + 1));
-        }
+    if (LLVM_UNLIKELY(TraceDynamicMultithreading && mUseDynamicMultithreading)) {
+        addDynamicThreadingReportProperties(b, getCacheLineGroupId(PipelineOutput + 1));
     }
     addZeroInputStructProperties(b);
 

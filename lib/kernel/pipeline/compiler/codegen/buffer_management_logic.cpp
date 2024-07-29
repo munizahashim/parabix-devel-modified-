@@ -18,9 +18,10 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
         const auto prefix = makeBufferName(kernelId, rd.Port);
         StreamSetBuffer * const buffer = bn.Buffer;
 
+        bool requiresLGVBA = rd.isManaged();
+
         // external buffers already have a buffer handle
         if (LLVM_LIKELY(bn.isInternal() || bn.isConstant())) {
-
             Type * const handleType = buffer->getHandleType(b);
             // We automatically assign the buffer memory according to the buffer start position
             if (LLVM_UNLIKELY(bn.isConstant())) {
@@ -37,8 +38,12 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
                 mTarget->addInternalScalar(handleType, prefix, groupId);
             } else {
                 mTarget->addNonPersistentScalar(handleType, prefix);
-                mTarget->addInternalScalar(buffer->getPointerType(), prefix + LAST_GOOD_VIRTUAL_BASE_ADDRESS, groupId);
+                requiresLGVBA = true;
             }
+        }
+
+        if (requiresLGVBA) {
+            mTarget->addInternalScalar(buffer->getPointerType(), prefix + LAST_GOOD_VIRTUAL_BASE_ADDRESS, groupId);
         }
 
         // Although we'll end up wasting memory, we can avoid memleaks and the issue of multiple threads

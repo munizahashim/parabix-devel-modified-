@@ -113,14 +113,14 @@ void PipelineCompiler::startCycleCounter(KernelBuilder & b, const std::initializ
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kernelId, const CycleCounter type) {
     assert (FirstKernel <= kernelId && kernelId <= PipelineOutput);
+    assert (EnableCycleCounter || (type == KERNEL_SYNCHRONIZATION || type == PARTITION_JUMP_SYNCHRONIZATION));
     Value * const end = b.CreateReadCycleCounter();
     Value * const start = mCycleCounters[(unsigned)type]; assert (start);
     Value * const duration = b.CreateSub(end, start);
 
     IntegerType * sizeTy = b.getSizeTy();
 
-    if (mUseDynamicMultithreading) {
-        // TODO: fixme
+    if (LLVM_UNLIKELY(mUseDynamicMultithreading && (type == KERNEL_SYNCHRONIZATION || type == PARTITION_JUMP_SYNCHRONIZATION))) {
         Value * const cur = b.CreateLoad(sizeTy, mAccumulatedSynchronizationTimePtr);
         Value * const accum = b.CreateAdd(cur, duration);
         b.CreateStore(accum, mAccumulatedSynchronizationTimePtr);
