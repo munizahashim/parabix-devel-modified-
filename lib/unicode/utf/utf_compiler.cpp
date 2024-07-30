@@ -735,7 +735,8 @@ void UTF_Lookahead_Compiler::extendLengthHierarchy(CC_List & ccs, Range r, Pablo
     codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(actual_range.hi, 1);
     Range testRange{test_lo, test_hi};
     if (lo_len == hi_len) {
-        subrangePartitioning(subrangeSets, testRange, test, nested);
+        //subrangePartitioning(subrangeSets, testRange, test, nested);
+        compileUnguardedSubrange(subrangeSets, testRange, test, testRange, nested);
     } else {
         codepoint_t len_max = mEncoder.max_codepoint_of_length(lo_len);
         Range lenRange{test_lo, len_max};
@@ -771,7 +772,7 @@ void UTF_Lookahead_Compiler::compileSubrange(CC_List & ccs, Range & enclosingRan
     //
     // Determine whether compilation of the CCs is below our cost model threshhold.
     if (costModel(subrangeCCs) < IfEmbeddingCostThreshhold) {
-        compileUnguardedSubrange(subrangeCCs, enclosingRange, enclosingTest, pb);
+        compileUnguardedSubrange(subrangeCCs, enclosingRange, enclosingTest, enclosingRange, pb);
         return;
     }
     // The subrange logic cost exceeds our cost model threshhold.
@@ -794,7 +795,7 @@ void UTF_Lookahead_Compiler::compileSubrange(CC_List & ccs, Range & enclosingRan
     subrangePartitioning(subrangeCCs, testRange, subrange_test, nested);
 }
 
-void UTF_Lookahead_Compiler::compileUnguardedSubrange(CC_List & ccs, Range & subrange, PabloAST * subrangeTest, PabloBuilder & pb) {
+void UTF_Lookahead_Compiler::compileUnguardedSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb) {
     llvm::errs() << "compileUnguarded subrange("<< subrange.lo << "," << subrange.hi << ")\n";
     CC_List subrangeCCs(ccs.size());
     extract_CCs_by_range(subrange, ccs, subrangeCCs);
@@ -802,15 +803,17 @@ void UTF_Lookahead_Compiler::compileUnguardedSubrange(CC_List & ccs, Range & sub
     //  generation is required.
     Range actual_subrange = CC_Set_Range(subrangeCCs);
     if (actual_subrange.is_empty()) return;
-    unsigned code_unit_to_test = mEncoder.common_code_units(subrange.lo, subrange.hi) + 1;
+    unsigned code_unit_to_test = mEncoder.common_code_units(enclosingRange.lo, enclosingRange.hi) + 1;
+    llvm::errs() << "  enclosingRange("<< enclosingRange.lo << "," << enclosingRange.hi  << ")\n" ;
     llvm::errs() << "  actual("<< actual_subrange.lo << "," << actual_subrange.hi  << ")\n" ;
     if (code_unit_to_test == mEncoder.encoded_length(actual_subrange.lo)) {
         // We are on the final code unit; compile each nonempty CC and
         // combine into the top-level Var for this CC.
         for (unsigned i = 0; i < ccs.size(); i++) {
             if (!subrangeCCs[i]->empty()) {
-                PabloAST * final_unit = mCodeUnitCompilers[code_unit_to_test - 1]->compileCC(subrangeCCs[i], pb);
-                PabloAST * test = pb.createAnd(subrangeTest, final_unit);
+                re::CC * unitCC = codeUnitCC(subrangeCCs[i], code_unit_to_test);
+                PabloAST * final_unit = mCodeUnitCompilers[code_unit_to_test - 1]->compileCC(unitCC, pb);
+                PabloAST * test = pb.createAnd(enclosingTest, final_unit);
                 pb.createAssign(mTargets[i], pb.createOr(mTargets[i], test));
             }
         }
@@ -819,19 +822,32 @@ void UTF_Lookahead_Compiler::compileUnguardedSubrange(CC_List & ccs, Range & sub
         // on each possible code unit at this level.
         unsigned lo_unit = mEncoder.nthCodeUnit(subrange.lo, code_unit_to_test);
         unsigned hi_unit = mEncoder.nthCodeUnit(subrange.hi, code_unit_to_test);
-        unsigned unit = lo_unit;
         codepoint_t min_cp = mEncoder.minCodePointWithCommonCodeUnits(subrange.lo, code_unit_to_test);
-        while (unit <= hi_unit) {
-            codepoint_t max_cp = mEncoder.maxCodePointWithCommonCodeUnits(min_cp, code_unit_to_test);
-            re::CC * unitCC = re::makeByte(unit, unit);
+        codepoint_t max_cp = mEncoder.maxCodePointWithCommonCodeUnits(subrange.hi, code_unit_to_test);
+        if (lo_unit != hi_unit) {
+            codepoint_t mid_cp = mEncoder.maxCodePointWithCommonCodeUnits((subrange.lo + subrange.hi)/2, code_unit_to_test);
+            Range lo_subrange{min_cp, mid_cp};
+            Range hi_subrange{mid_cp+1, max_cp};
+            compileUnguardedSubrange(subrangeCCs, enclosingRange, enclosingTest, lo_subrange, pb);
+            compileUnguardedSubrange(subrangeCCs, enclosingRange, enclosingTest, hi_subrange, pb);
+        } else {
+            re::CC * unitCC = re::makeByte(lo_unit, lo_unit);
             PabloAST * unit_test = mCodeUnitCompilers[code_unit_to_test - 1] -> compileCC(unitCC, pb);
-            PabloAST * subsubrangeTest = pb.createAnd(subrangeTest, unit_test);
-            Range subsubrange{min_cp, max_cp};
-            compileUnguardedSubrange(subrangeCCs, subsubrange, subsubrangeTest, pb);
-            min_cp = max_cp + 1;
-            unit++;
+            PabloAST * subrangeTest = pb.createAnd(enclosingTest, unit_test);
+            Range testedSubrange{min_cp, max_cp};
+            compileUnguardedSubrange(subrangeCCs, testedSubrange, subrangeTest, actual_subrange, pb);
         }
     }
+}
+
+re::CC * UTF_Lookahead_Compiler::codeUnitCC(re::CC * cc, unsigned codeunit) {
+    re::CC * unitCC = re::makeCC(&Byte);
+    for (auto i : *cc) {
+        unsigned lo_unit = mEncoder.nthCodeUnit(lo_codepoint(i), codeunit);
+        unsigned hi_unit = mEncoder.nthCodeUnit(hi_codepoint(i), codeunit);
+        unitCC = makeCC(unitCC, makeByte(lo_unit, hi_unit));
+    }
+    return unitCC;
 }
 
 unsigned UTF_Lookahead_Compiler::costModel(CC_List ccs) {
