@@ -105,3 +105,12 @@ codepoint_t UTF_Encoder::maxCodePointWithCommonCodeUnits(codepoint_t cp, unsigne
         else return cp;
     } else return 0x10FFFF;
 }
+
+unsigned UTF_Encoder::common_code_units(codepoint_t cp1, codepoint_t cp2) {
+    if (cp1 == cp2) return encoded_length(cp1);
+    unsigned common = 0;
+    while (nthCodeUnit(cp1, common+1) == nthCodeUnit(cp2, common+1)) {
+        common++;
+    }
+    return common;
+}

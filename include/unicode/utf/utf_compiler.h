@@ -90,5 +90,44 @@ private:
     ValueMap                mTargetValue;
 };
 
+using Target_List = std::vector<pablo::Var *>;
+using CC_List = std::vector<re::CC *>;
+using PabloAST = pablo::PabloAST;
+using PabloBuilder = pablo::PabloBuilder;
+using Basis_Set = std::vector<PabloAST *>;
+
+
+struct Range {
+    codepoint_t lo;
+    codepoint_t hi;
+    bool is_empty() {return lo > hi;}
+};
+
+class UTF_Lookahead_Compiler {
+public:
+    UTF_Lookahead_Compiler(pablo::Var * Var, PabloBuilder & pb);
+    void compile(Target_List targets, CC_List ccs);
+private:
+    pablo::Var *            mBasisVar;
+    PabloBuilder &          mPB;
+    UTF_Encoder             mEncoder;
+    Target_List             mTargets;
+    //  Depending on the actual CC_List being compiled, up to
+    //  4 scope positions will be defined, with corresponding basis
+    //  sets and code unit compilers.
+    unsigned                mScopeLength;
+    Basis_Set               mScopeBasis[4];
+    std::unique_ptr<cc::CC_Compiler> mCodeUnitCompilers[4];
+    void createLengthHierarchy(CC_List & ccs);
+    void extendLengthHierarchy(CC_List & ccs, Range r, PabloBuilder & pb);
+    void subrangePartitioning(CC_List & ccs, Range & range, PabloAST * rangeTest, PabloBuilder & pb);
+    void compileSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb);
+    void compileUnguardedSubrange(CC_List & ccs, Range & subrange, PabloAST * subrangeTest, PabloBuilder & pb);
+    unsigned costModel(CC_List ccs);
+};
+
+
+
+
 }
 

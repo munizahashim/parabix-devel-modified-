@@ -31,7 +31,7 @@ UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(KernelBuilder & b, re
 UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * Source, StreamSet * property, std::string && propValueName)
 : PabloKernel(b,
 "UCD:" + getStringHash(propValueName),
-{Binding{"source", Source}},
+{Binding{"source", Source, FixedRate(1), LookAhead(3)}},
 {Binding{"property_stream", property}})
 , mPropNameValue(propValueName)
 , mName(property_value_name) {
@@ -44,18 +44,20 @@ llvm::StringRef UnicodePropertyKernelBuilder::getSignature() const {
 
 void UnicodePropertyKernelBuilder::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
+    UTF::UTF_Lookahead_Compiler unicodeCompiler(getInput(0), pb);
     pablo::Var * propertyVar = pb.createVar(mName->getFullName(), pb.createZeroes());
     re::RE * property_defn = mName->getDefinition();
     if (re::CC * propertyCC = llvm::dyn_cast<re::CC>(property_defn)) {
-        unicodeCompiler.addTarget(propertyVar, propertyCC);
+        //unicodeCompiler.addTarget(propertyVar, propertyCC);
+        unicodeCompiler.compile({propertyVar}, {propertyCC});
     } else if (re::PropertyExpression * pe = llvm::dyn_cast<re::PropertyExpression>(property_defn)) {
         if (pe->getKind() == re::PropertyExpression::Kind::Codepoint) {
             re::CC * propertyCC = llvm::cast<re::CC>(pe->getResolvedRE());
-            unicodeCompiler.addTarget(propertyVar, propertyCC);
+            //unicodeCompiler.addTarget(propertyVar, propertyCC);
+            unicodeCompiler.compile({propertyVar}, {propertyCC});
         }
     }
-    unicodeCompiler.compile();
+    //unicodeCompiler.compile();
     Var * const property_stream = getOutputStreamVar("property_stream");
     pb.createAssign(pb.createExtract(property_stream, pb.getInteger(0)), propertyVar);
 }

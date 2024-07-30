@@ -17,6 +17,7 @@
 #include <pablo/pabloverifier.hpp>
 #include <toolchain/toolchain.h>
 #include <llvm/Support/CommandLine.h>
+#include <boost/intrusive/detail/math.hpp>
 
 using namespace cc;
 using namespace re;
@@ -31,6 +32,7 @@ static cl::opt<unsigned> BinaryLogicCostPerByte("BinaryLogicCostPerByte", cl::in
 static cl::opt<unsigned> TernaryLogicCostPerByte("TernaryLogicCostPerByte", cl::init(1), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> ShiftCostFactor("ShiftCostFactor", cl::init(10), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", cl::init(25), cl::cat(codegen::CodeGenOptions));
+static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(4), cl::cat(codegen::CodeGenOptions));
 
 std::string kernelAnnotation() {
     if (UseComputedUTFHierarchy) {
@@ -38,6 +40,7 @@ std::string kernelAnnotation() {
         a += "t" + std::to_string(TernaryLogicCostPerByte);
         a += "s" + std::to_string(ShiftCostFactor);
         a += "i" + std::to_string(IfEmbeddingCostThreshhold);
+        a += "p" + std::to_string(PartitioningFactor);
         return a;
     }
     return "+defaultIf";
@@ -209,6 +212,19 @@ void CostModel::addExpensiveSubranges(UCD::UnicodeSet endpoints, codepoint_t lo_
             }
         }
     }
+}
+
+UCD::UnicodeSet computeEndpoints(const std::vector<re::CC *> & CCs) {
+    UCD::UnicodeSet endpoints;
+    for (unsigned i = 0; i < CCs.size(); i++) {
+        for (const auto range : *CCs[i]) {
+            const auto lo = re::lo_codepoint(range);
+            const auto hi = re::hi_codepoint(range);
+            endpoints.insert(lo);
+            endpoints.insert(hi);
+        }
+    }
+    return endpoints;
 }
 
 UCD::UnicodeSet computeEndpoints(const std::vector<const re::CC *> & CCs) {
@@ -614,5 +630,218 @@ UTF_Compiler::UTF_Compiler(Var * basis_var, pablo::PabloBuilder & pb, unsigned /
         std::make_unique<cc::Parabix_CC_Compiler_Builder>(pb.getPabloBlock(), basis_set);
     }
 }
+
+
+using boost::intrusive::detail::ceil_log2;
+
+//
+// Determine the actual range of codepoints encountered in a CC_List.
+// If all the CCs are empty, return the impossible range {0x10FFF, 0}.
+Range CC_Set_Range(CC_List ccs) {
+    codepoint_t lo = 0x10FFFF;
+    codepoint_t hi = 0;
+    for (unsigned i = 0; i < ccs.size(); i++) {
+        if (!ccs[i]->empty()) {
+            lo = std::min(lo_codepoint(ccs[i]->front()), lo);
+            hi = std::max(hi_codepoint(ccs[i]->back()), hi);
+        }
+    }
+    return Range{lo, hi};
+}
+
+void extract_CCs_by_range(Range r, CC_List & ccs, CC_List & in_range) {
+    re::CC * rangeCC = re::makeCC(r.lo, r.hi, &Unicode);
+    for (unsigned i = 0; i < ccs.size(); i++) {
+        in_range[i] = re::intersectCC(ccs[i], rangeCC);
+    }
+}
+
+Basis_Set shifted_basis(Basis_Set basis, unsigned shift, PabloBuilder & pb) {
+    Basis_Set basis_shift(basis.size());
+    for (unsigned i = 0; i < basis.size(); i++) {
+        //if (mBitMovement == BitMovementMode::LookAhead) {
+        basis_shift[i] = pb.createLookahead(basis[i], shift);
+        //} else {
+        //    basis_shift[i] = pb.createAdvance(basis[i], shift);
+        //}
+    }
+    return basis_shift;
+}
+
+UTF_Lookahead_Compiler::UTF_Lookahead_Compiler(Var * basis_var, pablo::PabloBuilder & pb) :
+        mBasisVar(basis_var), mPB(pb)  {
+    mEncoder.setCodeUnitBits(8);
+}
+
+
+void UTF_Lookahead_Compiler::compile(Target_List targets, CC_List ccs) {
+    //  Initialize all the target vars to 0.
+    mTargets = targets;
+    for (unsigned i = 0; i < targets.size(); i++) {
+        mPB.createAssign(mTargets[i], mPB.createZeroes());
+    }
+    llvm::ArrayType * ty = cast<ArrayType>(mBasisVar->getType());
+    unsigned streamCount = ty->getArrayNumElements();
+    assert(streamCount == 8); // For now.
+    mScopeBasis[0].resize(streamCount);
+    for (unsigned i = 0; i < streamCount; i++) {
+        mScopeBasis[0][i] = mPB.createExtract(mBasisVar, mPB.getInteger(i));
+    }
+    mCodeUnitCompilers[0] =
+        std::make_unique<cc::Parabix_CC_Compiler_Builder>(mPB.getPabloBlock(), mScopeBasis[0]);
+    mScopeLength = 1;
+    createLengthHierarchy(ccs);
+}
+
+void UTF_Lookahead_Compiler::createLengthHierarchy(CC_List & ccs) {
+    CC_List len1_sets(ccs.size());
+    codepoint_t len1_max = mEncoder.max_codepoint_of_length(1);
+    Range len1_range{0, len1_max};
+    extract_CCs_by_range(len1_range, ccs, len1_sets);
+
+    compileSubrange(len1_sets, len1_range, mPB.createOnes(), len1_range, mPB);
+    extendLengthHierarchy(ccs, Range{len1_max+1, 0x10FFFF}, mPB);
+}
+
+
+void UTF_Lookahead_Compiler::extendLengthHierarchy(CC_List & ccs, Range r, PabloBuilder & pb) {
+    CC_List subrangeSets(ccs.size());
+    extract_CCs_by_range(r, ccs, subrangeSets);
+    // We further narrow the range of codepoints to consider based on
+    // the actual minimum and maximum codepoints found in the subrange.
+    // This will result in a narrower test, which will allow us to
+    // avoid computing the subrange logic for data blocks which have
+    // no elements in the narrower range.
+    Range actual_range = CC_Set_Range(subrangeSets);
+    //  If there are no CCs that intersect the subrange, no code
+    //  generation is required.
+    if (actual_range.is_empty()) return;
+
+    unsigned lo_pfx = mEncoder.nthCodeUnit(actual_range.lo, 1);
+    unsigned hi_pfx = mEncoder.nthCodeUnit(actual_range.hi, 1);
+    pablo::PabloAST * test = mCodeUnitCompilers[0]->compileCC(re::makeByte(lo_pfx, hi_pfx), pb);
+    auto nested = pb.createScope();
+    pb.createIf(test, nested);
+    //
+    unsigned lo_len = mEncoder.encoded_length(actual_range.lo);
+    unsigned hi_len = mEncoder.encoded_length(actual_range.hi);
+    while (mScopeLength < lo_len) {
+        mScopeBasis[mScopeLength] = shifted_basis(mScopeBasis[0], mScopeLength, nested);
+        mCodeUnitCompilers[mScopeLength] =
+            std::make_unique<cc::Parabix_CC_Compiler_Builder>(nested.getPabloBlock(), mScopeBasis[mScopeLength]);
+        mScopeLength++;
+    }
+    codepoint_t test_lo = mEncoder.minCodePointWithCommonCodeUnits(actual_range.lo, 1);
+    codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(actual_range.hi, 1);
+    Range testRange{test_lo, test_hi};
+    if (lo_len == hi_len) {
+        subrangePartitioning(subrangeSets, testRange, test, nested);
+    } else {
+        codepoint_t len_max = mEncoder.max_codepoint_of_length(lo_len);
+        Range lenRange{test_lo, len_max};
+        CC_List lenRangeSets(ccs.size());
+        extract_CCs_by_range(lenRange, subrangeSets, lenRangeSets);
+        Range actual_range = CC_Set_Range(lenRangeSets);
+        unsigned hi_pfx = mEncoder.nthCodeUnit(actual_range.hi, 1);
+        PabloAST * lenTest = mCodeUnitCompilers[0] -> compileCC(re::makeByte(lo_pfx, hi_pfx), nested);
+        subrangePartitioning(subrangeSets, lenRange, lenTest, nested);
+        extendLengthHierarchy(subrangeSets, Range{len_max+1, 0x10FFFF}, nested);
+    }
+}
+
+void UTF_Lookahead_Compiler::subrangePartitioning(CC_List & ccs, Range & range, PabloAST * rangeTest, PabloBuilder & pb) {
+    llvm::errs() << "subrangePartitioning subrange("<< range.lo << "," << range.hi << ")\n";
+    unsigned partition_size = ceil_log2((range.hi-range.lo)/PartitioningFactor);
+    if (partition_size < 128) partition_size = 128;
+    for (unsigned partition_lo = range.lo; partition_lo < range.hi; partition_lo += partition_size) {
+        unsigned partition_hi = std::min(partition_lo + partition_size - 1, range.hi);
+        Range partition{partition_lo, partition_hi};
+        compileSubrange(ccs, range, rangeTest, partition, pb);
+    }
+}
+
+void UTF_Lookahead_Compiler::compileSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb) {
+    llvm::errs() << "compileSubrange subrange("<< subrange.lo << "," << subrange.hi << ")\n";
+    CC_List subrangeCCs(ccs.size());
+    extract_CCs_by_range(subrange, ccs, subrangeCCs);
+    //  If there are no CCs that intersect the subrange, no code
+    //  generation is required.
+    Range actual_subrange = CC_Set_Range(subrangeCCs);
+    if (actual_subrange.is_empty()) return;
+    //
+    // Determine whether compilation of the CCs is below our cost model threshhold.
+    if (costModel(subrangeCCs) < IfEmbeddingCostThreshhold) {
+        compileUnguardedSubrange(subrangeCCs, enclosingRange, enclosingTest, pb);
+        return;
+    }
+    // The subrange logic cost exceeds our cost model threshhold.
+    // Construct a guarded if-block and partition into further subranges.
+    unsigned code_unit_to_test = mEncoder.common_code_units(enclosingRange.lo, enclosingRange.hi) + 1;
+    unsigned lo_unit = mEncoder.nthCodeUnit(actual_subrange.lo, code_unit_to_test);
+    unsigned hi_unit = mEncoder.nthCodeUnit(actual_subrange.hi, code_unit_to_test);
+    CC * unitCC = re::makeByte(lo_unit, hi_unit);
+    //
+    // TODO: Consider optimizing this test to take advantage of any bits
+    // the current unit that have been determined by enclosingTest.
+    PabloAST * unit_test = mCodeUnitCompilers[code_unit_to_test-1]->compileCC(unitCC);
+    PabloAST * subrange_test = pb.createAnd(enclosingTest, unit_test);
+    // Construct an if-block.
+    auto nested = pb.createScope();
+    pb.createIf(subrange_test, nested);
+    codepoint_t test_lo = mEncoder.minCodePointWithCommonCodeUnits(actual_subrange.lo, code_unit_to_test);
+    codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(actual_subrange.hi, code_unit_to_test);
+    Range testRange{test_lo, test_hi};
+    subrangePartitioning(subrangeCCs, testRange, subrange_test, nested);
+}
+
+void UTF_Lookahead_Compiler::compileUnguardedSubrange(CC_List & ccs, Range & subrange, PabloAST * subrangeTest, PabloBuilder & pb) {
+    llvm::errs() << "compileUnguarded subrange("<< subrange.lo << "," << subrange.hi << ")\n";
+    CC_List subrangeCCs(ccs.size());
+    extract_CCs_by_range(subrange, ccs, subrangeCCs);
+    //  If there are no CCs that intersect the subrange, no code
+    //  generation is required.
+    Range actual_subrange = CC_Set_Range(subrangeCCs);
+    if (actual_subrange.is_empty()) return;
+    unsigned code_unit_to_test = mEncoder.common_code_units(subrange.lo, subrange.hi) + 1;
+    llvm::errs() << "  actual("<< actual_subrange.lo << "," << actual_subrange.hi  << ")\n" ;
+    if (code_unit_to_test == mEncoder.encoded_length(actual_subrange.lo)) {
+        // We are on the final code unit; compile each nonempty CC and
+        // combine into the top-level Var for this CC.
+        for (unsigned i = 0; i < ccs.size(); i++) {
+            if (!subrangeCCs[i]->empty()) {
+                PabloAST * final_unit = mCodeUnitCompilers[code_unit_to_test - 1]->compileCC(subrangeCCs[i], pb);
+                PabloAST * test = pb.createAnd(subrangeTest, final_unit);
+                pb.createAssign(mTargets[i], pb.createOr(mTargets[i], test));
+            }
+        }
+    } else {
+        // We are not at the final unit.  Narrow down to subsubranges based
+        // on each possible code unit at this level.
+        unsigned lo_unit = mEncoder.nthCodeUnit(subrange.lo, code_unit_to_test);
+        unsigned hi_unit = mEncoder.nthCodeUnit(subrange.hi, code_unit_to_test);
+        unsigned unit = lo_unit;
+        codepoint_t min_cp = mEncoder.minCodePointWithCommonCodeUnits(subrange.lo, code_unit_to_test);
+        while (unit <= hi_unit) {
+            codepoint_t max_cp = mEncoder.maxCodePointWithCommonCodeUnits(min_cp, code_unit_to_test);
+            re::CC * unitCC = re::makeByte(unit, unit);
+            PabloAST * unit_test = mCodeUnitCompilers[code_unit_to_test - 1] -> compileCC(unitCC, pb);
+            PabloAST * subsubrangeTest = pb.createAnd(subrangeTest, unit_test);
+            Range subsubrange{min_cp, max_cp};
+            compileUnguardedSubrange(subrangeCCs, subsubrange, subsubrangeTest, pb);
+            min_cp = max_cp + 1;
+            unit++;
+        }
+    }
+}
+
+unsigned UTF_Lookahead_Compiler::costModel(CC_List ccs) {
+    UCD::UnicodeSet endpoints = computeEndpoints(ccs);
+    Range cc_span = CC_Set_Range(ccs);
+    unsigned bits_to_test = ceil_log2(cc_span.hi - cc_span.lo);
+    unsigned total_codepoints = endpoints.count();
+    return total_codepoints * bits_to_test * BinaryLogicCostPerByte / 8;
+}
+
+
 
 }
