@@ -745,7 +745,8 @@ void UTF_Lookahead_Compiler::extendLengthHierarchy(CC_List & ccs, Range r, Pablo
         Range actual_range = CC_Set_Range(lenRangeSets);
         unsigned hi_pfx = mEncoder.nthCodeUnit(actual_range.hi, 1);
         PabloAST * lenTest = mCodeUnitCompilers[0] -> compileCC(re::makeByte(lo_pfx, hi_pfx), nested);
-        subrangePartitioning(subrangeSets, lenRange, lenTest, nested);
+        compileUnguardedSubrange(lenRangeSets, lenRange, lenTest, lenRange, nested);
+        //subrangePartitioning(subrangeSets, lenRange, lenTest, nested);
         extendLengthHierarchy(subrangeSets, Range{len_max+1, 0x10FFFF}, nested);
     }
 }
@@ -796,7 +797,6 @@ void UTF_Lookahead_Compiler::compileSubrange(CC_List & ccs, Range & enclosingRan
 }
 
 void UTF_Lookahead_Compiler::compileUnguardedSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb) {
-    llvm::errs() << "compileUnguarded subrange("<< subrange.lo << "," << subrange.hi << ")\n";
     CC_List subrangeCCs(ccs.size());
     extract_CCs_by_range(subrange, ccs, subrangeCCs);
     //  If there are no CCs that intersect the subrange, no code
@@ -804,8 +804,6 @@ void UTF_Lookahead_Compiler::compileUnguardedSubrange(CC_List & ccs, Range & enc
     Range actual_subrange = CC_Set_Range(subrangeCCs);
     if (actual_subrange.is_empty()) return;
     unsigned code_unit_to_test = mEncoder.common_code_units(enclosingRange.lo, enclosingRange.hi) + 1;
-    llvm::errs() << "  enclosingRange("<< enclosingRange.lo << "," << enclosingRange.hi  << ")\n" ;
-    llvm::errs() << "  actual("<< actual_subrange.lo << "," << actual_subrange.hi  << ")\n" ;
     if (code_unit_to_test == mEncoder.encoded_length(actual_subrange.lo)) {
         // We are on the final code unit; compile each nonempty CC and
         // combine into the top-level Var for this CC.
@@ -825,7 +823,7 @@ void UTF_Lookahead_Compiler::compileUnguardedSubrange(CC_List & ccs, Range & enc
         codepoint_t min_cp = mEncoder.minCodePointWithCommonCodeUnits(subrange.lo, code_unit_to_test);
         codepoint_t max_cp = mEncoder.maxCodePointWithCommonCodeUnits(subrange.hi, code_unit_to_test);
         if (lo_unit != hi_unit) {
-            codepoint_t mid_cp = mEncoder.maxCodePointWithCommonCodeUnits((subrange.lo + subrange.hi)/2, code_unit_to_test);
+            codepoint_t mid_cp = mEncoder.maxCodePointWithCommonCodeUnits(subrange.lo, code_unit_to_test);
             Range lo_subrange{min_cp, mid_cp};
             Range hi_subrange{mid_cp+1, max_cp};
             compileUnguardedSubrange(subrangeCCs, enclosingRange, enclosingTest, lo_subrange, pb);
