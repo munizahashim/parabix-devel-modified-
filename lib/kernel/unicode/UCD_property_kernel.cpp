@@ -23,19 +23,18 @@ using namespace cc;
 
 UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * Source, StreamSet * property)
 : UnicodePropertyKernelBuilder(b, property_value_name, Source, property, [&]() -> std::string {
-    return std::to_string(Source->getNumElements()) + "x" + std::to_string(Source->getFieldWidth()) + property_value_name->getFullName();
+    return std::to_string(Source->getNumElements()) + "x" + std::to_string(Source->getFieldWidth()) + property_value_name->getFullName() + UTF::kernelAnnotation();
 }()) {
 
 }
 
 UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * Source, StreamSet * property, std::string && propValueName)
 : PabloKernel(b,
-"UCD:" + getStringHash(propValueName),
+"UCD:" + getStringHash(propValueName) ,
 {Binding{"source", Source, FixedRate(1), LookAhead(3)}},
 {Binding{"property_stream", property}})
 , mPropNameValue(propValueName)
 , mName(property_value_name) {
-
 }
 
 llvm::StringRef UnicodePropertyKernelBuilder::getSignature() const {

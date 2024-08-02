@@ -123,8 +123,9 @@ private:
     void subrangePartitioning(CC_List & ccs, Range & range, PabloAST * rangeTest, PabloBuilder & pb);
     void compileSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb);
     void compileUnguardedSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb);
+    re::CC * prefixCC(CC_List & ccs);
     re::CC * codeUnitCC(re::CC * cc, unsigned codeunit);
-    unsigned costModel(CC_List ccs);
+    unsigned costModel(CC_List & ccs);
 };
 
 
