@@ -298,9 +298,6 @@ private:
 bool CodeMotionPass::optimize(PabloKernel * kernel) {
     CodeMotionPassContainer C;
     C.doCodeMovement(kernel->getEntryScope());
-    #ifndef NDEBUG
-    PabloVerifier::verify(kernel, "post-code-motion");
-    #endif
     return true;
 }
 

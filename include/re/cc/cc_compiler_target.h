@@ -13,7 +13,8 @@ class Parabix_CC_Compiler_Builder : public CC_Compiler {
 public:
     using CC_Compiler::compileCC;
     
-    Parabix_CC_Compiler_Builder(pablo::PabloBlock * scope, std::vector<pablo::PabloAST *> basisBitSet);
+    Parabix_CC_Compiler_Builder(std::vector<pablo::PabloAST *> basisBitSet);
+
     pablo::PabloAST * compileCC(const std::string & name, const re::CC *cc, pablo::PabloBlock & block) override;
     pablo::PabloAST * compileCC(const std::string & name, const re::CC *cc, pablo::PabloBuilder & builder) override;
     ~Parabix_CC_Compiler_Builder() {}

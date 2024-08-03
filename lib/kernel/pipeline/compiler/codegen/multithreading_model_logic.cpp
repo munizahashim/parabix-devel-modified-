@@ -11,24 +11,6 @@
 #include <mach/thread_act.h>
 #endif
 
-namespace llvm {
-#if BOOST_OS_MACOS
-template<> class TypeBuilder<pthread_t, false> {
-public:
-  static Type *get(LLVMContext& C) {
-    return IntegerType::getIntNTy(C, sizeof(pthread_t) * CHAR_BIT);
-  }
-};
-#endif
-
-template<> class TypeBuilder<pthread_attr_t, false> {
-public:
-  static Type *get(LLVMContext& C) {
-    return IntegerType::getIntNTy(C, sizeof(pthread_attr_t) * CHAR_BIT);
-  }
-};
-}
-
 enum PipelineStateObjectField : unsigned {
     SHARED_STATE_PARAM
     , THREAD_LOCAL_PARAM
@@ -108,7 +90,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
     Function * const pthreadExitFn = m->getFunction("pthread_exit");
     Function * const pthreadJoinFn = m->getFunction("pthread_join");
 
-    Type * const pThreadTy = TypeBuilder<pthread_t, false>::get(b.getContext());
+    Type * const pThreadTy = IntegerType::getIntNTy(b.getContext(), sizeof(pthread_t) * CHAR_BIT);
 
     Value * minimumNumOfThreads = nullptr;
     Value * const maximumNumOfThreads = b.getScalarField(MAXIMUM_NUM_OF_THREADS);
@@ -893,7 +875,7 @@ StructType * PipelineCompiler::getThreadStuctType(KernelBuilder & b, const std::
         fields[ACCUMULATED_SYNCHRONIZATION_TIME] = emptyTy;
     }
 
-    Type * const pthreadTy = TypeBuilder<pthread_t, false>::get(b.getContext());
+    Type * const pthreadTy = IntegerType::getIntNTy(C, sizeof(pthread_t) * CHAR_BIT);
     assert (pthreadTy == b.getModule()->getFunction("pthread_self")->getReturnType());
     fields[CURRENT_THREAD_ID] = pthreadTy;
     const auto hasTermSignal = !mIsNestedPipeline || PipelineHasTerminationSignal;
@@ -1003,7 +985,7 @@ Value * PipelineCompiler::isProcessThread(KernelBuilder & b, StructType * const 
     indices[0] = b.getInt32(0);
     indices[1] = b.getInt32(CURRENT_THREAD_ID);
     Value * const ptr = b.CreateInBoundsGEP(threadStateTy, threadState, indices);
-    Type * const pthreadTy = TypeBuilder<pthread_t, false>::get(b.getContext());
+    Type * const pthreadTy = IntegerType::getIntNTy(b.getContext(), sizeof(pthread_t) * CHAR_BIT);
     return b.CreateIsNull(b.CreateLoad(pthreadTy, ptr));
 }
 

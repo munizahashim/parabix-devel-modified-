@@ -15,13 +15,16 @@
 #include <kernel/core/kernel_builder.h>
 #include <kernel/pipeline/pipeline_builder.h>
 
+using namespace pablo;
+using namespace cc;
+
 namespace kernel {
 
 /**
  * Marks all unix linebreak ('\n') positions in `basis`. Always places a bit at
  * EOF regardless of whether the input file ends in a linebreak of not. 
  */
-class XmlLineBreakKernel : public pablo::PabloKernel {
+class XmlLineBreakKernel : public PabloKernel {
 public:
 
     XmlLineBreakKernel(KernelBuilder & b, StreamSet * basis, StreamSet * out)
@@ -32,12 +35,10 @@ public:
     }
 
     void generatePabloMethod() override {
-        using namespace pablo;
-        using namespace cc;
         PabloBuilder pb(getEntryScope());
         std::unique_ptr<CC_Compiler> ccc;
-        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), pb.createExtract(getInputStreamVar("basis"), pb.getInteger(0)));
-        PabloAST * breaks = ccc->compileCC(re::makeByte('\n'));;
+        ccc = std::make_unique<cc::Direct_CC_Compiler>(pb.createExtract(getInputStreamVar("basis"), pb.getInteger(0)));
+        PabloAST * breaks = ccc->compileCC(re::makeByte('\n'), pb);;
         PabloAST * const eofBit = pb.createAtEOF(llvm::cast<PabloAST>(pb.createOnes()));
         Var * const output = pb.createExtract(getOutputStreamVar("out"), 0);
         pb.createAssign(output, pb.createOr(breaks, eofBit));

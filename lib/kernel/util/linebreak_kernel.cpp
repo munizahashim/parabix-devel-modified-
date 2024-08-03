@@ -78,18 +78,18 @@ void UnixLinesKernelBuilder::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::unique_ptr<CC_Compiler> ccc;
     if (getInputStreamSet("basis").size() == 1) {
-        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), pb.createExtract(getInput(0), pb.getInteger(0)));
+        ccc = std::make_unique<cc::Direct_CC_Compiler>(pb.createExtract(getInput(0), pb.getInteger(0)));
     } else {
-        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), getInputStreamSet("basis"));
+        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getInputStreamSet("basis"));
     }
     if (mNullMode == NullCharMode::Abort) {
-        pb.createTerminateAt(ccc->compileCC(makeCC(0, &cc::Byte)), pb.getInteger(0));
+        pb.createTerminateAt(ccc->compileCC(makeCC(0, &cc::Byte), pb), pb.getInteger(0));
     }
     CC * breakCC = makeByte(0x0A);
     if (mNullMode == NullCharMode::Break) {
         breakCC = makeCC(breakCC, makeCC(0, &cc::Byte));
     }
-    PabloAST * LB = ccc->compileCC(breakCC);
+    PabloAST * LB = ccc->compileCC(breakCC, pb);
     if (mEOFmode == UnterminatedLineAtEOF::Add1) {
         PabloAST * unterminatedLineAtEOF = pb.createAtEOF(pb.createAdvance(pb.createNot(LB), 1), "unterminatedLineAtEOF");
         LB = pb.createOr(LB, unterminatedLineAtEOF);
@@ -125,9 +125,9 @@ void LineFeedKernelBuilder::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::unique_ptr<CC_Compiler> ccc;
     if (mNumOfStreams == 1) {
-        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), pb.createExtract(getInput(0), pb.getInteger(0)));
+        ccc = std::make_unique<cc::Direct_CC_Compiler>(pb.createExtract(getInput(0), pb.getInteger(0)));
     } else {
-        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), getInputStreamSet("basis"));
+        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getInputStreamSet("basis"));
     }
     PabloAST * LF = ccc->compileCC("LF", makeByte(0x0A), pb);
     pb.createAssign(pb.createExtract(getOutput(0), 0), LF);
@@ -182,15 +182,15 @@ void UnicodeLinesKernelBuilder::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::unique_ptr<CC_Compiler> ccc;
     if (getInputStreamSet("basis").size() == 1) {
-        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), pb.createExtract(getInput(0), pb.getInteger(0)));
+        ccc = std::make_unique<cc::Direct_CC_Compiler>(pb.createExtract(getInput(0), pb.getInteger(0)));
     } else {
-        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), getInputStreamSet("basis"));
+        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getInputStreamSet("basis"));
     }
     if (mNullMode == NullCharMode::Abort) {
-        pb.createTerminateAt(ccc->compileCC(makeCC(0, &cc::Byte)), pb.getInteger(0));
+        pb.createTerminateAt(ccc->compileCC(makeCC(0, &cc::Byte), pb), pb.getInteger(0));
     }
     PabloAST * const LF = pb.createExtract(getInput(1), pb.getInteger(0), "LF");
-    PabloAST * const CR = ccc->compileCC(makeByte(0x0D));
+    PabloAST * const CR = ccc->compileCC(makeByte(0x0D), pb);
     PabloAST * const LF_VT_FF_CR = ccc->compileCC("LF,VT,FF,CR", makeByte(0x0A, 0x0D), pb);
     Var * const LineBreak = pb.createVar("LineBreak", LF_VT_FF_CR);
 
@@ -204,7 +204,7 @@ void UnicodeLinesKernelBuilder::generatePabloMethod() {
     crb.createAssign(LineBreak, removedCRLF);
 
     Zeroes * const ZEROES = pb.createZeroes();
-    PabloAST * const u8pfx = ccc->compileCC(makeByte(0xC0, 0xFF));
+    PabloAST * const u8pfx = ccc->compileCC(makeByte(0xC0, 0xFF), pb);
 
     Var * const nonFinal = pb.createVar("nonFinal", u8pfx);
     Var * const u8invalid = pb.createVar("u8invalid", ZEROES);
@@ -317,9 +317,9 @@ void NullDelimiterKernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::unique_ptr<CC_Compiler> ccc;
     if (getInputStreamSet("Source").size() == 1) {
-        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), pb.createExtract(getInput(0), pb.getInteger(0)));
+        ccc = std::make_unique<cc::Direct_CC_Compiler>(pb.createExtract(getInput(0), pb.getInteger(0)));
     } else {
-        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), getInputStreamSet("basis"));
+        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getInputStreamSet("basis"));
     }
     PabloAST * NUL = ccc->compileCC("NUL", makeByte(0x0), pb);
     if (mEOFmode == UnterminatedLineAtEOF::Add1) {

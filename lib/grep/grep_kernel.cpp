@@ -431,13 +431,13 @@ void UTF8_index::generatePabloMethod() {
     std::unique_ptr<cc::CC_Compiler> ccc;
     bool useDirectCC = getInput(0)->getType()->getArrayNumElements() == 1;
     if (useDirectCC) {
-        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), pb.createExtract(getInput(0), pb.getInteger(0)));
+        ccc = std::make_unique<cc::Direct_CC_Compiler>(pb.createExtract(getInput(0), pb.getInteger(0)));
     } else {
-        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), getInputStreamSet("source"));
+        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getInputStreamSet("source"));
     }
 
     Zeroes * const ZEROES = pb.createZeroes();
-    PabloAST * const u8pfx = ccc->compileCC(makeByte(0xC0, 0xFF));
+    PabloAST * const u8pfx = ccc->compileCC(makeByte(0xC0, 0xFF), pb);
 
 
     Var * const nonFinal = pb.createVar("nonFinal", u8pfx);
@@ -1209,9 +1209,9 @@ void MaskSelfTransitions::generatePabloMethod() {
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     std::unique_ptr<cc::CC_Compiler> ccc;
     if (basis.size() == 1) {
-        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), basis[0]);
+        ccc = std::make_unique<cc::Direct_CC_Compiler>(basis[0]);
     } else {
-        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), basis);
+        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(basis);
     }
     PabloAST * transitions = pb.createZeroes();
     PabloAST * idx = nullptr;
@@ -1219,7 +1219,7 @@ void MaskSelfTransitions::generatePabloMethod() {
         idx = getInputStreamSet("index")[0];
     }
     for (unsigned i = 0; i < mTransitionCCs.size(); i++) {
-        PabloAST * trCC = ccc->compileCC(mTransitionCCs[i]);
+        PabloAST * trCC = ccc->compileCC(mTransitionCCs[i], pb);
         PabloAST * transition = pb.createAnd(pb.createIndexedAdvance(trCC, idx, 1), trCC);
         transitions = pb.createOr(transitions, transition);
     }

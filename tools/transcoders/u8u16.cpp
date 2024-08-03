@@ -91,10 +91,10 @@ void U8U16Kernel::generatePabloMethod() {
     Var * delmask = main.createVar("delmask", zeroes);
     Var * error_mask = main.createVar("error_mask", zeroes);
 
-    cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), u8_bits);
+    cc::Parabix_CC_Compiler_Builder ccc(u8_bits);
 
     // The logic for processing non-ASCII bytes will be embedded within an if-hierarchy.
-    PabloAST * nonASCII = ccc.compileCC(makeByte(0x80, 0xFF));
+    PabloAST * nonASCII = ccc.compileCC(makeByte(0x80, 0xFF), main);
 
     // Builder for the if statement handling all non-ASCII logic
     auto nAb = main.createScope();
@@ -242,7 +242,7 @@ void U8U16Kernel::generatePabloMethod() {
     main.createIf(nonASCII, nAb);
     //
     //
-    PabloAST * ASCII = ccc.compileCC(makeByte(0x0, 0x7F));
+    PabloAST * ASCII = ccc.compileCC(makeByte(0x0, 0x7F), main);
     PabloAST * last_byte = main.createOr(ASCII, u8lastscope);
     main.createAssign(u16_lo[6], main.createOr(main.createAnd(ASCII, u8_bits[6]), p234_lo6));
     main.createAssign(u16_lo[5], main.createOr(main.createAnd(last_byte, u8_bits[5]), s43_lo5));

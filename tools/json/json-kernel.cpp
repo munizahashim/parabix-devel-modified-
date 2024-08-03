@@ -24,12 +24,12 @@ static PabloAST * sanitizeLexInput(PabloBuilder & pb, PabloAST * span, PabloAST 
 void JSONStringMarker::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
-    cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), basis);
+    cc::Parabix_CC_Compiler_Builder ccc(basis);
     Var * const strMarker = getOutputStreamVar("marker");
     Var * const strSpan = getOutputStreamVar("span");
 
-    PabloAST * dQuotes = ccc.compileCC(re::makeByte('"'));
-    PabloAST * backslash = ccc.compileCC(re::makeByte('\\'));
+    PabloAST * dQuotes = ccc.compileCC(re::makeByte('"'), pb);
+    PabloAST * backslash = ccc.compileCC(re::makeByte('\\'), pb);
 
     // keeping the names as the ones in paper PGJS (Lemire)
     PabloAST * B = backslash;
@@ -75,14 +75,14 @@ void JSONStringMarker::generatePabloMethod() {
 void JSONClassifyBytes::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
-    cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), basis);
+    cc::Parabix_CC_Compiler_Builder ccc(basis);
     PabloAST * notStrSpan = pb.createNot(getInputStreamSet("strSpan")[0]);
 
     Var * const lexStream = getOutputStreamVar("lexStream");
 
-    auto makeFn = [&ccc](auto c){ return ccc.compileCC(re::makeByte(c)); };
+    auto makeFn = [&](auto c){ return ccc.compileCC(re::makeByte(c), pb); };
 
-    PabloAST * digit = ccc.compileCC(re::makeByte('0', '9'));
+    PabloAST * digit = ccc.compileCC(re::makeByte('0', '9'), pb);
     PabloAST * ws = pb.createOr(pb.createOr3(makeFn(' '), makeFn('\n'), makeFn('\r')), makeFn('\t'));
 
     pb.createAssign(pb.createExtract(lexStream, pb.getInteger(Lex::lCurly)), pb.createAnd(notStrSpan, makeFn('{')));
@@ -102,7 +102,7 @@ void JSONClassifyBytes::generatePabloMethod() {
 void JSONKeywordEndMarker::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
-    cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), basis);
+    cc::Parabix_CC_Compiler_Builder ccc(basis);
     Var * const kwEndMarker = getOutputStreamVar("kwEndMarker");
 
     PabloAST * N = getInputStreamSet("lexIn")[Lex::n];
@@ -110,14 +110,14 @@ void JSONKeywordEndMarker::generatePabloMethod() {
     PabloAST * F = getInputStreamSet("lexIn")[Lex::f];
 
     // null
-    PabloAST * U = ccc.compileCC(re::makeByte('u'));
-    PabloAST * L = ccc.compileCC(re::makeByte('l'));
+    PabloAST * U = ccc.compileCC(re::makeByte('u'), pb);
+    PabloAST * L = ccc.compileCC(re::makeByte('l'), pb);
     // true
-    PabloAST * R = ccc.compileCC(re::makeByte('r'));
-    PabloAST * E = ccc.compileCC(re::makeByte('e'));
+    PabloAST * R = ccc.compileCC(re::makeByte('r'), pb);
+    PabloAST * E = ccc.compileCC(re::makeByte('e'), pb);
     // false
-    PabloAST * A = ccc.compileCC(re::makeByte('a'));
-    PabloAST * S = ccc.compileCC(re::makeByte('s'));
+    PabloAST * A = ccc.compileCC(re::makeByte('a'), pb);
+    PabloAST * S = ccc.compileCC(re::makeByte('s'), pb);
 
     Var * seqNULL = pb.createVar("null", pb.createZeroes());
     Var * seqTRUE = pb.createVar("true", pb.createZeroes());
@@ -163,7 +163,7 @@ void JSONKeywordEndMarker::generatePabloMethod() {
 void JSONNumberSpan::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
-    cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), basis);
+    cc::Parabix_CC_Compiler_Builder ccc(basis);
     PabloAST * hyphen = getInputStreamSet("lexIn")[Lex::hyphen];
     PabloAST * digit = getInputStreamSet("lexIn")[Lex::digit];
 
@@ -172,9 +172,9 @@ void JSONNumberSpan::generatePabloMethod() {
     Var * const nbrSpan = getOutputStreamVar("nbrSpan");
     Var * const nbrErr = getOutputStreamVar("nbrErr");
 
-    PabloAST * alleE = pb.createOr(ccc.compileCC(re::makeByte('e')), ccc.compileCC(re::makeByte('E')));
-    PabloAST * allDot = ccc.compileCC(re::makeByte('.'));
-    PabloAST * allPlusMinus = pb.createOr(hyphen, ccc.compileCC(re::makeByte('+')));
+    PabloAST * alleE = pb.createOr(ccc.compileCC(re::makeByte('e'), pb), ccc.compileCC(re::makeByte('E'), pb));
+    PabloAST * allDot = ccc.compileCC(re::makeByte('.'), pb);
+    PabloAST * allPlusMinus = pb.createOr(hyphen, ccc.compileCC(re::makeByte('+'), pb));
 
     PabloAST * notStrSpan = pb.createNot(strSpan);
     PabloAST * alleEAfterDigit = pb.createAnd(pb.createAdvance(digit, 1), alleE);

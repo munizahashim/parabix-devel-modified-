@@ -107,9 +107,9 @@ void ByteClassesKernel::generatePabloMethod() {
 
     auto basisBits = getInputStreamSet("basis");
     if (basisBits.size() == 1) {
-        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), basisBits[0]);
+        ccc = std::make_unique<cc::Direct_CC_Compiler>(basisBits[0]);
     } else {
-        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), basisBits);
+        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(basisBits);
     }
     unsigned n = mCCs.size();
 
@@ -118,7 +118,7 @@ void ByteClassesKernel::generatePabloMethod() {
     for (unsigned i = 0; i < n; i++) {
         Name * name = re::makeName("mpx_basis" + std::to_string(i), mCCs[i]);
 
-        nameMap.emplace(name, ccc->compileCC(mCCs[i]));
+        nameMap.emplace(name, ccc->compileCC(mCCs[i], pb));
         names.push_back(name);
 
     }

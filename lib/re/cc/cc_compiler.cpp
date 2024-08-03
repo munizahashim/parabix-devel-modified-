@@ -26,11 +26,12 @@ namespace cc {
 using octet_pair_t = Parabix_Ternary_CC_Compiler::octet_pair_t;
 using octets_intervals_union_t = Parabix_Ternary_CC_Compiler::octets_intervals_union_t;
 
-CC_Compiler::CC_Compiler(pablo::PabloBlock * scope)
-: mBuilder(scope) {
-}
+//CC_Compiler::CC_Compiler(PabloBlock * scope)
+//: mBuilder(scope) {
 
-CC_Compiler_Common::CC_Compiler_Common(unsigned encodingBits, std::vector<pablo::PabloAST *> basisBit, unsigned encodingMask)
+//}
+
+CC_Compiler_Common::CC_Compiler_Common(unsigned encodingBits, std::vector<PabloAST *> basisBit, unsigned encodingMask)
 : mEncodingBits(encodingBits)
 , mBasisBit(basisBit)
 , mEncodingMask(encodingMask) {
@@ -86,9 +87,8 @@ inline PabloAST * CC_Compiler_Common::getBasisVar(const unsigned i, PabloBlockOr
     return mBasisBit[i];
 }
 
-Parabix_CC_Compiler::Parabix_CC_Compiler(pablo::PabloBlock * scope, std::vector<pablo::PabloAST *> basisBitSet)
-: CC_Compiler(scope)
-, CC_Compiler_Common(basisBitSet.size(), basisBitSet, (static_cast<unsigned>(1) << basisBitSet.size()) - static_cast<unsigned>(1)) {
+Parabix_CC_Compiler::Parabix_CC_Compiler(std::vector<PabloAST *> basisBitSet)
+:  CC_Compiler_Common(basisBitSet.size(), basisBitSet, (static_cast<unsigned>(1) << basisBitSet.size()) - static_cast<unsigned>(1)) {
 }
 
 PabloAST * Parabix_CC_Compiler::compileCC(const std::string & canonicalName, const CC *cc, PabloBlock & block) {
@@ -285,23 +285,22 @@ PabloAST * compileCCfromCodeUnitStream(const CC * cc, PabloAST * codeUnitStream,
     return pb.createInFile(ccStrm, "ccStrm");
 }
 
-Direct_CC_Compiler::Direct_CC_Compiler(pablo::PabloBlock * scope, pablo::PabloAST * codeUnitStream)
-: CC_Compiler(scope)
-, mCodeUnitStream(codeUnitStream) {
+Direct_CC_Compiler::Direct_CC_Compiler(PabloAST * codeUnitStream)
+:  mCodeUnitStream(codeUnitStream) {
+
 }
 
-pablo::PabloAST * Direct_CC_Compiler::compileCC(const std::string & name, const re::CC *cc, pablo::PabloBlock & block) {
+PabloAST * Direct_CC_Compiler::compileCC(const std::string & name, const re::CC *cc, PabloBlock & block) {
     PabloBuilder pb(&block);
     return compileCC(name, cc, pb);
 }
 
-pablo::PabloAST * Direct_CC_Compiler::compileCC(const std::string & name, const re::CC *cc, pablo::PabloBuilder & b) {
+PabloAST * Direct_CC_Compiler::compileCC(const std::string & name, const re::CC *cc, PabloBuilder & b) {
     return compileCCfromCodeUnitStream(cc, mCodeUnitStream, b);
 }
 
-Parabix_Ternary_CC_Compiler::Parabix_Ternary_CC_Compiler(pablo::PabloBlock * scope, std::vector<pablo::PabloAST *> basisBitSet)
-: CC_Compiler(scope)
-, CC_Compiler_Common(basisBitSet.size(), basisBitSet, (static_cast<unsigned>(1) << basisBitSet.size()) - static_cast<unsigned>(1)) {
+Parabix_Ternary_CC_Compiler::Parabix_Ternary_CC_Compiler(std::vector<PabloAST *> basisBitSet)
+: CC_Compiler_Common(basisBitSet.size(), basisBitSet, (static_cast<unsigned>(1) << basisBitSet.size()) - static_cast<unsigned>(1)) {
 }
 
 PabloAST * Parabix_Ternary_CC_Compiler::compileCC(const std::string & canonicalName, const CC *cc, PabloBlock & block) {
@@ -321,7 +320,7 @@ PabloAST * Parabix_Ternary_CC_Compiler::compileCC(const std::string & canonicalN
 }
 
 template<typename PabloBlockOrBuilder>
-pablo::PabloAST * Parabix_Ternary_CC_Compiler::charset_expr(const re::CC *cc, PabloBlockOrBuilder & pb) {
+PabloAST * Parabix_Ternary_CC_Compiler::charset_expr(const re::CC *cc, PabloBlockOrBuilder & pb) {
     if (cc->empty()) {
         return pb.createZeroes();
     }

@@ -43,30 +43,51 @@ void pablo_function_passes(PabloKernel * kernel) {
     }
 
 #ifdef NDEBUG
-    if (pablo::DebugOptionIsSet(VerifyPablo)) {
+    const auto verify = pablo::DebugOptionIsSet(VerifyPablo);
+#else
+    const auto verify = true;
 #endif
+
+    if (LLVM_UNLIKELY(verify)) {
         PabloVerifier::verify(kernel, "creation");
-#ifdef NDEBUG
     }
-#endif
+
     if (LLVM_UNLIKELY(codegen::EnableIllustrator && !pablo::PabloIllustrateBitstreamRegEx.empty())) {
         runIllustratorPass(kernel);
+        if (LLVM_UNLIKELY(verify)) {
+            PabloVerifier::verify(kernel, "post-illustrator-pass");
+        }
     }
     // Scan through the pablo code and perform DCE and CSE
     if (Flatten){
         FlattenIf::transform(kernel);
+        if (LLVM_UNLIKELY(verify)) {
+            PabloVerifier::verify(kernel, "post-distributive-pass");
+        }
     }
     if (LLVM_LIKELY(!CompileOptionIsSet(DisableSimplification))) {
         Simplifier::optimize(kernel);
+        if (LLVM_UNLIKELY(verify)) {
+            PabloVerifier::verify(kernel, "post-simplification");
+        }
     }
     if (CompileOptionIsSet(EnableDistribution)) {
         DistributivePass::optimize(kernel);
+        if (LLVM_UNLIKELY(verify)) {
+            PabloVerifier::verify(kernel, "post-distributive-pass");
+        }
     }
     if (LLVM_LIKELY(!CompileOptionIsSet(DisableCodeMotion))) {
         CodeMotionPass::optimize(kernel);
+        if (LLVM_UNLIKELY(verify)) {
+            PabloVerifier::verify(kernel, "post-code-motion");
+        }
     }
     if (CompileOptionIsSet(EnableSchedulingPrePass)) {
         SchedulingPrePass::optimize(kernel);
+        if (LLVM_UNLIKELY(verify)) {
+            PabloVerifier::verify(kernel, "post-scheduling-prepass");
+        }
     }
     if (ShowOptimizedPabloOption != codegen::OmittedOption) {
         if (ShowOptimizedPabloOption.empty()) {

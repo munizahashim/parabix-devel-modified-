@@ -432,14 +432,14 @@ void BixNumTableCompiler::innerLogic(PabloBuilder & pb,
     }
     BixNumCompiler bnc(pb);
     assert(bitsPerInputUnit <= 8);
-    cc::Parabix_CC_Compiler_Builder inputUnitCompiler(pb.getPabloBlock(), bnc.ZeroExtend(bnc.Truncate(mInput, bitsPerInputUnit),8));
+    cc::Parabix_CC_Compiler_Builder inputUnitCompiler(bnc.ZeroExtend(bnc.Truncate(mInput, bitsPerInputUnit),8));
     BixNum output(outputBitsToSet, pb.createZeroes());
     for (unsigned i = 0; i < xfrmBits; i++) {
-        PabloAST * xfrmStrm = inputUnitCompiler.compileCC(bitXfrmClasses[i]);
+        PabloAST * xfrmStrm = inputUnitCompiler.compileCC(bitXfrmClasses[i], pb);
         output[i] = pb.createXor(xfrmStrm, mInput[i], "tbl_xfrm[" + std::to_string(i) + "]");
     }
     for (unsigned i = xfrmBits; i < outputBitsToSet; i++) {
-        output[i] = inputUnitCompiler.compileCC(outputBitClasses[i - xfrmBits]);
+        output[i] = inputUnitCompiler.compileCC(outputBitClasses[i - xfrmBits], pb);
     }
     if (max_seq_lgth >= CONSECUTIVE_SEQ_OPTIMIZATION_MINIMUM) {
         output = BixNumCompiler(pb).AddModular(output, static_cast<unsigned>(best_offset));
