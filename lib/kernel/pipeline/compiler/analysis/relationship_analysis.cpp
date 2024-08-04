@@ -828,11 +828,7 @@ void PipelineAnalysis::generateInitialPipelineGraph(KernelBuilder & b) {
 
     RelationshipGraphBuilder B(Relationships, *this);
 
-
     // Copy the list of kernels and add in any internal kernels
-    if (LLVM_UNLIKELY(mKernels.empty())) {
-        llvm::report_fatal_error("Pipeline must have at least one kernel");
-    }
     assert (num_vertices(Relationships) == 0);
     const unsigned p_in = add_vertex(RelationshipNode(RelationshipNode::IsKernel, mPipelineKernel), Relationships);
     assert (p_in == PipelineInput);
@@ -973,6 +969,7 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
     // kernels and subsituted kernels/relationships.
 
     const auto numOfKernels = kernels.size();
+    assert (numOfKernels >= 2);
     const auto numOfStreamSets = streamSets.size();
     const auto numOfBindings = bindings.size();
     const auto numOfCallees = callees.size();
@@ -980,7 +977,8 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
 
     SmallVector<unsigned, 256> subsitution(num_vertices(Relationships), -1U);
 
-    LastKernel = PipelineInput + numOfKernels - 2;
+    FirstKernel = (numOfKernels == 2) ? PipelineInput : 1;
+    LastKernel = PipelineInput + (numOfKernels - 2);
 
     // Now fill in all of the remaining kernels subsitute position
     KernelPartitionId.resize(numOfKernels);
@@ -1067,7 +1065,6 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
     FirstKernelInPartition[0] = PipelineInput;
 
     auto currentPartitionId = KernelPartitionId[FirstKernel];
-    assert (currentPartitionId == 1);
     auto firstKernelInPartition = FirstKernel;
     FirstKernelInPartition[currentPartitionId] = firstKernelInPartition;
     for (auto kernel = (FirstKernel + 1U); kernel <= LastKernel; ++kernel) {
@@ -1112,8 +1109,18 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
 
     PipelineOutput = newPipelineOutput;
 
-    FirstStreamSet = PipelineOutput + 1U;
-    LastStreamSet = PipelineOutput + numOfStreamSets;
+    assert (FirstKernel < PipelineOutput);
+
+    if (LLVM_UNLIKELY(numOfStreamSets == 0)) {
+        FirstStreamSet = PipelineOutput;
+        LastStreamSet = PipelineOutput;
+    } else {
+        FirstStreamSet = PipelineOutput + 1U;
+        LastStreamSet = PipelineOutput + numOfStreamSets;
+    }
+
+    assert (FirstStreamSet <= LastStreamSet);
+
     FirstBinding = LastStreamSet + 1U;
     LastBinding = LastStreamSet + numOfBindings;
 
@@ -1234,7 +1241,6 @@ void PipelineAnalysis::transcribeRelationshipGraph(const PartitionGraph & initia
     copy_out_edges(callees, mScalarGraph, RelationshipNode::IsScalar);
 
     transcribe(scalars, mScalarGraph);
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

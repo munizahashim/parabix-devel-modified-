@@ -20,7 +20,31 @@ using namespace llvm;
 template <typename T, unsigned n = 16>
 using Vec = SmallVector<T, n>;
 
-using SimulationAllocator = SlabAllocator<>;
+
+struct CompilerAllocator : public SlabAllocator<> {
+    template<typename Type = uint8_t>
+    inline Type * allocate(const size_type n, const_pointer = nullptr) noexcept {
+        static_assert(sizeof(Type) > 0, "Cannot allocate a zero-length type.");
+        if (LLVM_UNLIKELY(n == 0)) {
+            return nullptr;
+        }
+        assert ("A memory leak will occur whenever the SlabAllocator allocates 0 items" && n > 0);
+        auto ptr = static_cast<Type *>(mAllocator.Allocate(n * sizeof(Type), sizeof(void*)));
+        assert ("allocator returned a null pointer. Function was likely called before Allocator creation!" && ptr);
+        return ptr;
+    }
+
+    template<typename Type = uint8_t>
+    inline Type * aligned_allocate(const size_type n, const size_t align, const_pointer = nullptr) noexcept {
+        static_assert(sizeof(Type) > 0, "Cannot allocate a zero-length type.");
+        if (LLVM_UNLIKELY(n == 0)) {
+            return nullptr;
+        }
+        auto ptr = static_cast<Type *>(mAllocator.Allocate(n * sizeof(Type), align));
+        assert ("allocator returned a null pointer. Function was likely called before Allocator creation!" && ptr);
+        return ptr;
+    }
+};
 
 using pipeline_random_engine = std::default_random_engine;
 
@@ -125,7 +149,7 @@ private:
 
 template <typename T>
 struct FixedVector {
-    FixedVector(const size_t First, const size_t Last, SimulationAllocator & A)
+    FixedVector(const size_t First, const size_t Last, CompilerAllocator & A)
     : mArray(A.allocate<T>(Last - First + 1U) - First)
     #ifndef NDEBUG
     , mFirst(First)
@@ -135,7 +159,7 @@ struct FixedVector {
         reset(First, Last);
     }
 
-    FixedVector(const size_t Size, SimulationAllocator & A)
+    FixedVector(const size_t Size, CompilerAllocator & A)
     : mArray(A.allocate<T>(Size))
     #ifndef NDEBUG
     , mFirst(0)
@@ -222,7 +246,7 @@ struct StreamSetOutputPort {
 
 template <typename T>
 struct InputPortVector {
-    inline InputPortVector(const size_t n, SimulationAllocator & A)
+    inline InputPortVector(const size_t n, CompilerAllocator & A)
     : mArray(0, n, A) {
     }
     inline T operator[](const StreamSetPort port) const {
@@ -248,7 +272,7 @@ private:
 
 template <typename T>
 struct OutputPortVector {
-    inline OutputPortVector(const size_t n, SimulationAllocator & A)
+    inline OutputPortVector(const size_t n, CompilerAllocator & A)
     : mArray(0, n, A) {
     }
     inline T operator[](const StreamSetPort port) const {

@@ -275,6 +275,11 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
     // TODO: if we detect a fatal error at init, we should not execute
     // the pipeline loop.
 
+    if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
+        assert (LastKernel == PipelineInput);
+        return;
+    }
+
     initializeScalarValues(b);
 
     initializeKernelAssertions(b);
@@ -310,7 +315,9 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
                 assert (mScalarGraph[e].Type == PortType::Input);
                 assert (expected++ == mScalarGraph[e].Number);
                 const auto scalar = source(e, mScalarGraph);
-                args.push_back(getScalar(b, scalar));
+                Value * const scalarVal = getScalar(b, scalar);
+
+                args.push_back(scalarVal);
             }
             addFamilyCallInitializationArguments(b, i, args);
             addRepeatingStreamSetInitializationArguments(i, args);
@@ -359,8 +366,19 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
  * @brief generateAllocateInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * const expectedNumOfStrides) {
+
     b.setScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER, expectedNumOfStrides);
 
+    if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
+        assert (LastKernel == PipelineInput);
+        #ifndef NDEBUG
+        for (auto streamSet = (PipelineOutput + 1); streamSet <= LastStreamSet; ++streamSet) {
+            const auto & bn = mBufferGraph[streamSet];
+            assert (bn.isUnowned() && bn.isExternal());
+        }
+        #endif
+        return;
+    }
 
     initializeInitialSlidingWindowSegmentLengths(b, expectedNumOfStrides);
 
@@ -463,6 +481,11 @@ void PipelineCompiler::generateKernelMethod(KernelBuilder & b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateFinalizeMethod(KernelBuilder & b) {
 
+    if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
+        assert (FirstKernel == LastKernel);
+        return;
+    }
+
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet() || NumOfPAPIEvents > 0)) {
         printOptionalCycleCounter(b);
         #ifdef ENABLE_PAPI
@@ -513,6 +536,11 @@ void PipelineCompiler::generateFinalizeMethod(KernelBuilder & b) {
  * @brief generateFinalizeThreadLocalMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
+
+    if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
+        assert (FirstKernel == LastKernel);
+        return;
+    }
 
     assert (mTarget->hasThreadLocal());
 

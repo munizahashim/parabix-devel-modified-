@@ -42,8 +42,6 @@ void PipelineCompiler::writeOutputScalars(KernelBuilder & b, const size_t index,
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initializeScalarValues(KernelBuilder & b) {
     mScalarValue.reset(FirstKernel, LastScalar);
-
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

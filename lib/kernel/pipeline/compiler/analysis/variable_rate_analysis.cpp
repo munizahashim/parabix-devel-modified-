@@ -25,8 +25,6 @@ constexpr uint64_t MAX_DATA_ITERATIONS =   100000;
 
 constexpr long APPROXIMATE_TIMEOUT_SECONDS = 10;
 
-using SimulationAllocator = SlabAllocator<uint8_t>;
-
 using length_t = int64_t;
 
 using DistId = ProcessingRateProbabilityDistribution::DistributionTypeId;
@@ -150,7 +148,7 @@ struct SimulationPort {
         QueueLength -= pending;
     }
 
-    void * operator new (std::size_t size, SimulationAllocator & allocator) noexcept {
+    void * operator new (std::size_t size, CompilerAllocator & allocator) noexcept {
         return allocator.allocate<uint8_t>(size);
     }
 
@@ -279,7 +277,7 @@ struct BasePartialSumGenerator {
         HeadPosition = min;
     }
 
-    BasePartialSumGenerator(const unsigned users, const unsigned historyLength, SimulationAllocator & allocator)
+    BasePartialSumGenerator(const unsigned users, const unsigned historyLength, CompilerAllocator & allocator)
     : Users(users)
     , HeadOffset(0)
     , HeadPosition(0)
@@ -304,7 +302,7 @@ struct BasePartialSumGenerator {
         }
     }
 
-    void * operator new (std::size_t size, SimulationAllocator & allocator) noexcept {
+    void * operator new (std::size_t size, CompilerAllocator & allocator) noexcept {
         return allocator.allocate<uint8_t>(size);
     }
 
@@ -323,7 +321,7 @@ private:
     uint64_t * const UserReadPosition;
 
 
-    SimulationAllocator & Allocator;
+    CompilerAllocator & Allocator;
 };
 
 template<typename DistributionModel>
@@ -332,7 +330,7 @@ struct PartialSumGenerator : public BasePartialSumGenerator {
     PartialSumGenerator(const DistributionModel model,
                         const uint32_t users,
                         const unsigned historyLength,
-                        SimulationAllocator & allocator)
+                        CompilerAllocator & allocator)
     : BasePartialSumGenerator(users, historyLength, allocator)
     , Model(model) {
 
@@ -453,7 +451,7 @@ struct SimulationNode {
 
     virtual void fire(length_t * const pendingArray, pipeline_random_engine & rng, uint64_t *& history) = 0;
 
-    void * operator new (std::size_t size, SimulationAllocator & allocator) noexcept {
+    void * operator new (std::size_t size, CompilerAllocator & allocator) noexcept {
         return allocator.allocate<uint8_t>(size);
     }
 
@@ -461,7 +459,7 @@ struct SimulationNode {
 
 protected:
 
-    SimulationNode(const unsigned inputs, const unsigned outputs, SimulationAllocator & allocator)
+    SimulationNode(const unsigned inputs, const unsigned outputs, CompilerAllocator & allocator)
     : Input(inputs ? allocator.allocate<SimulationPort *>(inputs) : nullptr),
       Output(outputs ? allocator.allocate<SimulationPort *>(outputs) : nullptr),
       Inputs(inputs), Outputs(outputs) {
@@ -472,7 +470,7 @@ protected:
 // we use a fork for both streamsets and relative rates
 struct SimulationFork final : public SimulationNode {
 
-    SimulationFork(const unsigned outputs, SimulationAllocator & allocator)
+    SimulationFork(const unsigned outputs, CompilerAllocator & allocator)
     : SimulationNode(1, outputs, allocator) {
 
     }
@@ -509,7 +507,7 @@ struct SimulationFork final : public SimulationNode {
 
 struct BlockSizedSimulationFork final : public SimulationNode {
 
-    BlockSizedSimulationFork(const unsigned blockSize, const unsigned outputs, SimulationAllocator & allocator)
+    BlockSizedSimulationFork(const unsigned blockSize, const unsigned outputs, CompilerAllocator & allocator)
     : SimulationNode(1, outputs, allocator)
     , BlockSize(blockSize) { }
 
@@ -570,7 +568,7 @@ private:
 
 struct SimulationActor : public SimulationNode {
 
-    SimulationActor(const unsigned inputs, const unsigned outputs, SimulationAllocator & allocator)
+    SimulationActor(const unsigned inputs, const unsigned outputs, CompilerAllocator & allocator)
     : SimulationNode(inputs, outputs, allocator)
     , SumOfStrides(0)
     , SumOfStridesSquared(0) {
@@ -665,7 +663,7 @@ no_more_pending_input:
 struct SimulationSourceActor final : public SimulationActor {
 
     SimulationSourceActor(const unsigned outputs,
-                          SimulationAllocator & allocator)
+                          CompilerAllocator & allocator)
     : SimulationActor(0, outputs, allocator)
     , RequiredIterations(1) {
 
@@ -713,7 +711,7 @@ struct SimulationSourceActor final : public SimulationActor {
 
 struct SimulationSinkActor final : public SimulationActor {
 
-    SimulationSinkActor(const unsigned inputs, SimulationAllocator & allocator)
+    SimulationSinkActor(const unsigned inputs, CompilerAllocator & allocator)
     : SimulationActor(inputs, 0, allocator) {
 
     }
@@ -1613,7 +1611,7 @@ equivalent_relationship_already_exists:
 
     flat_map<Graph::edge_descriptor, SimulationPort *> portMap;
 
-    auto makePortNode = [&](const Graph::edge_descriptor e, length_t * const pendingArray, SimulationAllocator & allocator) HOT {
+    auto makePortNode = [&](const Graph::edge_descriptor e, length_t * const pendingArray, CompilerAllocator & allocator) HOT {
         PartitionPort & p = G[e];
         SimulationPort * port = nullptr;
 
@@ -1787,7 +1785,7 @@ equivalent_relationship_already_exists:
     errs() << "BUILT NETWORK\n";
     #endif
 
-    SimulationAllocator allocator;
+    CompilerAllocator allocator;
 
     SimulationNode ** const nodes = allocator.allocate<SimulationNode *>(nodeCount);
 

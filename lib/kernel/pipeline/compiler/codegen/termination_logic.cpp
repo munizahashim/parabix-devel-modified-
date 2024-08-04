@@ -115,12 +115,14 @@ Value * PipelineCompiler::hasPipelineTerminated(KernelBuilder & b) {
             }
         }
     }
-
-
-    assert (soft);
-    Value * signal = b.CreateSelect(soft, aborted, unterminated);
-    if (hard) {
-        signal = b.CreateSelect(hard, fatal, signal);
+    Value * signal = aborted;
+    if (soft) {
+        signal = b.CreateSelect(soft, aborted, unterminated);
+        if (hard) {
+            signal = b.CreateSelect(hard, fatal, signal);
+        }
+    } else {
+        assert (hard == nullptr);
     }
     return signal;
 

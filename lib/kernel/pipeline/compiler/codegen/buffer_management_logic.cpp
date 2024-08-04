@@ -80,6 +80,11 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
  * @brief loadInternalStreamSetHandles
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::loadInternalStreamSetHandles(KernelBuilder & b, const bool nonLocal) {
+
+    if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
+        return;
+    }
+
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
         if (LLVM_UNLIKELY(bn.isTruncated())) continue;
@@ -173,7 +178,6 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const exp
             }
         }
     }
-
 
     // and allocate any output buffers
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
@@ -308,6 +312,10 @@ void PipelineCompiler::updateExternalProducedItemCounts(KernelBuilder & b) {
  * @brief resetInternalBufferHandles
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::resetInternalBufferHandles() {
+    if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
+        assert (LastStreamSet == PipelineOutput);
+        return;
+    }
     for (auto i = FirstStreamSet; i <= LastStreamSet; ++i) {
         const BufferNode & bn = mBufferGraph[i];
         if (LLVM_UNLIKELY(bn.isInternal())) {

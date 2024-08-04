@@ -11,7 +11,9 @@ void PipelineAnalysis::addFlowControlAnnotations() {
 
     AllowIOProcessThread = false;
 
-    if (codegen::UseProcessThreadForIO && !IsNestedPipeline) {
+    if (codegen::UseProcessThreadForIO && !IsNestedPipeline && FirstKernel != PipelineInput) {
+
+        assert (LastKernel != PipelineOutput);
 
         for (; firstPartitionId < lastPartitionId; ++firstPartitionId) {
             const auto kernelId = FirstKernelInPartition[firstPartitionId];
@@ -82,9 +84,6 @@ void PipelineAnalysis::addFlowControlAnnotations() {
         }
 
     }
-
-    assert (firstPartitionId <= lastPartitionId);
-    assert (lastPartitionId < PartitionCount);
 
     FirstComputePartitionId = firstPartitionId;
     LastComputePartitionId = lastPartitionId;

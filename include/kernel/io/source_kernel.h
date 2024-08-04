@@ -81,7 +81,6 @@ public:
 protected:
     void generateInitializeMethod(KernelBuilder & b) override;
     void generateDoSegmentMethod(KernelBuilder & b) override;
-    void generateFinalizeMethod(KernelBuilder & b) override;
     llvm::Value * generateExpectedOutputSizeMethod(KernelBuilder &) override;
 };
 

@@ -316,6 +316,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         assert (AllowIOProcessThread || firstComputeKernel == FirstKernel);
         if (mIsIOProcessThread) {
             assert (!mIsNestedPipeline);
+            assert (FirstKernel != PipelineInput);
             if (FirstKernel < firstComputeKernel) {
                 // Let C be the current segment number of the compute thread,
                 // P be the current segment number of the process thread and
@@ -337,12 +338,13 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
                     executeKernel(b);
                 }
             }
-        } else {
+        } else if (firstComputeKernel != PipelineInput) {
             if (AllowIOProcessThread && firstComputeKernel != FirstKernel) {
                  // If C < P, then the compute thread is behind the process thread.
                  waitUntilCurrentSegmentNumberIsLessThan(b, firstComputeKernel - 1, nullptr);
             }
             const auto lastComputeKernel = FirstKernelInPartition[LastComputePartitionId + 1] - 1;
+            assert (lastComputeKernel < PipelineOutput);
             assert (AllowIOProcessThread || lastComputeKernel == LastKernel);
             for (auto i = firstComputeKernel; i <= lastComputeKernel; ++i) {
                 setActiveKernel(b, i, true);

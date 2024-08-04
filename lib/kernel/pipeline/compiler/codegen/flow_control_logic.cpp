@@ -29,7 +29,7 @@ void PipelineCompiler::addSegmentLengthSlidingWindowKernelProperties(KernelBuild
 void PipelineCompiler::initializeInitialSlidingWindowSegmentLengths(KernelBuilder & b, Value * const segmentLengthScalingFactor) {
     for (unsigned i = FirstComputePartitionId; i <= LastComputePartitionId; ++i) {
         const auto f = FirstKernelInPartition[i];
-        assert (FirstKernel <= f && f <= LastKernel);
+      //  assert (FirstKernel <= f && f <= LastKernel);
         if (MinimumNumOfStrides[f] != MaximumNumOfStrides[f] || mIsNestedPipeline) {
             Value * const init = b.CreateMul(segmentLengthScalingFactor, b.getSize(MaximumNumOfStrides[f]));
             b.setScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(f), init);

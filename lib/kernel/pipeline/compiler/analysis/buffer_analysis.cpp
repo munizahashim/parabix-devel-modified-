@@ -583,19 +583,20 @@ void PipelineAnalysis::determineBufferSize(KernelBuilder & b) {
 
     const auto blockWidth = b.getBitBlockWidth();
 
+    if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
+        return;
+    }
+
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
 
         BufferNode & bn = mBufferGraph[streamSet];
-
-        if (bn.isUnowned() || bn.hasZeroElementsOrWidth() || bn.isConstant()) {
-            continue;
-        }
 
         unsigned maxLookBehind = 0;
 
         Rational bMin{0};
         Rational bMax{0};
         if (LLVM_LIKELY(!bn.isConstant())) {
+
             const auto producerOutput = in_edge(streamSet, mBufferGraph);
             const BufferPort & producerRate = mBufferGraph[producerOutput];
             maxLookBehind = producerRate.LookBehind;
@@ -654,9 +655,11 @@ void PipelineAnalysis::determineBufferSize(KernelBuilder & b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineAnalysis::addStreamSetsToBufferGraph(KernelBuilder & b) {
 
-    mInternalBuffers.resize(LastStreamSet - FirstStreamSet + 1);
+    if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
+        return;
+    }
 
-//    const auto useMMap = DebugOptionIsSet(codegen::EnableAnonymousMMapedDynamicLinearBuffers);
+    mInternalBuffers.resize(LastStreamSet - FirstStreamSet + 1);
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         BufferNode & bn = mBufferGraph[streamSet];

@@ -553,10 +553,6 @@ void MemorySourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
     b.SetInsertPoint(exit);
 }
 
-void MemorySourceKernel::generateFinalizeMethod(KernelBuilder & b) {
-    b.CreateFree(b.getScalarField("ancillaryBuffer"));
-}
-
 Value * MemorySourceKernel::generateExpectedOutputSizeMethod(KernelBuilder & b) {
     return b.getScalarField("fileItems");
 }

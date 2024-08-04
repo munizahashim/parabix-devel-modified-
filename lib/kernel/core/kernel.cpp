@@ -203,9 +203,6 @@ void Kernel::generateKernel(KernelBuilder & b) {
     if (LLVM_UNLIKELY(mModule == nullptr)) {
         report_fatal_error(StringRef(getName()) + " does not have a module");
     }
-    if (LLVM_UNLIKELY(mStride == 0)) {
-        report_fatal_error(StringRef(getName()) + ": stride cannot be 0");
-    }
     b.setModule(mModule);
     assert (mSharedStateType == nullptr && mThreadLocalStateType == nullptr);
     instantiateKernelCompiler(b)->generateKernel(b);

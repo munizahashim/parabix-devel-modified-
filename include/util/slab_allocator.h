@@ -72,7 +72,7 @@ public:
     inline SlabAllocator() noexcept {}
     inline SlabAllocator(const SlabAllocator &) noexcept = delete;
     template <class U> inline SlabAllocator (const SlabAllocator<U> &) noexcept { }
-private:
+protected:
     LLVMAllocator mAllocator;
 };
 

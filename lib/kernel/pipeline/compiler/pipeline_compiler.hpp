@@ -598,7 +598,7 @@ public:
 
 protected:
 
-    SimulationAllocator                         mAllocator;
+    CompilerAllocator                         mAllocator;
 
     const bool                                  CheckAssertions;
     const bool                                  mTraceProcessedProducedItemCounts;
@@ -614,7 +614,7 @@ protected:
 
     // analysis state
     static constexpr unsigned                   PipelineInput = 0;
-    static constexpr unsigned                   FirstKernel = 1;
+    const unsigned                              FirstKernel;
     const unsigned                              LastKernel;
     const unsigned                              PipelineOutput;
     const unsigned                              FirstStreamSet;
@@ -933,6 +933,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mUseDynamicMultithreading(codegen::EnableDynamicMultithreading && !P.IsNestedPipeline)
 , mUsesIllustrator(codegen::EnableIllustrator)
 , mLengthAssertions(pipelineKernel->getLengthAssertions())
+, FirstKernel(P.FirstKernel)
 , LastKernel(P.LastKernel)
 , PipelineOutput(P.PipelineOutput)
 , FirstStreamSet(P.FirstStreamSet)

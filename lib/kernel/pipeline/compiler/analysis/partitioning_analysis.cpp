@@ -444,7 +444,7 @@ add_output_rate:    O.set(nextRateId++);
         duplicateFilter.clear();
     }
 
-    assert (partitionCount > 2);
+    assert (partitionCount > 0);
 
     for (unsigned i = 1; i < (partitionCount - 1); ++i) {
         if (in_degree(i, P) == 0) {
@@ -1014,7 +1014,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
         duplicateFilter.clear();
     }
 
-    assert (partitionCount > 2);
+    assert (partitionCount > 0);
 
     for (unsigned i = 1; i < (partitionCount - 1); ++i) {
         if (in_degree(i, P) == 0) {
@@ -1261,17 +1261,18 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
         }
     }
 
+
+
     PartitionJumpTargetId[0] = 0;
-    assert (FirstComputePartitionId > 0);
-    for (size_t i = 2; i < FirstComputePartitionId; ++i) {
-        PartitionJumpTargetId[i - 1] = i;
-    }
-    assert ((FirstComputePartitionId - 1) < (LastComputePartitionId + 1));
-    PartitionJumpTargetId[(FirstComputePartitionId - 1)] = (LastComputePartitionId + 1);
-    assert (LastComputePartitionId < (PartitionCount - 1));
-    for (size_t i = FirstComputePartitionId; i <= LastComputePartitionId; ++i) {
-        if (PartitionJumpTargetId[i] > LastComputePartitionId) {
-            PartitionJumpTargetId[i] = (PartitionCount - 1);
+    if (LLVM_LIKELY(FirstComputePartitionId > 0)) {
+        for (size_t i = 2; i < FirstComputePartitionId; ++i) {
+            PartitionJumpTargetId[i - 1] = i;
+        }
+        PartitionJumpTargetId[(FirstComputePartitionId - 1)] = (LastComputePartitionId + 1);
+        for (size_t i = FirstComputePartitionId; i <= LastComputePartitionId; ++i) {
+            if (PartitionJumpTargetId[i] > LastComputePartitionId) {
+                PartitionJumpTargetId[i] = (PartitionCount - 1);
+            }
         }
     }
     assert (PartitionCount > 1);

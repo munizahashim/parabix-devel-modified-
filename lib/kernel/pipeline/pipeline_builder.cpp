@@ -339,6 +339,7 @@ Kernel * PipelineBuilder::makeKernel() {
                     out << ".";
                     report_fatal_error(StringRef(out.str()));
                 }
+
                 const auto bufferVertex = add_vertex(rel, G);
                 M.emplace(rel, bufferVertex);
                 add_edge(bufferVertex, producer, i, G); // buffer -> producer ordering
@@ -641,6 +642,7 @@ Scalar * PipelineBuilder::getInputScalar(const StringRef name) {
 }
 
 void PipelineBuilder::setInputScalar(const StringRef name, Scalar * value) {
+    errs() << "setInputScalar " << name << " ["; errs().write_hex((uintptr_t)value) << "] " << (unsigned)value->getClassTypeId() << "\n";
     for (Binding & input : mTarget->mInputScalars) {
         if (name.equals(input.getName())) {
             input.setRelationship(value);

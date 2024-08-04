@@ -276,8 +276,8 @@ public:
     const bool                      mTraceIndividualConsumedItemCounts;
     const bool                      IsNestedPipeline;
 
-    static const unsigned           PipelineInput = 0U;
-    static const unsigned           FirstKernel = 1U;
+    static const unsigned           PipelineInput = 0;
+    unsigned                        FirstKernel = 0;
     unsigned                        LastKernel = 0;
     unsigned                        PipelineOutput = 0;
     unsigned                        FirstStreamSet = 0;

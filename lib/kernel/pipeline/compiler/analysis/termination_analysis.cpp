@@ -52,8 +52,6 @@ void PipelineAnalysis::identifyTerminationChecks() {
         }
     }
 
-    assert ("program has no outputs? relationship construction should have reported this case." && in_degree(terminal, G) > 0);
-
     ReverseTopologicalOrdering ordering;
     ordering.reserve(num_vertices(G));
     topological_sort(G, std::back_inserter(ordering));
