@@ -103,6 +103,15 @@ struct Range {
     bool is_empty() {return lo > hi;}
 };
 
+struct LengthInfo {
+    unsigned lgth;
+    Range range;
+    CC_List ccs;
+    Range actualRange;
+    PabloAST * test;
+    PabloAST * combined_test;
+};
+
 class UTF_Lookahead_Compiler {
 public:
     UTF_Lookahead_Compiler(pablo::Var * Var, PabloBuilder & pb);
@@ -119,7 +128,7 @@ private:
     Basis_Set               mScopeBasis[4];
     std::unique_ptr<cc::CC_Compiler> mCodeUnitCompilers[4];
     void createLengthHierarchy(CC_List & ccs);
-    void extendLengthHierarchy(CC_List & ccs, Range r, PabloBuilder & pb);
+    void extendLengthHierarchy(std::vector<LengthInfo> & lengthInfo, unsigned i, PabloBuilder & pb);
     void subrangePartitioning(CC_List & ccs, Range & range, PabloAST * rangeTest, PabloBuilder & pb);
     void compileSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb);
     void compileUnguardedSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb);

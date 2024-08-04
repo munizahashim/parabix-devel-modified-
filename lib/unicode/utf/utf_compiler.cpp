@@ -32,6 +32,7 @@ static cl::opt<unsigned> TernaryLogicCostPerByte("TernaryLogicCostPerByte", cl::
 static cl::opt<unsigned> ShiftCostFactor("ShiftCostFactor", cl::init(10), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", cl::init(25), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(4), cl::cat(codegen::CodeGenOptions));
+static cl::opt<bool> SuffixOptimization("SuffixOptimization", cl::init(false), cl::cat(codegen::CodeGenOptions));
 
 std::string kernelAnnotation() {
         std::string a = "+b" + std::to_string(BinaryLogicCostPerByte);
@@ -690,75 +691,77 @@ void UTF_Lookahead_Compiler::compile(Target_List targets, CC_List ccs) {
     createLengthHierarchy(ccs);
 }
 
-void UTF_Lookahead_Compiler::createLengthHierarchy(CC_List & ccs) {
 
-    CC_List len1_sets(ccs.size());
-    codepoint_t len1_max = mEncoder.max_codepoint_of_length(1);
-    Range len1_range{0, len1_max};
-    extract_CCs_by_range(len1_range, ccs, len1_sets);
-    compileSubrange(len1_sets, len1_range, mPB.createOnes(), len1_range, mPB);
-    extendLengthHierarchy(ccs, Range{len1_max+1, 0x10FFFF}, mPB);
+void UTF_Lookahead_Compiler::createLengthHierarchy(CC_List & ccs) {
+    // Maximum number of code units (UTF-8) is 4.
+    std::vector<LengthInfo> lengthInfo;
+    //
+    // For each possible multibyte sequence length, determine
+    // (1) the subsets of the ccs that are of that length
+    // (2) a narrow codepoint range of the ccs of this length
+    // (3) a narrow test for the prefixes of multibyte sequences of that lgth.
+    codepoint_t lgth_base = 0;
+    for (unsigned lgth = 1; lgth <= mEncoder.encoded_length(0x10FFFF); lgth++) {
+        Range lgth_range{lgth_base, mEncoder.max_codepoint_of_length(lgth)};
+        CC_List length_ccs(ccs.size());
+        extract_CCs_by_range(lgth_range, ccs, length_ccs);
+        Range actual_range = CC_Set_Range(length_ccs);
+        if (!actual_range.is_empty()) {
+            PabloAST * lgth_test = nullptr;
+            if (lgth > 1) {
+                re::CC * lgth_test_CC = prefixCC(length_ccs);
+                lgth_test = mCodeUnitCompilers[0]->compileCC(lgth_test_CC, mPB);
+            } else {
+                lgth_test = mPB.createOnes(); // mPB.createNot(mScopeBasis[0][7]);
+            }
+            lengthInfo.push_back(LengthInfo{lgth, lgth_range, length_ccs, actual_range, lgth_test, lgth_test});
+            llvm::errs() << "lengthInfo.size() = " << lengthInfo.size() << "\n";
+        }
+        lgth_base = lgth_range.hi + 1;
+    }
+    if (lengthInfo.size() >= 2) {
+        PabloAST * combined = lengthInfo[lengthInfo.size() - 1].test;
+        for (int i = lengthInfo.size() - 2; i >= 0; i--) {
+            llvm::errs() << "i  = " << i << "\n";
+            if (lengthInfo[i].lgth > 1) {
+                lengthInfo[i].combined_test = mPB.createOr(lengthInfo[i].test, combined);
+                combined = lengthInfo[i].combined_test;
+            }
+        }
+    }
+    unsigned first_pfx = 0;
+    if (lengthInfo[0].lgth == 1) {
+        compileSubrange(lengthInfo[0].ccs, lengthInfo[0].range, lengthInfo[0].test, lengthInfo[0].actualRange, mPB);
+        first_pfx = 1;
+    }
+    extendLengthHierarchy(lengthInfo, first_pfx, mPB);
 }
 
-
-void UTF_Lookahead_Compiler::extendLengthHierarchy(CC_List & ccs, Range r, PabloBuilder & pb) {
-    CC_List subrangeSets(ccs.size());
-    extract_CCs_by_range(r, ccs, subrangeSets);
-    // We further narrow the range of codepoints to consider based on
-    // the actual minimum and maximum codepoints found in the subrange.
-    // This will result in a narrower test, which will allow us to
-    // avoid computing the subrange logic for data blocks which have
-    // no elements in the narrower range.
-    Range actual_range = CC_Set_Range(subrangeSets);
-    //  If there are no CCs that intersect the subrange, no code
-    //  generation is required.
-    if (actual_range.is_empty()) return;
-
-    re::CC * preCC = prefixCC(subrangeSets);
-    const auto lo_pfx = mEncoder.nthCodeUnit(actual_range.lo, 1);
-    PabloAST * const outer_test = mCodeUnitCompilers[0]->compileCC(preCC, pb);
-
+void UTF_Lookahead_Compiler::extendLengthHierarchy(std::vector<LengthInfo> & lengthInfo, unsigned i, PabloBuilder & pb) {
+    llvm::errs() << "extendLengthHierarchy(" << i << ")\n";
+    if (lengthInfo.size() <= i) return;
+    PabloAST * outer_test = lengthInfo[i].combined_test;
     auto nested = pb.createScope();
     pb.createIf(outer_test, nested);
-
-
-    const auto lo_len = mEncoder.encoded_length(actual_range.lo);
-    const auto hi_len = mEncoder.encoded_length(actual_range.hi);
-    
     PabloAST * inner_test = outer_test;
-    while (mScopeLength < lo_len) {
+    while (mScopeLength < lengthInfo[i].lgth) {
         mScopeBasis[mScopeLength] = shifted_basis(mScopeBasis[0], mScopeLength, nested);
         // Combine the suffix bits into the current test and discard them.
-        if (lo_len == hi_len) {
+        if (SuffixOptimization) {
+            // Combine the suffix bits into the current test and discard them.
             inner_test = nested.createAnd(mScopeBasis[mScopeLength][7], inner_test);
-            inner_test = nested.createAnd(nested.createNot(mScopeBasis[mScopeLength][6]), inner_test);
+            lengthInfo[i].test = nested.createAnd(nested.createNot(mScopeBasis[mScopeLength][6]), inner_test);
+            mScopeBasis[mScopeLength].resize(6);
         }
-        mScopeBasis[mScopeLength].resize(6);
         mCodeUnitCompilers[mScopeLength] =
-            std::make_unique<cc::Parabix_CC_Compiler_Builder>(mScopeBasis[mScopeLength]);
+        std::make_unique<cc::Parabix_CC_Compiler_Builder>(mScopeBasis[mScopeLength]);
         mScopeLength++;
     }
-
-    codepoint_t test_lo = mEncoder.minCodePointWithCommonCodeUnits(actual_range.lo, 1);
-    codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(actual_range.hi, 1);
+    codepoint_t test_lo = mEncoder.minCodePointWithCommonCodeUnits(lengthInfo[i].actualRange.lo, 1);
+    codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(lengthInfo[i].actualRange.hi, 1);
     Range testRange{test_lo, test_hi};
-    if (lo_len == hi_len) {
-        subrangePartitioning(subrangeSets, testRange, inner_test, nested);
-        //compileUnguardedSubrange(subrangeSets, testRange, test, testRange, nested);
-    } else {
-        codepoint_t len_max = mEncoder.max_codepoint_of_length(lo_len);
-        Range lenRange{test_lo, len_max};
-        CC_List lenRangeSets(ccs.size());
-        extract_CCs_by_range(lenRange, subrangeSets, lenRangeSets);
-        Range actual_range = CC_Set_Range(lenRangeSets);
-        const auto hi_pfx = mEncoder.nthCodeUnit(actual_range.hi, 1);
-        PabloAST * lenTest = mCodeUnitCompilers[0]->compileCC(re::makeByte(lo_pfx, hi_pfx), nested);
-        //compileUnguardedSubrange(lenRangeSets, lenRange, lenTest, lenRange, nested);
-        subrangePartitioning(subrangeSets, lenRange, lenTest, nested);
-        extendLengthHierarchy(subrangeSets, Range{len_max+1, 0x10FFFF}, nested);
-    }
-
-
+    subrangePartitioning(lengthInfo[i].ccs, testRange, lengthInfo[i].test, nested);
+    extendLengthHierarchy(lengthInfo, i+1, nested);
 }
 
 void UTF_Lookahead_Compiler::subrangePartitioning(CC_List & ccs, Range & range, PabloAST * rangeTest, PabloBuilder & pb) {
@@ -815,7 +818,7 @@ void UTF_Lookahead_Compiler::compileSubrange(CC_List & ccs, Range & enclosingRan
     llvm::errs() << "  code_unit_to_test = " << code_unit_to_test << "\n";
     llvm::errs() << "  lo_unit = " << lo_unit << "  hi_unit = " << hi_unit << "\n";
     // Adjust for suffixes by masking off suffix bit 7;
-    if (code_unit_to_test > 1) {
+    if (SuffixOptimization && (code_unit_to_test > 1)) {
         lo_unit &= 0x3F;
         hi_unit &= 0x3F;
     }
@@ -886,7 +889,7 @@ re::CC * UTF_Lookahead_Compiler::codeUnitCC(re::CC * cc, unsigned codeunit) {
         unsigned hi_unit = mEncoder.nthCodeUnit(hi_codepoint(i), codeunit);
         //
         // Mask off bits 6 and 7 for suffixes.
-        if (codeunit > 1) {
+        if (SuffixOptimization && (codeunit > 1)) {
             lo_unit &= 0x3F;
             hi_unit &= 0x3F;
         }
