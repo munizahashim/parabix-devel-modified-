@@ -12,32 +12,30 @@ namespace IDISA { class IDISA_Builder; }
 namespace re { class RE; class CC; }
 namespace kernel {
 
-using CCs = std::vector<re::CC *>;
-
 class CharClassesKernel final : public pablo::PabloKernel {
 public:
-    CharClassesKernel(KernelBuilder & b, CCs & ccs, StreamSet * BasisBits, StreamSet * CharClasses);
+    CharClassesKernel(KernelBuilder & b, std::vector<re::CC *> ccs, StreamSet * BasisBits, StreamSet * CharClasses);
     bool hasSignature() const override { return true; }
     llvm::StringRef getSignature() const override;
 protected:
-    CharClassesKernel(KernelBuilder & b, std::string signature, CCs & ccs, StreamSet * BasisBits, StreamSet * CharClasses);
+    CharClassesKernel(KernelBuilder & b, std::string signature, std::vector<re::CC *> && ccs, StreamSet * BasisBits, StreamSet * CharClasses);
     void generatePabloMethod() override;
 protected:
-    CCs & mCCs;
+    const std::vector<re::CC *> mCCs;
     const std::string mSignature;
 };
 
 
 class ByteClassesKernel final : public pablo::PabloKernel {
 public:
-    ByteClassesKernel(KernelBuilder & b, CCs & ccs, StreamSet * inputStream, StreamSet * CharClasses);
+    ByteClassesKernel(KernelBuilder & b, std::vector<re::CC *> ccs, StreamSet * inputStream, StreamSet * CharClasses);
     bool hasSignature() const override { return true; }
     llvm::StringRef getSignature() const override;
 protected:
-    ByteClassesKernel(KernelBuilder & b, std::string signature, CCs & ccs, StreamSet * inputStream, StreamSet * CharClasses);
+    ByteClassesKernel(KernelBuilder & b, std::string signature, std::vector<re::CC *> && ccs, StreamSet * inputStream, StreamSet * CharClasses);
     void generatePabloMethod() override;
 protected:
-    CCs mCCs;
+    const std::vector<re::CC *> mCCs;
     const std::string mSignature;
 };
 

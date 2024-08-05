@@ -24,7 +24,7 @@ using namespace re;
 using namespace llvm;
 using namespace UTF;
 
-std::string makeSignature(const StreamSet * const basis, CCs & ccs) {
+std::string makeSignature(const StreamSet * const basis, std::vector<re::CC *> & ccs) {
     std::string tmp;
     raw_string_ostream out(tmp);
     out << basis->getNumElements() << 'x' << basis->getFieldWidth();
@@ -42,12 +42,12 @@ std::string makeSignature(const StreamSet * const basis, CCs & ccs) {
     return tmp;
 }
 
-CharClassesKernel::CharClassesKernel(KernelBuilder & b, CCs & ccs, StreamSet * BasisBits, StreamSet * CharClasses)
-: CharClassesKernel(b, makeSignature(BasisBits, ccs), ccs, BasisBits, CharClasses) {
+CharClassesKernel::CharClassesKernel(KernelBuilder & b, std::vector<re::CC *> ccs, StreamSet * BasisBits, StreamSet * CharClasses)
+: CharClassesKernel(b, makeSignature(BasisBits, ccs), std::move(ccs), BasisBits, CharClasses) {
 
 }
 
-CharClassesKernel::CharClassesKernel(KernelBuilder & b, std::string signature, CCs & ccs, StreamSet * BasisBits, StreamSet * CharClasses)
+CharClassesKernel::CharClassesKernel(KernelBuilder & b, std::string signature, std::vector<re::CC *> && ccs, StreamSet * BasisBits, StreamSet * CharClasses)
 : PabloKernel(b, "cc_" + getStringHash(signature)
 , {Binding{"basis", BasisBits}}, {Binding{"charclasses", CharClasses}})
 , mCCs(ccs)
@@ -76,16 +76,16 @@ void CharClassesKernel::generatePabloMethod() {
 }
 
 ByteClassesKernel::ByteClassesKernel(KernelBuilder & b,
-                                     CCs & ccs,
+                                     std::vector<re::CC *>  ccs,
                                      StreamSet * inputStream,
                                      StreamSet * CharClasses)
-: ByteClassesKernel(b, makeSignature(inputStream, ccs), ccs, inputStream, CharClasses) {
+: ByteClassesKernel(b, makeSignature(inputStream, ccs), std::move(ccs), inputStream, CharClasses) {
 
 }
 
 ByteClassesKernel::ByteClassesKernel(KernelBuilder & b,
                                      std::string signature,
-                                     CCs & ccs,
+                                     std::vector<re::CC *> && ccs,
                                      StreamSet * inputStream,
                                      StreamSet * CharClasses)
 : PabloKernel(b, "bcc_" + getStringHash(signature)
