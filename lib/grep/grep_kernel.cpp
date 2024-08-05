@@ -297,7 +297,7 @@ void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, std::vector<Strea
     UCD::PropertyObject * propObj = UCD::getPropertyObject(mProperty);
     if (auto * obj = dyn_cast<UCD::EnumeratedPropertyObject>(propObj)) {
         std::vector<UCD::UnicodeSet> & bases = obj->GetEnumerationBasisSets();
-        std::vector<re::CC *> ccs;
+        UTF::CC_List ccs;
         for (auto & b : bases) ccs.push_back(makeCC(b, &cc::Unicode));
         StreamSet * basis = b->CreateStreamSet(ccs.size());
         b->CreateKernelFamilyCall<CharClassesKernel>(ccs, inputs[0], basis);
@@ -878,21 +878,21 @@ void CodePointMatchKernel::generatePabloMethod() {
     if (UCD::CodePointPropertyObject * p = dyn_cast<UCD::CodePointPropertyObject>(propObj)) {
         const UCD::UnicodeSet & nullSet = p->GetNullSet();
         std::vector<UCD::UnicodeSet> & xfrms = p->GetBitTransformSets();
-        std::vector<re::CC *> xfrm_ccs;
+        UTF::CC_List xfrm_ccs;
         for (auto & b : xfrms) xfrm_ccs.push_back(makeCC(b, &cc::Unicode));
         UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
-        Var * nullVar = nullptr;
-        if (!nullSet.empty()) {
-            re::CC * nullCC = makeCC(nullSet, &cc::Unicode);
-            nullVar = pb.createVar("null_set", pb.createZeroes());
-            unicodeCompiler.addTarget(nullVar, nullCC);
-        }
         std::vector<Var *> xfrm_vars;
         for (unsigned i = 0; i < xfrm_ccs.size(); i++) {
             xfrm_vars.push_back(pb.createVar("xfrm_cc_" + std::to_string(i), pb.createZeroes()));
-            unicodeCompiler.addTarget(xfrm_vars[i], xfrm_ccs[i]);
         }
-        unicodeCompiler.compile();
+        Var * nullVar = nullptr;
+        if (!nullSet.empty()) {
+            re::CC * nullCC = makeCC(nullSet, &cc::Unicode);
+            xfrm_ccs.push_back(nullCC);
+            nullVar = pb.createVar("null_set", pb.createZeroes());
+            xfrm_vars.push_back(nullVar);
+        }
+        unicodeCompiler.compile(xfrm_vars, xfrm_ccs);
         std::vector<PabloAST *> basis = getInputStreamSet("Basis");
         std::vector<PabloAST *> transformed(basis.size());
         for (unsigned i = 0; i < basis.size(); i++) {
@@ -921,7 +921,7 @@ void CodePointMatchKernel::generatePabloMethod() {
 }
 
 CodePointMatchKernel::CodePointMatchKernel (KernelBuilder & b, UCD::property_t prop, unsigned distance, StreamSet * Basis, StreamSet * Matches)
-: PabloKernel(b, getPropertyEnumName(prop) + "_dist_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1" + UTF::kernelAnnotation(),
+: PabloKernel(b, getPropertyEnumName(prop) + "_dist_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1", // + UTF::kernelAnnotation(),
 // inputs
 {Binding{"Basis", Basis}},
 // output
@@ -1159,7 +1159,7 @@ void InclusiveSpans::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("spans"), pb.getInteger(0)), spans);
 }
 
-std::string CC_string(std::vector<const CC *> transitionCCs, StreamSet * index) {
+std::string CC_string(std::vector<CC *> transitionCCs, StreamSet * index) {
     std::stringstream s;
     if (index != nullptr) s << "+ix";
     for (auto & cc : transitionCCs) {
@@ -1168,10 +1168,10 @@ std::string CC_string(std::vector<const CC *> transitionCCs, StreamSet * index) 
     return s.str();
 }
 
-MaskCC::MaskCC(KernelBuilder & b, const CC * CC_to_mask, StreamSet * basis, StreamSet * mask, StreamSet * index)
+MaskCC::MaskCC(KernelBuilder & b, CC * CC_to_mask, StreamSet * basis, StreamSet * mask, StreamSet * index)
 : PabloKernel(b, "MaskCC" + basis->shapeString()
-                 + CC_string(std::vector<const CC *>{CC_to_mask}, index)
-                 + UTF::kernelAnnotation(),
+                 + CC_string(std::vector<CC *>{CC_to_mask}, index),
+                 //+ UTF::kernelAnnotation(),
               {Binding{"basis", basis}},
               {Binding{"mask", mask}}), mCC_to_mask(CC_to_mask), mIndexStrm(nullptr) {
                   if (index != nullptr) {
@@ -1184,8 +1184,7 @@ void MaskCC::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
     Var * maskVar = pb.createVar("maskVar", pb.createZeroes());
-    unicodeCompiler.addTarget(maskVar, mCC_to_mask);
-    unicodeCompiler.compile();
+    unicodeCompiler.compile({maskVar}, {mCC_to_mask});
     PabloAST * mask = pb.createNot(maskVar);
     if (mIndexStrm) {
         PabloAST * idx = getInputStreamSet("index")[0];
@@ -1194,7 +1193,7 @@ void MaskCC::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("mask"), pb.getInteger(0)), mask);
 }
 
-MaskSelfTransitions::MaskSelfTransitions(KernelBuilder & b, const std::vector<const CC *> transitionCCs, StreamSet * basis, StreamSet * mask, StreamSet * index)
+MaskSelfTransitions::MaskSelfTransitions(KernelBuilder & b, const std::vector<CC *> transitionCCs, StreamSet * basis, StreamSet * mask, StreamSet * index)
 : PabloKernel(b, "MaskSelfTransitions" + basis->shapeString() + CC_string(transitionCCs, index),
               {Binding{"basis", basis}},
               {Binding{"mask", mask}}), mTransitionCCs(transitionCCs), mIndexStrm(nullptr) {

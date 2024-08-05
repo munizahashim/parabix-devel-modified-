@@ -23,7 +23,7 @@ using namespace cc;
 
 UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * Source, StreamSet * property)
 : UnicodePropertyKernelBuilder(b, property_value_name, Source, property, [&]() -> std::string {
-    return std::to_string(Source->getNumElements()) + "x" + std::to_string(Source->getFieldWidth()) + property_value_name->getFullName() + UTF::kernelAnnotation();
+    return std::to_string(Source->getNumElements()) + "x" + std::to_string(Source->getFieldWidth()) + property_value_name->getFullName();// + UTF::kernelAnnotation();
 }()) {
 
 }
@@ -43,7 +43,7 @@ llvm::StringRef UnicodePropertyKernelBuilder::getSignature() const {
 
 void UnicodePropertyKernelBuilder::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    UTF::UTF_Lookahead_Compiler unicodeCompiler(getInput(0), pb);
+    UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
     pablo::Var * propertyVar = pb.createVar(mName->getFullName(), pb.createZeroes());
     re::RE * property_defn = mName->getDefinition();
     if (re::CC * propertyCC = llvm::dyn_cast<re::CC>(property_defn)) {
@@ -56,7 +56,6 @@ void UnicodePropertyKernelBuilder::generatePabloMethod() {
             unicodeCompiler.compile({propertyVar}, {propertyCC});
         }
     }
-    //unicodeCompiler.compile();
     Var * const property_stream = getOutputStreamVar("property_stream");
     pb.createAssign(pb.createExtract(property_stream, pb.getInteger(0)), propertyVar);
 }
@@ -74,16 +73,16 @@ void UnicodePropertyBasis::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
     std::vector<UCD::UnicodeSet> & bases = mEnumObj->GetEnumerationBasisSets();
-    std::vector<Var *> propertyVar;
+    std::vector<Var *> targetVars(bases.size());
+    std::vector<re::CC *> basisCCs(bases.size());
     for (unsigned i = 0; i < bases.size(); i++) {
         std::string vname = "basis" + std::to_string(i);
-        propertyVar.push_back(pb.createVar(vname, pb.createZeroes()));
-        re::CC * basisCC = re::makeCC(bases[i], &Unicode);
-        unicodeCompiler.addTarget(propertyVar[i], basisCC);
+        targetVars[i] = pb.createVar(vname, pb.createZeroes());
+        basisCCs[i] = re::makeCC(bases[i], &Unicode);
     }
-    unicodeCompiler.compile();
+    unicodeCompiler.compile(targetVars, basisCCs);
     Var * const property_basis = getOutputStreamVar("property_basis");
     for (unsigned i = 0; i < bases.size(); i++) {
-        pb.createAssign(pb.createExtract(property_basis, pb.getInteger(i)), propertyVar[i]);
+        pb.createAssign(pb.createExtract(property_basis, pb.getInteger(i)), targetVars[i]);
     }
 }

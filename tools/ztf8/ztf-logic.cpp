@@ -67,7 +67,7 @@ unsigned EncodingInfo::prefixLengthOffset(unsigned lgth) const {
 }
 
 WordMarkKernel::WordMarkKernel(KernelBuilder & kb, StreamSet * BasisBits, StreamSet * WordMarks)
-: PabloKernel(kb, "WordMarks" + UTF::kernelAnnotation(), {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
+: PabloKernel(kb, "WordMarks" /*+ UTF::kernelAnnotation()*/, {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
 
 void WordMarkKernel::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
@@ -76,8 +76,7 @@ void WordMarkKernel::generatePabloMethod() {
     re::CC * word_CC = cast<re::CC>(cast<re::PropertyExpression>(word_prop)->getResolvedRE());
     Var * wordChar = pb.createVar("word");
     UTF::UTF_Compiler unicodeCompiler(getInputStreamVar("source"), pb);
-    unicodeCompiler.addTarget(wordChar, word_CC);
-    unicodeCompiler.compile();
+    unicodeCompiler.compile({wordChar}, {word_CC});
     pb.createAssign(pb.createExtract(getOutputStreamVar("WordMarks"), pb.getInteger(0)), wordChar);
 }
 

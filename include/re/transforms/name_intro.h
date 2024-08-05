@@ -56,7 +56,7 @@ protected:
 class Repeated_CC_Seq_Namer final : public NameIntroduction {
 public:
     Repeated_CC_Seq_Namer();
-    std::map<std::string, std::pair<const re::CC *, unsigned>> mInfoMap;
+    std::map<std::string, std::pair<re::CC *, unsigned>> mInfoMap;
 protected:
     RE * transform (RE * r) override;
 private:

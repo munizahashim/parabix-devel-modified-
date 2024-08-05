@@ -34,16 +34,115 @@ static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", 
 static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(4), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> SuffixOptimization("SuffixOptimization", cl::init(false), cl::cat(codegen::CodeGenOptions));
 
-std::string kernelAnnotation() {
-        std::string a = "+b" + std::to_string(BinaryLogicCostPerByte);
-        a += "t" + std::to_string(TernaryLogicCostPerByte);
-        a += "s" + std::to_string(ShiftCostFactor);
-        a += "i" + std::to_string(IfEmbeddingCostThreshhold);
-        a += "p" + std::to_string(PartitioningFactor);
-        return a;
-}
+class UTF_Legacy_Compiler {
+public:
 
-const UTF_Compiler::RangeList UTF_Compiler::defaultIfHierachy = {
+    using CC = re::CC;
+    using PabloBuilder = pablo::PabloBuilder;
+    using PabloAST = pablo::PabloAST;
+    using RangeList = std::vector<UCD::interval_t>;
+
+    using TargetMap = boost::container::flat_map<const CC *, pablo::Var *>;
+    using ValueMap = boost::container::flat_map<const CC *, PabloAST *>;
+    using Values = std::vector<std::pair<ValueMap::key_type, ValueMap::mapped_type>>;
+
+    static const RangeList defaultIfHierachy;
+    static const RangeList noIfHierachy;
+
+    enum class IfHierarchy {None, Default, Computed};
+    using NameMap = boost::container::flat_map<re::Name *, PabloAST *>;
+
+    UTF_Legacy_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb, PabloAST * mask = nullptr);
+
+    void addTarget(pablo::Var * theVar, const re::CC * theCC);
+
+    void compile();
+
+protected:
+
+    void generateRange(const RangeList & ifRanges, PabloBuilder & entry);
+
+    void generateRange(const RangeList & ifRanges, const codepoint_t lo, const codepoint_t hi, PabloBuilder & builder);
+
+    void generateSubRanges(const codepoint_t lo, const codepoint_t hi, PabloBuilder & builder);
+
+    PabloAST * sequenceGenerator(const RangeList && ranges, const unsigned byte_no, PabloBuilder & builder, PabloAST * target, PabloAST * prefix);
+
+    PabloAST * sequenceGenerator(const codepoint_t lo, const codepoint_t hi, const unsigned byte_no, PabloBuilder & builder, PabloAST * target, PabloAST * prefix);
+
+    PabloAST * ifTestCompiler(const codepoint_t lo, const codepoint_t hi, PabloBuilder & builder);
+
+    PabloAST * ifTestCompiler(const codepoint_t lo, const codepoint_t hi, const unsigned byte_no, PabloBuilder & builder, PabloAST * target);
+
+    PabloAST * makePrefix(const codepoint_t cp, const unsigned byte_no, PabloBuilder & builder, PabloAST * prefix);
+
+    RangeList byteDefinitions(const RangeList & list, const unsigned byte_no);
+
+    template <typename RangeListOrUnicodeSet>
+    static RangeList rangeIntersect(const RangeListOrUnicodeSet & list, const codepoint_t lo, const codepoint_t hi);
+
+    static RangeList rangeGaps(const RangeList & list, const codepoint_t lo, const codepoint_t hi);
+
+    static RangeList outerRanges(const RangeList & list);
+
+    static RangeList innerRanges(const RangeList & list);
+
+private:
+    UTF_Encoder             mEncoder;
+    pablo::PabloBuilder &   mPb;
+//    unsigned                mLookAhead;
+    PabloAST *              mMask;
+    std::unique_ptr<cc::CC_Compiler>       mCodeUnitCompiler;
+    TargetMap               mTarget;
+    ValueMap                mTargetValue;
+};
+
+using PabloAST = pablo::PabloAST;
+using PabloBuilder = pablo::PabloBuilder;
+using Basis_Set = std::vector<PabloAST *>;
+
+
+struct Range {
+    codepoint_t lo;
+    codepoint_t hi;
+    bool is_empty() {return lo > hi;}
+};
+
+struct LengthInfo {
+    unsigned lgth;
+    Range range;
+    CC_List ccs;
+    Range actualRange;
+    PabloAST * test;
+    PabloAST * combined_test;
+};
+
+class UTF_Lookahead_Compiler {
+public:
+    UTF_Lookahead_Compiler(pablo::Var * Var, PabloBuilder & pb);
+    void compile(Target_List targets, CC_List ccs);
+private:
+    pablo::Var *            mBasisVar;
+    PabloBuilder &          mPB;
+    UTF_Encoder             mEncoder;
+    Target_List             mTargets;
+    //  Depending on the actual CC_List being compiled, up to
+    //  4 scope positions will be defined, with corresponding basis
+    //  sets and code unit compilers.
+    unsigned                mScopeLength;
+    Basis_Set               mScopeBasis[4];
+    std::unique_ptr<cc::CC_Compiler> mCodeUnitCompilers[4];
+    void createLengthHierarchy(CC_List & ccs);
+    void extendLengthHierarchy(std::vector<LengthInfo> & lengthInfo, unsigned i, PabloBuilder & pb);
+    void subrangePartitioning(CC_List & ccs, Range & range, PabloAST * rangeTest, PabloBuilder & pb);
+    void compileSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb);
+    void compileUnguardedSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb);
+    re::CC * prefixCC(CC_List & ccs);
+    const re::CC * codeUnitCC(const re::CC * cc, unsigned codeunit);
+    unsigned costModel(CC_List & ccs);
+};
+
+const UTF_Legacy_Compiler::RangeList UTF_Legacy_Compiler::defaultIfHierachy = {
     // Non-ASCII
     {0x80, 0x10FFFF},
     // Two-byte sequences
@@ -130,14 +229,14 @@ const UTF_Compiler::RangeList UTF_Compiler::defaultIfHierachy = {
 
     {0x10000, 0x10FFFF}};
 
-const UTF_Compiler::RangeList UTF_Compiler::noIfHierachy = {{0x80, 0x10FFFF}};
+const UTF_Legacy_Compiler::RangeList UTF_Legacy_Compiler::noIfHierachy = {{0x80, 0x10FFFF}};
 
 class CostModel {
 
 public:
     CostModel(UTF_Encoder & e, bool useTernaryLogic);
     unsigned incrementalCost(codepoint_t cp);
-    void addExpensiveSubranges(UCD::UnicodeSet endpoints, codepoint_t lo_base, codepoint_t hi_ceil, UTF_Compiler::RangeList & r);
+    void addExpensiveSubranges(UCD::UnicodeSet endpoints, codepoint_t lo_base, codepoint_t hi_ceil, UTF_Legacy_Compiler::RangeList & r);
 
 private:
     UTF_Encoder & mEncoder;
@@ -177,8 +276,8 @@ unsigned CostModel::incrementalCost(codepoint_t cp) {
     }
 }
 
-void CostModel::addExpensiveSubranges(UCD::UnicodeSet endpoints, codepoint_t lo_base, codepoint_t hi_ceil, UTF_Compiler::RangeList & r) {
-    UTF_Compiler::RangeList expensiveRanges;
+void CostModel::addExpensiveSubranges(UCD::UnicodeSet endpoints, codepoint_t lo_base, codepoint_t hi_ceil, UTF_Legacy_Compiler::RangeList & r) {
+    UTF_Legacy_Compiler::RangeList expensiveRanges;
     bool base_cp_found = false;
     bool limit_cp_found = false;
     codepoint_t base_cp = 0;
@@ -241,7 +340,7 @@ UCD::UnicodeSet computeEndpoints(const std::vector<const re::CC *> & CCs) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateRange
  ** ------------------------------------------------------------------------------------------------------------- */
-void UTF_Compiler::generateRange(const RangeList & ifRanges, PabloBuilder & entry) {
+void UTF_Legacy_Compiler::generateRange(const RangeList & ifRanges, PabloBuilder & entry) {
     // Pregenerate the suffix var outside of the if ranges. The DCE pass will either eliminate it if it's not used or the
     // code sinking pass will move appropriately into an inner if block.
     if (mMask) {
@@ -257,7 +356,7 @@ void UTF_Compiler::generateRange(const RangeList & ifRanges, PabloBuilder & entr
  * @brief generateRange
  * @param ifRangeList
  ** ------------------------------------------------------------------------------------------------------------- */
-void UTF_Compiler::generateRange(const RangeList & ifRanges, const codepoint_t lo, const codepoint_t hi, PabloBuilder & builder) {
+void UTF_Legacy_Compiler::generateRange(const RangeList & ifRanges, const codepoint_t lo, const codepoint_t hi, PabloBuilder & builder) {
 
     // Codepoints in unenclosed ranges will be computed unconditionally.
     // Generate them first so that computed subexpressions may be shared
@@ -316,7 +415,7 @@ void UTF_Compiler::generateRange(const RangeList & ifRanges, const codepoint_t l
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateSubRanges
  ** ------------------------------------------------------------------------------------------------------------- */
-void UTF_Compiler::generateSubRanges(const codepoint_t lo, const codepoint_t hi, PabloBuilder & builder) {
+void UTF_Legacy_Compiler::generateSubRanges(const codepoint_t lo, const codepoint_t hi, PabloBuilder & builder) {
     for (auto & t : mTargetValue) {
         const auto range = rangeIntersect(*t.first, lo, hi);
         PabloAST * target = t.second;
@@ -340,7 +439,7 @@ void UTF_Compiler::generateSubRanges(const codepoint_t lo, const codepoint_t hi,
  * Generate remaining code to match UTF-8 code sequences within the codepoint set cpset, assuming that the code
  * matching the sequences up to byte number code_unit have been generated.
  ** ------------------------------------------------------------------------------------------------------------- */
-PabloAST * UTF_Compiler::sequenceGenerator(const RangeList && ranges, const unsigned code_unit, PabloBuilder & builder, PabloAST * target, PabloAST * prefix) {
+PabloAST * UTF_Legacy_Compiler::sequenceGenerator(const RangeList && ranges, const unsigned code_unit, PabloBuilder & builder, PabloAST * target, PabloAST * prefix) {
 
     if (LLVM_LIKELY(ranges.size() > 0)) {
 
@@ -414,21 +513,21 @@ PabloAST * UTF_Compiler::sequenceGenerator(const RangeList && ranges, const unsi
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief sequenceGenerator
  ** ------------------------------------------------------------------------------------------------------------- */
-inline PabloAST * UTF_Compiler::sequenceGenerator(const codepoint_t lo, const codepoint_t hi, const unsigned code_unit, PabloBuilder & builder, PabloAST * target, PabloAST * prefix) {
+inline PabloAST * UTF_Legacy_Compiler::sequenceGenerator(const codepoint_t lo, const codepoint_t hi, const unsigned code_unit, PabloBuilder & builder, PabloAST * target, PabloAST * prefix) {
     return sequenceGenerator({{ lo, hi }}, code_unit, builder, target, prefix);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ifTestCompiler
  ** ------------------------------------------------------------------------------------------------------------- */
-inline PabloAST * UTF_Compiler::ifTestCompiler(const codepoint_t lo, const codepoint_t hi, PabloBuilder & builder) {
+inline PabloAST * UTF_Legacy_Compiler::ifTestCompiler(const codepoint_t lo, const codepoint_t hi, PabloBuilder & builder) {
     return ifTestCompiler(lo, hi, 1, builder, builder.createOnes());
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ifTestCompiler
  ** ------------------------------------------------------------------------------------------------------------- */
-PabloAST * UTF_Compiler::ifTestCompiler(const codepoint_t lo, const codepoint_t hi, const unsigned code_unit, PabloBuilder & builder, PabloAST * target) {
+PabloAST * UTF_Legacy_Compiler::ifTestCompiler(const codepoint_t lo, const codepoint_t hi, const unsigned code_unit, PabloBuilder & builder, PabloAST * target) {
 
     codepoint_t lo_unit = mEncoder.nthCodeUnit(lo, code_unit);
     codepoint_t hi_unit = mEncoder.nthCodeUnit(hi, code_unit);
@@ -464,7 +563,7 @@ PabloAST * UTF_Compiler::ifTestCompiler(const codepoint_t lo, const codepoint_t 
  *
  * Ensure the sequence of preceding bytes is defined, up to, but not including the given code_unit
  ** ------------------------------------------------------------------------------------------------------------- */
-PabloAST * UTF_Compiler::makePrefix(const codepoint_t cp, const unsigned code_unit, PabloBuilder & builder, PabloAST * prefix) {
+PabloAST * UTF_Legacy_Compiler::makePrefix(const codepoint_t cp, const unsigned code_unit, PabloBuilder & builder, PabloAST * prefix) {
     assert (code_unit >= 1 && code_unit <= 4);
     assert (code_unit == 1 || prefix != nullptr);
     for (unsigned i = 1; i != code_unit; ++i) {
@@ -485,7 +584,7 @@ PabloAST * UTF_Compiler::makePrefix(const codepoint_t cp, const unsigned code_un
  *
  * Ensure the sequence of preceding bytes is defined, up to, but not including the given code_unit
  ** ------------------------------------------------------------------------------------------------------------- */
-UTF_Compiler::RangeList UTF_Compiler::byteDefinitions(const RangeList & list, const unsigned code_unit) {
+UTF_Legacy_Compiler::RangeList UTF_Legacy_Compiler::byteDefinitions(const RangeList & list, const unsigned code_unit) {
     RangeList result;
     result.reserve(list.size());
     for (const auto & i : list) {
@@ -501,7 +600,7 @@ UTF_Compiler::RangeList UTF_Compiler::byteDefinitions(const RangeList & list, co
  * @param hi
  ** ------------------------------------------------------------------------------------------------------------- */
 template <typename RangeListOrUnicodeSet>
-UTF_Compiler::RangeList UTF_Compiler::rangeIntersect(const RangeListOrUnicodeSet & list, const codepoint_t lo, const codepoint_t hi) {
+UTF_Legacy_Compiler::RangeList UTF_Legacy_Compiler::rangeIntersect(const RangeListOrUnicodeSet & list, const codepoint_t lo, const codepoint_t hi) {
     RangeList result;
     for (const auto & i : list) {
         if ((lo_codepoint(i) <= hi) && (hi_codepoint(i) >= lo)) {
@@ -517,7 +616,7 @@ UTF_Compiler::RangeList UTF_Compiler::rangeIntersect(const RangeListOrUnicodeSet
  * @param lo
  * @param hi
  ** ------------------------------------------------------------------------------------------------------------- */
-UTF_Compiler::RangeList UTF_Compiler::rangeGaps(const RangeList & list, const codepoint_t lo, const codepoint_t hi) {
+UTF_Legacy_Compiler::RangeList UTF_Legacy_Compiler::rangeGaps(const RangeList & list, const codepoint_t lo, const codepoint_t hi) {
     RangeList gaps;
     if (LLVM_LIKELY(lo < hi)) {
         if (LLVM_UNLIKELY(list.empty())) {
@@ -543,7 +642,7 @@ UTF_Compiler::RangeList UTF_Compiler::rangeGaps(const RangeList & list, const co
  * @brief outerRanges
  * @param list
  ** ------------------------------------------------------------------------------------------------------------- */
-UTF_Compiler::RangeList UTF_Compiler::outerRanges(const RangeList & list) {
+UTF_Legacy_Compiler::RangeList UTF_Legacy_Compiler::outerRanges(const RangeList & list) {
     RangeList ranges;
     if (LLVM_LIKELY(list.size() > 0)) {
         auto i = list.cbegin();
@@ -563,7 +662,7 @@ UTF_Compiler::RangeList UTF_Compiler::outerRanges(const RangeList & list) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief innerRanges
  ** ------------------------------------------------------------------------------------------------------------- */
-UTF_Compiler::RangeList UTF_Compiler::innerRanges(const RangeList & list) {
+UTF_Legacy_Compiler::RangeList UTF_Legacy_Compiler::innerRanges(const RangeList & list) {
     RangeList ranges;
     if (LLVM_LIKELY(list.size() > 0)) {
         for (auto i = list.cbegin(), j = i + 1; j != list.cend(); ++j) {
@@ -577,12 +676,12 @@ UTF_Compiler::RangeList UTF_Compiler::innerRanges(const RangeList & list) {
     return ranges;
 }
 
-void UTF_Compiler::addTarget(Var * theVar, const CC * theCC) {
+void UTF_Legacy_Compiler::addTarget(Var * theVar, const CC * theCC) {
     mTarget.emplace(theCC, theVar);
     mTargetValue.emplace(theCC, mPb.createZeroes());
 }
 
-void UTF_Compiler::compile() {
+void UTF_Legacy_Compiler::compile() {
     if (!UseComputedUTFHierarchy) {
         generateRange(defaultIfHierachy, mPb);
     } else {
@@ -608,8 +707,8 @@ void UTF_Compiler::compile() {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
-UTF_Compiler::UTF_Compiler(Var * basis_var, pablo::PabloBuilder & pb, unsigned /* lookAhead */, PabloAST * mask)
-: mPb(pb), mMask(mask) { // , mLookAhead(lookAhead)
+UTF_Legacy_Compiler::UTF_Legacy_Compiler(Var * basis_var, pablo::PabloBuilder & pb, PabloAST * mask)
+: mPb(pb), mMask(mask) {
     llvm::ArrayType * ty = cast<ArrayType>(basis_var->getType());
     unsigned streamCount = ty->getArrayNumElements();
     if (streamCount == 1) {
@@ -765,12 +864,16 @@ void UTF_Lookahead_Compiler::extendLengthHierarchy(std::vector<LengthInfo> & len
 }
 
 void UTF_Lookahead_Compiler::subrangePartitioning(CC_List & ccs, Range & range, PabloAST * rangeTest, PabloBuilder & pb) {
+    auto differing_bits = range.lo ^ range.hi;
+    // Calculate the index of the high differing bit, noting that
+    // the special case if the differing bits value is exactly 2^k.
+    unsigned high_differing_bit = ceil_log2(differing_bits + 1) - 1;
+    codepoint_t partition_size = (1U << high_differing_bit)/PartitioningFactor;
     llvm::errs() << "subrangePartitioning(";
     llvm::errs().write_hex(range.lo);
     llvm::errs() << ", ";
     llvm::errs().write_hex(range.hi);
     llvm::errs() << ")\n";
-    unsigned partition_size = 1U << ceil_log2((range.hi-range.lo)/PartitioningFactor);
     llvm::errs() << "  partition_size = " << partition_size << "\n";
     if (partition_size < 32) {
         partition_size = 32;
@@ -779,7 +882,9 @@ void UTF_Lookahead_Compiler::subrangePartitioning(CC_List & ccs, Range & range, 
         compileUnguardedSubrange(ccs, range, rangeTest, range, pb);
         return;
     }
-    for (unsigned partition_lo = range.lo; partition_lo < range.hi; partition_lo += partition_size) {
+    codepoint_t mask = partition_size - 1;
+    codepoint_t base = range.lo & ~mask;
+    for (unsigned partition_lo = base; partition_lo < range.hi; partition_lo += partition_size) {
         unsigned partition_hi = std::min(partition_lo + partition_size - 1, range.hi);
         Range partition{partition_lo, partition_hi};
         compileSubrange(ccs, range, rangeTest, partition, pb);
@@ -853,7 +958,7 @@ void UTF_Lookahead_Compiler::compileUnguardedSubrange(CC_List & ccs, Range & enc
         // combine into the top-level Var for this CC.
         for (unsigned i = 0; i < ccs.size(); i++) {
             if (!subrangeCCs[i]->empty()) {
-                re::CC * unitCC = codeUnitCC(subrangeCCs[i], code_unit_to_test);
+                const re::CC * unitCC = codeUnitCC(subrangeCCs[i], code_unit_to_test);
                 PabloAST * final_unit = mCodeUnitCompilers[code_unit_to_test - 1]->compileCC(unitCC, pb);
                 PabloAST * test = pb.createAnd(enclosingTest, final_unit);
                 pb.createAssign(mTargets[i], pb.createOr(mTargets[i], test));
@@ -882,7 +987,7 @@ void UTF_Lookahead_Compiler::compileUnguardedSubrange(CC_List & ccs, Range & enc
     }
 }
 
-re::CC * UTF_Lookahead_Compiler::codeUnitCC(re::CC * cc, unsigned codeunit) {
+const re::CC * UTF_Lookahead_Compiler::codeUnitCC(const re::CC * cc, unsigned codeunit) {
     re::CC * unitCC = re::makeCC(&Byte);
     for (auto i : *cc) {
         unsigned lo_unit = mEncoder.nthCodeUnit(lo_codepoint(i), codeunit);
@@ -921,5 +1026,42 @@ unsigned UTF_Lookahead_Compiler::costModel(CC_List & ccs) {
 }
 
 
+UTF_Compiler::UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb,
+             pablo::PabloAST * mask,
+             pablo::BitMovementMode mode) :
+mVar(basisVar), mPB(pb), mMask(mask), mBitMovement(mode) {}
+
+UTF_Compiler::UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb,
+             pablo::BitMovementMode mode) :
+mVar(basisVar), mPB(pb), mMask(nullptr), mBitMovement(mode) {}
+
+void UTF_Compiler::compile(Target_List targets, CC_List ccs) {
+    if (mBitMovement == pablo::BitMovementMode::LookAhead) {
+        if (mMask != nullptr) {
+            llvm::report_fatal_error("mask parameter for the UTF lookahead compiler is a future option.");
+        }
+        UTF_Lookahead_Compiler utf_compiler(mVar, mPB);
+        utf_compiler.compile(targets, ccs);
+    } else {
+        UTF_Legacy_Compiler utf_compiler(mVar, mPB, mMask);
+        for (unsigned i = 0; i < targets.size(); i++) {
+            utf_compiler.addTarget(targets[i], ccs[i]);
+        }
+        utf_compiler.compile();
+    }
+}
+
+std::string UTF_Compiler::kernelAnnotation() {
+    std::string a = "+b" + std::to_string(BinaryLogicCostPerByte);
+    a += "t" + std::to_string(TernaryLogicCostPerByte);
+    a += "s" + std::to_string(ShiftCostFactor);
+    a += "i" + std::to_string(IfEmbeddingCostThreshhold);
+    a += "p" + std::to_string(PartitioningFactor);
+    if (SuffixOptimization) {
+        a += "sfx";
+    }
+    a += pablo::BitMovementMode_string(mBitMovement);
+    return a;
+}
 
 }

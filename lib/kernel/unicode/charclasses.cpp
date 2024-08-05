@@ -15,8 +15,7 @@
 #include <pablo/pe_zeroes.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <llvm/Support/raw_ostream.h>
-
-using NameMap = UTF::UTF_Compiler::NameMap;
+#include <map>
 
 using namespace cc;
 using namespace kernel;
@@ -25,7 +24,7 @@ using namespace re;
 using namespace llvm;
 using namespace UTF;
 
-std::string makeSignature(const StreamSet * const basis, const std::vector<re::CC *> & ccs) {
+std::string makeSignature(const StreamSet * const basis, CCs & ccs) {
     std::string tmp;
     raw_string_ostream out(tmp);
     out << basis->getNumElements() << 'x' << basis->getFieldWidth();
@@ -38,17 +37,17 @@ std::string makeSignature(const StreamSet * const basis, const std::vector<re::C
         }
         out << ']';
     }
-    out << UTF::kernelAnnotation();
+    //out << UTF::kernelAnnotation();
     out.flush();
     return tmp;
 }
 
-CharClassesKernel::CharClassesKernel(KernelBuilder & b, std::vector<CC *> ccs, StreamSet * BasisBits, StreamSet * CharClasses)
-: CharClassesKernel(b, makeSignature(BasisBits, ccs), std::move(ccs), BasisBits, CharClasses) {
+CharClassesKernel::CharClassesKernel(KernelBuilder & b, CCs & ccs, StreamSet * BasisBits, StreamSet * CharClasses)
+: CharClassesKernel(b, makeSignature(BasisBits, ccs), ccs, BasisBits, CharClasses) {
 
 }
 
-CharClassesKernel::CharClassesKernel(KernelBuilder & b, std::string signature, std::vector<CC *> && ccs, StreamSet * BasisBits, StreamSet * CharClasses)
+CharClassesKernel::CharClassesKernel(KernelBuilder & b, std::string signature, CCs & ccs, StreamSet * BasisBits, StreamSet * CharClasses)
 : PabloKernel(b, "cc_" + getStringHash(signature)
 , {Binding{"basis", BasisBits}}, {Binding{"charclasses", CharClasses}})
 , mCCs(ccs)
@@ -68,9 +67,8 @@ void CharClassesKernel::generatePabloMethod() {
     std::vector<Var *> mpx;
     for (unsigned i = 0; i < n; i++) {
         mpx.push_back(pb.createVar("mpx_basis" + std::to_string(i), pb.createZeroes()));
-        unicodeCompiler.addTarget(mpx[i], mCCs[i]);
     }
-    unicodeCompiler.compile();
+    unicodeCompiler.compile(mpx, mCCs);
     for (unsigned i = 0; i < mpx.size(); i++) {
         Extract * const r = pb.createExtract(getOutput(0), pb.getInteger(i));
         pb.createAssign(r, pb.createInFile(mpx[i]));
@@ -78,16 +76,16 @@ void CharClassesKernel::generatePabloMethod() {
 }
 
 ByteClassesKernel::ByteClassesKernel(KernelBuilder & b,
-                                     std::vector<re::CC *> ccs,
+                                     CCs & ccs,
                                      StreamSet * inputStream,
                                      StreamSet * CharClasses)
-: ByteClassesKernel(b, makeSignature(inputStream, ccs), std::move(ccs), inputStream, CharClasses) {
+: ByteClassesKernel(b, makeSignature(inputStream, ccs), ccs, inputStream, CharClasses) {
 
 }
 
 ByteClassesKernel::ByteClassesKernel(KernelBuilder & b,
                                      std::string signature,
-                                     std::vector<re::CC *> && ccs,
+                                     CCs & ccs,
                                      StreamSet * inputStream,
                                      StreamSet * CharClasses)
 : PabloKernel(b, "bcc_" + getStringHash(signature)
@@ -113,22 +111,12 @@ void ByteClassesKernel::generatePabloMethod() {
     }
     unsigned n = mCCs.size();
 
-    NameMap nameMap;
-    std::vector<Name *> names;
+    std::vector<PabloAST *> byte_class;
     for (unsigned i = 0; i < n; i++) {
-        Name * name = re::makeName("mpx_basis" + std::to_string(i), mCCs[i]);
-
-        nameMap.emplace(name, ccc->compileCC(mCCs[i], pb));
-        names.push_back(name);
-
+        byte_class.push_back(ccc->compileCC(mCCs[i], pb));
     }
-    for (unsigned i = 0; i < names.size(); i++) {
-        auto t = nameMap.find(names[i]);
-        if (t != nameMap.end()) {
-            Extract * const r = pb.createExtract(getOutput(0), pb.getInteger(i));
-            pb.createAssign(r, pb.createInFile(t->second));
-        } else {
-            llvm::report_fatal_error("Can't compile character classes.");
-        }
+    for (unsigned i = 0; i < byte_class.size(); i++) {
+        Extract * const r = pb.createExtract(getOutput(0), pb.getInteger(i));
+        pb.createAssign(r, pb.createInFile(byte_class[i]));
     }
 }
