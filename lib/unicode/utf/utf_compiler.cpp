@@ -34,6 +34,23 @@ static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", 
 static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(4), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> SuffixOptimization("SuffixOptimization", cl::init(false), cl::cat(codegen::CodeGenOptions));
 
+std::string kernelAnnotation() {
+    if (!UseComputedUTFHierarchy) {
+        return "+LegacyUTFH";
+    }
+    std::string a = "+b" + std::to_string(BinaryLogicCostPerByte);
+    a += "t" + std::to_string(TernaryLogicCostPerByte);
+    a += "s" + std::to_string(ShiftCostFactor);
+    a += "i" + std::to_string(IfEmbeddingCostThreshhold);
+    a += "p" + std::to_string(PartitioningFactor);
+    if (SuffixOptimization) {
+        a += "sfx";
+    }
+    return a;
+}
+
+
+
 class UTF_Legacy_Compiler {
 public:
 
@@ -1049,19 +1066,6 @@ void UTF_Compiler::compile(Target_List targets, CC_List ccs) {
         }
         utf_compiler.compile();
     }
-}
-
-std::string UTF_Compiler::kernelAnnotation() {
-    std::string a = "+b" + std::to_string(BinaryLogicCostPerByte);
-    a += "t" + std::to_string(TernaryLogicCostPerByte);
-    a += "s" + std::to_string(ShiftCostFactor);
-    a += "i" + std::to_string(IfEmbeddingCostThreshhold);
-    a += "p" + std::to_string(PartitioningFactor);
-    if (SuffixOptimization) {
-        a += "sfx";
-    }
-    a += pablo::BitMovementMode_string(mBitMovement);
-    return a;
 }
 
 }

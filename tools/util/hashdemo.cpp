@@ -74,7 +74,7 @@ protected:
 };
 
 WordMarkKernel::WordMarkKernel(KernelBuilder & b, StreamSet * BasisBits, StreamSet * WordMarks)
-: PabloKernel(b, "WordMarks"/* + UTF::kernelAnnotation()*/, {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
+: PabloKernel(b, "WordMarks" + UTF::kernelAnnotation(), {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
 
 void WordMarkKernel::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());

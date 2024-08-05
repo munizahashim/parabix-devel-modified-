@@ -921,7 +921,7 @@ void CodePointMatchKernel::generatePabloMethod() {
 }
 
 CodePointMatchKernel::CodePointMatchKernel (KernelBuilder & b, UCD::property_t prop, unsigned distance, StreamSet * Basis, StreamSet * Matches)
-: PabloKernel(b, getPropertyEnumName(prop) + "_dist_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1", // + UTF::kernelAnnotation(),
+: PabloKernel(b, getPropertyEnumName(prop) + "_dist_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1" + UTF::kernelAnnotation(),
 // inputs
 {Binding{"Basis", Basis}},
 // output
@@ -1170,8 +1170,8 @@ std::string CC_string(std::vector<CC *> transitionCCs, StreamSet * index) {
 
 MaskCC::MaskCC(KernelBuilder & b, CC * CC_to_mask, StreamSet * basis, StreamSet * mask, StreamSet * index)
 : PabloKernel(b, "MaskCC" + basis->shapeString()
-                 + CC_string(std::vector<CC *>{CC_to_mask}, index),
-                 //+ UTF::kernelAnnotation(),
+                 + CC_string(std::vector<CC *>{CC_to_mask}, index)
+                 + UTF::kernelAnnotation(),
               {Binding{"basis", basis}},
               {Binding{"mask", mask}}), mCC_to_mask(CC_to_mask), mIndexStrm(nullptr) {
                   if (index != nullptr) {

@@ -17,6 +17,10 @@ namespace pablo {
 
 namespace UTF {
 
+// Kernel annotation string based on command line parameters
+// controlling the UTF if-hierarchy.
+std::string kernelAnnotation();
+
 using Target_List = std::vector<pablo::Var *>;
 using CC_List = std::vector<re::CC *>;
 
@@ -28,7 +32,6 @@ public:
     UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb,
                  pablo::BitMovementMode m);
     void compile(Target_List targets, CC_List ccs);
-    std::string kernelAnnotation();
 protected:
     pablo::Var *            mVar;
     pablo::PabloBuilder &   mPB;

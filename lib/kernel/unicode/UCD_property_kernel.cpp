@@ -23,7 +23,10 @@ using namespace cc;
 
 UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * Source, StreamSet * property)
 : UnicodePropertyKernelBuilder(b, property_value_name, Source, property, [&]() -> std::string {
-    return std::to_string(Source->getNumElements()) + "x" + std::to_string(Source->getFieldWidth()) + property_value_name->getFullName();// + UTF::kernelAnnotation();
+    return std::to_string(Source->getNumElements()) +
+           "x" + std::to_string(Source->getFieldWidth()) +
+            property_value_name->getFullName() +
+            UTF::kernelAnnotation();
 }()) {
 
 }

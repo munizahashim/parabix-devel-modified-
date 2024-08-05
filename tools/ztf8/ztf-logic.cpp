@@ -67,7 +67,7 @@ unsigned EncodingInfo::prefixLengthOffset(unsigned lgth) const {
 }
 
 WordMarkKernel::WordMarkKernel(KernelBuilder & kb, StreamSet * BasisBits, StreamSet * WordMarks)
-: PabloKernel(kb, "WordMarks" /*+ UTF::kernelAnnotation()*/, {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
+: PabloKernel(kb, "WordMarks" + UTF::kernelAnnotation(), {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
 
 void WordMarkKernel::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());

@@ -158,7 +158,7 @@ protected:
 
 NFD_Translation::NFD_Translation (KernelBuilder & b, NFD_BixData & BixData,
                                   StreamSet * Basis, StreamSet * Output)
-: PabloKernel(b, "NFD_Translation" + std::to_string(Basis->getNumElements()) + "x1"/* + UTF::kernelAnnotation()*/,
+: PabloKernel(b, "NFD_Translation" + std::to_string(Basis->getNumElements()) + "x1" + UTF::kernelAnnotation(),
 // inputs
 {Binding{"basis", Basis}},
 // output
