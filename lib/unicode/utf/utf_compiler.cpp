@@ -35,9 +35,6 @@ static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(4), c
 static cl::opt<bool> SuffixOptimization("SuffixOptimization", cl::init(false), cl::cat(codegen::CodeGenOptions));
 
 std::string kernelAnnotation() {
-    if (!UseComputedUTFHierarchy) {
-        return "+LegacyUTFH";
-    }
     std::string a = "+b" + std::to_string(BinaryLogicCostPerByte);
     a += "t" + std::to_string(TernaryLogicCostPerByte);
     a += "s" + std::to_string(ShiftCostFactor);
@@ -45,6 +42,9 @@ std::string kernelAnnotation() {
     a += "p" + std::to_string(PartitioningFactor);
     if (SuffixOptimization) {
         a += "sfx";
+    }
+    if (!UseComputedUTFHierarchy) {
+        a += "+LegacyUTFH";
     }
     return a;
 }

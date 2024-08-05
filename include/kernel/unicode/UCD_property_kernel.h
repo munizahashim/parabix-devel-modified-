@@ -5,6 +5,7 @@
 #pragma once
 
 #include <pablo/pablo_kernel.h>  // for PabloKernel
+#include <pablo/pablo_toolchain.h>  // for PabloKernel
 
 namespace re { class Name; }
 namespace UCD { class EnumeratedPropertyObject; }
@@ -13,16 +14,21 @@ namespace kernel {
 
 class UnicodePropertyKernelBuilder : public pablo::PabloKernel {
 public:
-    UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * BasisBits, StreamSet * property);
+    UnicodePropertyKernelBuilder(KernelBuilder & b,
+                                 re::Name * property_value_name,
+                                 StreamSet * BasisBits,
+                                 StreamSet * property,
+                                 pablo::BitMovementMode mode = pablo::BitMovementMode::Advance);
 protected:
     llvm::StringRef getSignature() const override;
     bool hasSignature() const override { return true; }
     void generatePabloMethod() override;
 private:
-    UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * BasisBits, StreamSet * property, std::string && propValueName);
+    UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * BasisBits, StreamSet * property, pablo::BitMovementMode mode, std::string && propValueName);
 private:
     std::string mPropNameValue;
     re::Name * mName;
+    pablo::BitMovementMode mBitMovement;
 };
 
 class UnicodePropertyBasis : public pablo::PabloKernel {

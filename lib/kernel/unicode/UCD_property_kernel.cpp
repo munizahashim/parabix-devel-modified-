@@ -21,23 +21,25 @@ using namespace pablo;
 using namespace cc;
 
 
-UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * Source, StreamSet * property)
-: UnicodePropertyKernelBuilder(b, property_value_name, Source, property, [&]() -> std::string {
+UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * Source, StreamSet * property, pablo::BitMovementMode mode)
+: UnicodePropertyKernelBuilder(b, property_value_name, Source, property, mode, [&]() -> std::string {
     return std::to_string(Source->getNumElements()) +
            "x" + std::to_string(Source->getFieldWidth()) +
             property_value_name->getFullName() +
-            UTF::kernelAnnotation();
+            UTF::kernelAnnotation() +
+            pablo::BitMovementMode_string(mode);
 }()) {
 
 }
 
-UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * Source, StreamSet * property, std::string && propValueName)
+UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * Source, StreamSet * property, pablo::BitMovementMode mode, std::string && propValueName)
 : PabloKernel(b,
 "UCD:" + getStringHash(propValueName) ,
 {Binding{"source", Source, FixedRate(1), LookAhead(3)}},
 {Binding{"property_stream", property}})
 , mPropNameValue(propValueName)
-, mName(property_value_name) {
+, mName(property_value_name)
+, mBitMovement(mode) {
 }
 
 llvm::StringRef UnicodePropertyKernelBuilder::getSignature() const {
@@ -46,7 +48,7 @@ llvm::StringRef UnicodePropertyKernelBuilder::getSignature() const {
 
 void UnicodePropertyKernelBuilder::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
+    UTF::UTF_Compiler unicodeCompiler(getInput(0), pb, mBitMovement);
     pablo::Var * propertyVar = pb.createVar(mName->getFullName(), pb.createZeroes());
     re::RE * property_defn = mName->getDefinition();
     if (re::CC * propertyCC = llvm::dyn_cast<re::CC>(property_defn)) {
