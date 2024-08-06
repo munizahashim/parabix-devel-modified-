@@ -2,33 +2,6 @@
 #include <pthread.h>
 #include <llvm/IR/Verifier.h>
 
-#if BOOST_OS_LINUX
-#include <sched.h>
-#endif
-
-#if BOOST_OS_MACOS
-#include <mach/mach_init.h>
-#include <mach/thread_act.h>
-#endif
-
-namespace llvm {
-#if BOOST_OS_MACOS
-template<> class TypeBuilder<pthread_t, false> {
-public:
-  static Type *get(LLVMContext& C) {
-    return IntegerType::getIntNTy(C, sizeof(pthread_t) * CHAR_BIT);
-  }
-};
-#endif
-
-template<> class TypeBuilder<pthread_attr_t, false> {
-public:
-  static Type *get(LLVMContext& C) {
-    return IntegerType::getIntNTy(C, sizeof(pthread_attr_t) * CHAR_BIT);
-  }
-};
-}
-
 enum PipelineStateObjectField : unsigned {
     SHARED_STATE_PARAM
     , THREAD_LOCAL_PARAM
