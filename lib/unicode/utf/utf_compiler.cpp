@@ -30,9 +30,10 @@ static cl::opt<bool> UseComputedUTFHierarchy("UseComputedUTFHierarchy", cl::init
 static cl::opt<unsigned> BinaryLogicCostPerByte("BinaryLogicCostPerByte", cl::init(2), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> TernaryLogicCostPerByte("TernaryLogicCostPerByte", cl::init(1), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> ShiftCostFactor("ShiftCostFactor", cl::init(10), cl::cat(codegen::CodeGenOptions));
-static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", cl::init(25), cl::cat(codegen::CodeGenOptions));
+static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", cl::init(15), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(4), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> SuffixOptimization("SuffixOptimization", cl::init(false), cl::cat(codegen::CodeGenOptions));
+static cl::opt<bool> InitialBit7Test("InitialBit7Test", cl::init(false), cl::cat(codegen::CodeGenOptions));
 
 std::string kernelAnnotation() {
     std::string a = "+b" + std::to_string(BinaryLogicCostPerByte);
@@ -42,6 +43,9 @@ std::string kernelAnnotation() {
     a += "p" + std::to_string(PartitioningFactor);
     if (SuffixOptimization) {
         a += "sfx";
+    }
+    if (InitialBit7Test) {
+        a += "b7";
     }
     if (!UseComputedUTFHierarchy) {
         a += "+LegacyUTFH";
@@ -840,7 +844,13 @@ void New_UTF_Compiler::createLengthHierarchy(CC_List & ccs) {
         compileSubrange(lengthInfo[0].ccs, lengthInfo[0].range, lengthInfo[0].test, lengthInfo[0].actualRange, mPB);
         first_pfx = 1;
     }
-    extendLengthHierarchy(lengthInfo, first_pfx, mPB);
+    if (InitialBit7Test) {
+        auto nested = mPB.createScope();
+        mPB.createIf(mScopeBasis[0][7], nested);
+        extendLengthHierarchy(lengthInfo, first_pfx, nested);
+    } else {
+        extendLengthHierarchy(lengthInfo, first_pfx, mPB);
+    }
 }
 
 void New_UTF_Compiler::extendLengthHierarchy(std::vector<LengthInfo> & lengthInfo, unsigned i, PabloBuilder & pb) {
