@@ -34,17 +34,6 @@ constexpr static unsigned JUMP_SCHEDULING_GA_STALLS = 25;
 
 using Vertex = unsigned;
 
-//    PROGRAM_SCHEDULING_GA_MAX_INIT_TIME_SECONDS,
-//    MAX_INIT_PROGRAM_POPULATION_SIZE,
-    //    PermutationBasedEvolutionaryAlgorithm(CandidateLengthType candidateLength
-    //                                         , const unsigned maxInitTime
-    //                                         , const unsigned maxInitCandidates
-    //                                         , const unsigned maxRunTime
-    //                                         , const unsigned maxCandidates
-    //                                         , const unsigned maxStallRounds
-    //                                         , pipeline_random_engine & rng)
-
-
 constexpr static unsigned PROGRAM_SCHEDULING_GA_MAX_INIT_TIME_SECONDS = 2; // 50;
 
 constexpr static unsigned MAX_INIT_PROGRAM_POPULATION_SIZE = 20; // 50;

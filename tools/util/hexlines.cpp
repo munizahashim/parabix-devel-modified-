@@ -149,7 +149,7 @@ void Hexify::generatePabloMethod() {
     cc::Parabix_CC_Compiler_Builder ccc(spreadBasis);
     // Compute the stream marking LFs.
     PabloAST * LF = ccc.compileCC(re::makeByte(0xA), pb);
-    
+
     // Compute a set of 4 bit streams as described in STEP 2 above.
     std::vector<PabloAST *> lo(4);
     lo[3] = pb.createSel(insertMask, spreadBasis[7], pb.createAdvance(spreadBasis[3], 1), "lo[3]");

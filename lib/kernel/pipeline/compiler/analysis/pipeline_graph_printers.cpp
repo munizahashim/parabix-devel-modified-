@@ -602,7 +602,7 @@ void PipelineAnalysis::printBufferGraph(KernelBuilder & b, raw_ostream & out) co
         for (unsigned i = 0; i < PartitionCount; ++i) {
             const auto a = i;
             const auto b = PartitionJumpTargetId[i];
-            if (b > (a + 1)) {
+            if (b != (a + 1)) {
                 const auto s = firstKernelOfPartition[a];
                 const auto t = firstKernelOfPartition[b];
                 out << "v" << s << " -> v" << t <<

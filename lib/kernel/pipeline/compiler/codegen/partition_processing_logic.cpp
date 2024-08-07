@@ -1,4 +1,4 @@
-#include "../pipeline_compiler.hpp"
+﻿#include "../pipeline_compiler.hpp"
 
 namespace kernel {
 
@@ -10,12 +10,6 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
     for (unsigned i = 1; i < PartitionCount; ++i) {
         mPartitionEntryPoint[i] = b.CreateBasicBlock("Partition" + std::to_string(i), mPipelineEnd);
     }
-
-//    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-//    mPartitionEntryPoint[PartitionCount] = b.CreateBasicBlock("PipelineLoopCond", mPipelineEnd);
-//    #else
-//    mPartitionEntryPoint[PartitionCount] = mPipelineEnd;
-//    #endif
 
     IntegerType * const boolTy = b.getInt1Ty();
     IntegerType * const sizeTy = b.getInt64Ty();
@@ -161,7 +155,6 @@ void PipelineCompiler::branchToInitialPartition(KernelBuilder & b) {
             } else {
                 startCycleCounter(b, CycleCounter::KERNEL_SYNCHRONIZATION);
             }
-
         }
         const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
         acquireSynchronizationLock(b, FirstKernel, type, mSegNo);
@@ -191,9 +184,6 @@ BasicBlock * PipelineCompiler::getPartitionExitPoint(KernelBuilder & /* b */) {
 void PipelineCompiler::checkForPartitionEntry(KernelBuilder & b) {
     assert (mKernelId >= FirstKernel && mKernelId <= LastKernel);
     mIsPartitionRoot = false;
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    mUsingNewSynchronizationVariable = false;
-    #endif
     const auto partitionId = KernelPartitionId[mKernelId];
     if (partitionId != mCurrentPartitionId) {
         mIsPartitionRoot = true;
@@ -202,14 +192,12 @@ void PipelineCompiler::checkForPartitionEntry(KernelBuilder & b) {
         mCurrentPartitionRoot = mKernelId;
         mNextPartitionEntryPoint = getPartitionExitPoint(b);
         determinePartitionStrideRateScalingFactor();
-        #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-        mUsingNewSynchronizationVariable =
-            (PartitionJumpTargetId[partitionId] == (PartitionCount - 1)) && (partitionId != (PartitionCount - 2));
-        if (LLVM_UNLIKELY(mUsingNewSynchronizationVariable)) {
-            ++mCurrentNestedSynchronizationVariable;
+        mUsesNestedSynchronizationVariable = UseJumpGuidedSynchronization && (PartitionJumpTargetId[partitionId] == (PartitionCount - 1));
+        if (LLVM_UNLIKELY(mUsesNestedSynchronizationVariable && (partitionId < (PartitionCount - 2)))) {
             mPartitionExitSegNoPhi = PHINode::Create(b.getSizeTy(), 2, "regionedSegNo", mNextPartitionEntryPoint);
+        } else {
+            mPartitionExitSegNoPhi = nullptr;
         }
-        #endif
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, "  *** entering partition %" PRIu64, b.getSize(mCurrentPartitionId));
         #endif
@@ -360,7 +348,7 @@ void PipelineCompiler::phiOutPartitionStatusFlags(KernelBuilder & b, const unsig
  * @brief phiOutAllStateAndReleaseSynchronizationLocks
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::phiOutPartitionStateAndReleaseSynchronizationLocks(KernelBuilder & b,
-    const unsigned targetKernelId, const unsigned targetPartitionId, const bool fromKernelEntryBlock, Value * const afterFirstSegNo) {
+    const unsigned targetKernelId, const unsigned targetPartitionId, const bool fromKernelEntryBlock) {
 
     assert (KernelPartitionId[FirstKernel] == 1);
 
@@ -372,20 +360,19 @@ void PipelineCompiler::phiOutPartitionStateAndReleaseSynchronizationLocks(Kernel
 
     releaseAllSynchronizationLocksFor(b, mKernelId);
 
-    assert (afterFirstSegNo);
+    const auto releaseAllSynchronizationLocks = (!mUsesNestedSynchronizationVariable);
 
-    Value * const curSegNo = mSegNo;
-    mSegNo = afterFirstSegNo;
+    assert (releaseAllSynchronizationLocks || UseJumpGuidedSynchronization);
 
     for (auto kernel = mKernelId + 1; kernel < targetKernelId; ++kernel) {
         phiOutPartitionItemCounts(b, kernel, targetPartitionId, fromKernelEntryBlock);
         if (HasTerminationSignal.test(kernel)) {
             mKernelTerminationSignal[kernel] = readTerminationSignal(b, kernel);
         }
-        releaseAllSynchronizationLocksFor(b, kernel);
+        if (releaseAllSynchronizationLocks) {
+            releaseAllSynchronizationLocksFor(b, kernel);
+        }
     }
-
-    mSegNo = curSegNo;
 
     phiOutPartitionStatusFlags(b, targetPartitionId, fromKernelEntryBlock);
     for (auto kernel = mKernelId + 1; kernel < targetKernelId; ++kernel) {
@@ -407,10 +394,6 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(KernelBuilder & b, co
         startCycleCounter(b, CycleCounter::PARTITION_JUMP_SYNCHRONIZATION);
     }
     assert (firstKernelInTargetPartition <= PipelineOutput);
-
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    assert (firstKernelInTargetPartition != PipelineOutput);
-    #endif
 
     if (firstKernelInTargetPartition == PipelineOutput) {
         const auto type = isDataParallel(LastKernel) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
@@ -481,17 +464,13 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(KernelBuilder & b) 
         const auto targetKernelId = FirstKernelInPartition[nextPartitionId];
 
         Value * nextSegNo = mSegNo;
-        #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-        if (mPartitionExitSegNoPhi) {
-            nextSegNo = obtainNextSegmentNumber(b);
+
+        if (LLVM_UNLIKELY(mUsesNestedSynchronizationVariable)) {
+            nextSegNo = obtainNextSegmentNumber(b, mKernelId + 1U);
         }
-        #endif
 
         acquirePartitionSynchronizationLock(b, targetKernelId, nextSegNo);
-        mKernelInitiallyTerminatedExit = b.GetInsertBlock();
-
-        phiOutPartitionStateAndReleaseSynchronizationLocks(b, targetKernelId, nextPartitionId, true, nextSegNo);
-
+        phiOutPartitionStateAndReleaseSynchronizationLocks(b, targetKernelId, nextPartitionId, true);
         zeroAnySkippedTransitoryConsumedItemCountsUntil(b, targetKernelId);
 
         if (LLVM_UNLIKELY(EnableCycleCounter)) {
@@ -503,12 +482,10 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(KernelBuilder & b) 
         }
         #endif
 
-        #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-        if (mPartitionExitSegNoPhi) {
-            assert (nextSegNo);
+        mKernelInitiallyTerminatedExit = b.GetInsertBlock();
+        if (LLVM_UNLIKELY(mPartitionExitSegNoPhi)) {
             mPartitionExitSegNoPhi->addIncoming(nextSegNo, mKernelInitiallyTerminatedExit);
         }
-        #endif
 
         b.CreateBr(mNextPartitionEntryPoint);
 
@@ -593,13 +570,10 @@ void PipelineCompiler::writeJumpToNextPartition(KernelBuilder & b) {
 
     updateNextSlidingWindowSize(b, mMaximumNumOfStridesAtJumpPhi, b.getSize(0));
 
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    if (LLVM_LIKELY(targetKernelId != PipelineOutput)) {
-    #endif
+    if (!UseJumpGuidedSynchronization || targetKernelId != PipelineOutput) {
         acquirePartitionSynchronizationLock(b, targetKernelId, mSegNo);
-        phiOutPartitionStateAndReleaseSynchronizationLocks(b, targetKernelId, jumpPartitionId, false, mSegNo);
+        phiOutPartitionStateAndReleaseSynchronizationLocks(b, targetKernelId, jumpPartitionId, false);
         zeroAnySkippedTransitoryConsumedItemCountsUntil(b, targetKernelId);
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
     } else {
         if (LLVM_UNLIKELY(isDataParallel(mKernelId))) {
             releaseSynchronizationLock(b, mKernelId, SYNC_LOCK_PRE_INVOCATION, mSegNo);
@@ -610,7 +584,7 @@ void PipelineCompiler::writeJumpToNextPartition(KernelBuilder & b) {
         }
         phiOutPartitionStatusFlags(b, jumpPartitionId, false);
     }
-    #endif
+
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
     }
@@ -630,20 +604,23 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
 
     assert (mKernelId >= FirstKernel && mKernelId <= LastKernel);
 
-    Value * nextSegNo = mSegNo;
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    if (LLVM_UNLIKELY(mUsingNewSynchronizationVariable)) {
-        assert (mIsPartitionRoot);
-        nextSegNo = obtainNextSegmentNumber(b);
-    }
-    #endif
 
     // TODO: if any statefree kernel exists, swap counter accumulators to be thread local
     // and combine them at the end?
 
+    const auto nextKernel = mKernelId + 1;
+    const auto nextPartitionId = KernelPartitionId[nextKernel];
+    assert (nextKernel != PipelineOutput || (nextPartitionId != mCurrentPartitionId));
+
+    Value * nextSegNo = mSegNo;
+    if (LLVM_UNLIKELY(mIsPartitionRoot && mUsesNestedSynchronizationVariable)) {
+        nextSegNo = obtainNextSegmentNumber(b, nextKernel);
+    }
 
     const auto type = isDataParallel(mKernelId) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
     releaseSynchronizationLock(b, mKernelId, type, mSegNo);
+
+    mSegNo = nextSegNo;
 
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         updateCycleCounter(b, mKernelId, CycleCounter::TOTAL_TIME);
@@ -654,7 +631,7 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
     }
     #endif
 
-    const auto nextKernel = mKernelId + 1;
+
     if (LLVM_LIKELY(nextKernel < PipelineOutput)) {
         #ifdef ENABLE_PAPI
         if (NumOfPAPIEvents) {
@@ -665,7 +642,7 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
             startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
         }
         const auto type = isDataParallel(nextKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
-        acquireSynchronizationLock(b, nextKernel, type, nextSegNo);
+        acquireSynchronizationLock(b, nextKernel, type, mSegNo);
         if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
             updateCycleCounter(b, nextKernel, CycleCounter::KERNEL_SYNCHRONIZATION);
         }
@@ -676,17 +653,10 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
         #endif
     }
 
-    const auto nextPartitionId = KernelPartitionId[nextKernel];
-    assert (nextKernel != PipelineOutput || (nextPartitionId != mCurrentPartitionId));
-
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    mSegNo = nextSegNo;
-    #endif
-
     if (nextPartitionId != mCurrentPartitionId) {
+        BasicBlock * const exitBlock = b.GetInsertBlock();
         assert (mCurrentPartitionId < nextPartitionId);
         assert (nextPartitionId <= PartitionCount);
-        BasicBlock * const exitBlock = b.GetInsertBlock();
         #ifdef PRINT_DEBUG_MESSAGES
         debugPrint(b, "  *** exiting partition %" PRIu64, b.getSize(mCurrentPartitionId));
         #endif
@@ -697,18 +667,18 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
         progressPhi->addIncoming(mPipelineProgress, exitBlock);
         mPipelineProgress = progressPhi;
 
-        #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-        if (LLVM_UNLIKELY(mPartitionExitSegNoPhi)) {
-            mPartitionExitSegNoPhi->addIncoming(nextSegNo, exitBlock);
-            mSegNo = mPartitionExitSegNoPhi;
-            mPartitionExitSegNoPhi = nullptr;
-        }
-        #endif
         // Since there may be multiple paths into this kernel, phi out the start time
         // for each path.
         if (LLVM_UNLIKELY(EnableCycleCounter && nextPartitionId < (PartitionCount - 1))) {
             mPartitionStartTimePhi[nextPartitionId]->addIncoming(mCycleCounters[TOTAL_TIME], exitBlock);
             mCycleCounters[TOTAL_TIME] = mPartitionStartTimePhi[nextPartitionId];
+        }
+
+        if (LLVM_UNLIKELY(mPartitionExitSegNoPhi)) {
+            assert (UseJumpGuidedSynchronization);
+            mPartitionExitSegNoPhi->addIncoming(nextSegNo, exitBlock);
+            mSegNo = mPartitionExitSegNoPhi;
+            mPartitionExitSegNoPhi = nullptr;
         }
 
         const auto n = LastStreamSet - FirstStreamSet + 1U;
@@ -737,6 +707,9 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
             }
         }
     }
+
+
+
 }
 
 } // end of namespace kernel

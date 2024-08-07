@@ -69,9 +69,6 @@ const static std::string ZERO_EXTENDED_SPACE = "ZeS";
 
 const static std::string KERNEL_THREAD_LOCAL_SUFFIX = ".KTL";
 const static std::string NEXT_LOGICAL_SEGMENT_NUMBER = "@NLSN";
-#ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-const static std::string NESTED_LOGICAL_SEGMENT_NUMBER_PREFIX = "!NLSN";
-#endif
 
 const static std::string MINIMUM_NUM_OF_THREADS = "MIN.T";
 const static std::string MAXIMUM_NUM_OF_THREADS = "MAX.T";
@@ -248,7 +245,7 @@ public:
     void phiOutPartitionItemCounts(KernelBuilder & b, const unsigned kernel, const unsigned targetPartitionId, const bool fromKernelEntryBlock);
     void phiOutPartitionStatusFlags(KernelBuilder & b, const unsigned targetPartitionId, const bool fromKernelEntry);
 
-    void phiOutPartitionStateAndReleaseSynchronizationLocks(KernelBuilder & b, const unsigned targetKernelId, const unsigned targetPartitionId, const bool fromKernelEntryBlock, Value * const afterFirstSegNo);
+    void phiOutPartitionStateAndReleaseSynchronizationLocks(KernelBuilder & b, const unsigned targetKernelId, const unsigned targetPartitionId, const bool fromKernelEntryBlock);
 
     void acquirePartitionSynchronizationLock(KernelBuilder & b, const unsigned firstKernelInTargetPartition, Value * const segNo);
     void releaseAllSynchronizationLocksFor(KernelBuilder & b, const unsigned kernel);
@@ -477,9 +474,7 @@ public:
     void releaseSynchronizationLock(KernelBuilder & b, const unsigned kernelId, const unsigned lockType, Value * const segNo);
     Value * getSynchronizationLockPtrForKernel(KernelBuilder & b, const unsigned kernelId, const unsigned lockType) const;
     inline LLVM_READNONE bool isMultithreaded() const;
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    Value * obtainNextSegmentNumber(KernelBuilder & b);
-    #endif
+    Value * obtainNextSegmentNumber(KernelBuilder & b, const unsigned kernelId);
 
 // family functions
 
@@ -639,6 +634,7 @@ protected:
     const bool                                  TraceUnconsumedItemCounts;
     const bool                                  TraceProducedItemCounts;
     const bool                                  TraceDynamicMultithreading;
+    const bool                                  UseJumpGuidedSynchronization;
 
     const KernelIdVector                        KernelPartitionId;
     const KernelIdVector                        FirstKernelInPartition;
@@ -669,12 +665,10 @@ protected:
     Value *                                     mKernelCommonThreadLocalHandle = nullptr;
     Value *                                     mSegNo = nullptr;
     Value *                                     mNumOfFixedThreads = nullptr;
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
+
     Value *                                     mBaseSegNo = nullptr;
     PHINode *                                   mPartitionExitSegNoPhi = nullptr;
-    bool                                        mUsingNewSynchronizationVariable = false;
-    unsigned                                    mCurrentNestedSynchronizationVariable = 0;
-    #endif
+
     PHINode *                                   mMadeProgressInLastSegment = nullptr;
     Value *                                     mPipelineProgress = nullptr;
     Value *                                     mThreadLocalMemorySizePtr = nullptr;
@@ -788,6 +782,7 @@ protected:
     bool                                        mHasPrincipalInput = false;
     bool                                        mRecordHistogramData = false;
     bool                                        mIsPartitionRoot = false;
+    bool                                        mUsesNestedSynchronizationVariable = false;
     bool                                        mIsOptimizationBranch = false;
     bool                                        mMayHaveInsufficientIO = false;
     bool                                        mExecuteStridesIndividually = false;
@@ -951,7 +946,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , TraceUnconsumedItemCounts(DebugOptionIsSet(codegen::TraceUnconsumedItemCounts))
 , TraceProducedItemCounts(DebugOptionIsSet(codegen::TraceProducedItemCounts))
 , TraceDynamicMultithreading(mUseDynamicMultithreading && DebugOptionIsSet(codegen::TraceDynamicMultithreading))
-
+, UseJumpGuidedSynchronization(!mIsNestedPipeline && codegen::EnableJumpGuidedSynchronizationVariables)
 , KernelPartitionId(std::move(P.KernelPartitionId))
 , FirstKernelInPartition(std::move(P.FirstKernelInPartition))
 , StrideStepLength(std::move(P.StrideRepetitionVector))
@@ -969,9 +964,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mTerminationCheck(std::move(P.mTerminationCheck))
 , mTerminationPropagationGraph(std::move(P.mTerminationPropagationGraph))
 , mInternallyGeneratedStreamSetGraph(std::move(P.mInternallyGeneratedStreamSetGraph))
-
 , HasTerminationSignal(std::move(P.HasTerminationSignal))
-
 , mFamilyScalarGraph(std::move(P.mFamilyScalarGraph))
 
 , mIllustratedStreamSetBindings(std::move(P.mIllustratedStreamSetBindings))
