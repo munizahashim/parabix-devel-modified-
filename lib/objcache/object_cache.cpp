@@ -248,8 +248,6 @@ void ParabixObjectCache::notifyObjectCompiled(const Module * M, MemoryBufferRef 
             }
         }
 
-
-
         for (const auto & og : M->named_metadata()) {
             NamedMDNode * const md = H->getOrInsertNamedMetadata(og.getName());
             const auto n = og.getNumOperands();
@@ -358,8 +356,8 @@ inline void getDefaultCachePath(Path & configPath) {
     sys::path::append(configPath, ".parabix", "cache");
 #endif
 }
-#if 0
 
+#if 0
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief getConfigPath
  ** ------------------------------------------------------------------------------------------------------------- */

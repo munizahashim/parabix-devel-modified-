@@ -226,6 +226,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
         Value * const selected = accessibleItems[inputPort.Number];
         Value * const totalNumOfItems = mLocallyAvailableItems[streamSet]; // getAccessibleInputItems(b, port);
 
+
         const auto alwaysTruncate = bn.isUnowned() || bn.isTruncated() || bn.isConstant();
 
         if (LLVM_UNLIKELY(alwaysTruncate)) {
@@ -579,6 +580,7 @@ void PipelineCompiler::clearUnwrittenOutputData(KernelBuilder & b) {
         } else {
             inputPtr = buffer->getStreamBlockPtr(b, baseAddress, streamIndexPhi, blockIndex);
         }
+
         #ifdef PRINT_DEBUG_MESSAGES
         Value * const ptrInt = b.CreatePtrToInt(inputPtr, intPtrTy);
         debugPrint(b, prefix + "_zeroUnwritten_partialPtr = 0x%" PRIx64, ptrInt);
@@ -593,7 +595,6 @@ void PipelineCompiler::clearUnwrittenOutputData(KernelBuilder & b) {
             } else {
                 outputPtr = buffer->getStreamBlockPtr(b, baseAddress, streamIndexPhi, blockIndex);
             }
-
         }
         b.CreateBlockAlignedStore(maskedValue, outputPtr);
         if (itemWidth > 1) {

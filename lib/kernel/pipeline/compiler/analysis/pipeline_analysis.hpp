@@ -69,6 +69,8 @@ public:
 
         P.identifyInterPartitionSymbolicRates();
 
+        P.addFlowControlAnnotations();
+
         P.identifyTerminationChecks();
 
         P.makeTerminationPropagationGraph();
@@ -205,6 +207,8 @@ private:
 
     void buildZeroInputGraph();
 
+    void addFlowControlAnnotations();
+
     // thread local analysis
 
     void determineInitialThreadLocalBufferLayout(KernelBuilder & b, pipeline_random_engine & rng);
@@ -291,7 +295,10 @@ public:
     unsigned                        FirstScalar = 0;
     unsigned                        LastScalar = 0;
     unsigned                        PartitionCount = 0;
-    unsigned                        NumOfThreads = 0;
+    unsigned                        FirstComputePartitionId = 0;
+    unsigned                        LastComputePartitionId = 0;
+    bool                            AllowIOProcessThread = false;
+
     bool                            HasZeroExtendedStream = false;
 
     size_t                          RequiredThreadLocalStreamSetMemory = 0;

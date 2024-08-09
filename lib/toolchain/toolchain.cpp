@@ -63,7 +63,6 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                                                            "particular stream."),
                         clEnumVal(DisableIndirectBranch, "Disable use of indirect branches in kernel code."),
                         clEnumVal(DisableThreadLocalStreamSets, "Disable use of thread-local memory for streamsets within the same partition."),
-                        clEnumVal(EnableAnonymousMMapedDynamicLinearBuffers, "Use anonymous mmap for dynamic linear buffers instead of copyback mechanism."),
 
                         #ifdef ENABLE_PAPI
                         clEnumVal(DisplayPAPICounterThreadTotalsOnly, "Disable per-kernel PAPI counters when given a valid PapiCounters list."),
@@ -226,6 +225,11 @@ static cl::opt<std::string, true> CCTypeOption("ccc-type", cl::location(CCCOptio
 bool TimeKernelsIsEnabled;
 static cl::opt<bool, true> OptCompileTime("time-kernels", cl::location(TimeKernelsIsEnabled),
                                         cl::desc("Times each kernel, printing elapsed time for each on exit"), cl::init(false));
+
+
+bool UseProcessThreadForIO;
+static cl::opt<bool, true> OptUseProcessThreadForIO("io-thread", cl::location(UseProcessThreadForIO),
+                                        cl::desc("Only permit the process thread to perform IO"), cl::init(false));
 
 CodeGenOpt::Level OptLevel;
 CodeGenOpt::Level BackEndOptLevel;

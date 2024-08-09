@@ -9,6 +9,9 @@
 #include <kernel/core/kernel_builder.h>
 #include <kernel/core/streamset.h>
 #include <toolchain/toolchain.h>
+#include <boost/intrusive/detail/math.hpp>
+
+using boost::intrusive::detail::floor_log2;
 
 namespace llvm { class Type; }
 
@@ -173,7 +176,7 @@ void UntilNkernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * cons
         b.storeOutputStreamBlock("uptoN", ZERO, blockIndex2, maskedInputValue);
     }
 
-    const auto log2BlockWidth = std::log2(b.getBitBlockWidth());
+    const auto log2BlockWidth = floor_log2(b.getBitBlockWidth());
     Value * positionOfNthItem = nullptr;
     if ((mMode == Mode::TerminateAtN) || (mMode == Mode::ReportAcceptedLengthAtAndBeforeN)) {
         positionOfNthItem = b.CreateShl(blockIndex2, log2BlockWidth);

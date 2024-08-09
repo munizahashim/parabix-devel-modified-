@@ -12,6 +12,9 @@
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
 #include <llvm/IR/IntrinsicsX86.h>
 #endif
+#include <boost/intrusive/detail/math.hpp>
+
+using boost::intrusive::detail::floor_log2;
 
 using namespace llvm;
 
@@ -102,7 +105,7 @@ void SwizzleGenerator::generateDoBlockMethod(KernelBuilder & b) {
     }
 
     const auto swizzleFactor = b.getBitBlockWidth() / mFieldWidth;
-    const auto passes = std::log2(swizzleFactor);
+    const auto passes = floor_log2(swizzleFactor);
     const auto swizzleGroups = ceil_udiv(mBitStreamCount, swizzleFactor);
     const auto inputStreamsPerSet = ceil_udiv(mBitStreamCount, getNumOfStreamInputs());
     const auto outputStreamsPerSet = ceil_udiv(mBitStreamCount, getNumOfStreamOutputs());

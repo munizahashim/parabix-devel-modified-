@@ -21,7 +21,7 @@ public:
         generateDoSegmentMethod(mCodeUnitWidth, mStride, b);
     }
     void generateFinalizeMethod(KernelBuilder & b) override {
-        freeBuffer(b, mCodeUnitWidth);
+        freeBuffer(mCodeUnitWidth, b);
     }
     llvm::Value * generateExpectedOutputSizeMethod(KernelBuilder & b) override {
         return generateExpectedOutputSizeMethod(mCodeUnitWidth, b);
@@ -31,7 +31,7 @@ protected:
     static void generateInitializeMethod(const unsigned codeUnitWidth, const unsigned stride, KernelBuilder & b);
     static void generateDoSegmentMethod(const unsigned codeUnitWidth, const unsigned stride, KernelBuilder & b);
     static llvm::Value * generateExpectedOutputSizeMethod(const unsigned codeUnitWidth, KernelBuilder & b);
-    static void freeBuffer(KernelBuilder & b, const unsigned codeUnitWidth);
+    static void freeBuffer(const unsigned codeUnitWidth, KernelBuilder & b);
 protected:
     const unsigned mCodeUnitWidth;
 };
@@ -48,7 +48,7 @@ public:
         generateDoSegmentMethod(mCodeUnitWidth, mStride, b);
     }
     void generateFinalizeMethod(KernelBuilder & b) override {
-        freeBuffer(b);
+        freeBuffer(mCodeUnitWidth, b);
     }
     llvm::Value * generateExpectedOutputSizeMethod(KernelBuilder & b) override {
         return generateExpectedOutputSizeMethod(mCodeUnitWidth, b);
@@ -58,8 +58,7 @@ protected:
     static void generateInitializeMethod(const unsigned codeUnitWidth, const unsigned stride, KernelBuilder & b);
     static void generateDoSegmentMethod(const unsigned codeUnitWidth, const unsigned stride, KernelBuilder & b);
     static llvm::Value * generateExpectedOutputSizeMethod(const unsigned codeUnitWidth, KernelBuilder & b);
-    static void freeBuffer(KernelBuilder & b);
-    static void createInternalBuffer(KernelBuilder & b);
+    static void freeBuffer(const unsigned codeUnitWidth, KernelBuilder & b);
 private:
     const unsigned mCodeUnitWidth;
 };

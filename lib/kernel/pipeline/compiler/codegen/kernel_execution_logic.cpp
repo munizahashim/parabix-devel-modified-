@@ -41,6 +41,7 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
 
         assert (!mUsesIllustrator);
+        assert (!mIsIOProcessThread);
 
         if (mCurrentKernelIsStateFree) {
             updateProcessedAndProducedItemCounts(b);

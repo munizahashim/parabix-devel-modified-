@@ -392,7 +392,6 @@ void ScanBatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
     b.setScalarField("pendingFileLimit", pendingLimit);
     b.CreateBr(stridePrecomputation);
 
-
     // Precompute index masks for one stride of the match result and line break streams,
     // as well as a partial sum popcount of line numbers if line numbering is on.
     b.SetInsertPoint(stridePrecomputation);

@@ -160,10 +160,11 @@ void StreamSelect::generateDoBlockMethod(KernelBuilder & b) {
     }
 }
 
+
 IStreamSelect::IStreamSelect(KernelBuilder & b, StreamSet * output, SelectOperation operation)
 : MultiBlockKernel(b, "IStreamSelect" + streamutils::genSignature(operation),
     {},
-    {{"output", output, BoundedRate(0, 1)}},
+    {{"output", output}},
     {}, {}, {})
 {
 //    assert(resultStreamCount(operation) == output->getNumElements());
@@ -179,38 +180,34 @@ IStreamSelect::IStreamSelect(KernelBuilder & b, StreamSet * output, SelectOperat
         assert(mFieldWidth == 0 ? true : mFieldWidth == kv.first->getFieldWidth());
         mFieldWidth = kv.first->getFieldWidth();
         assert(mFieldWidth == output->getFieldWidth());
-        mInputStreamSets.push_back({kv.second, kv.first, BoundedRate(0, 1)});
+        mInputStreamSets.push_back({kv.second, kv.first});
     }
-    setStride(1);
 }
 
 void IStreamSelect::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
     BasicBlock * const block_Entry = b.GetInsertBlock();
     BasicBlock * const block_Loop = b.CreateBasicBlock("loop");
     BasicBlock * const block_Exit = b.CreateBasicBlock("exit");
-    Value * const initialStride = b.getProducedItemCount("output");
-    b.CreateCondBr(b.isFinal(), block_Exit, block_Loop);
+    b.CreateBr(block_Loop);
 
     b.SetInsertPoint(block_Loop);
-    PHINode * const strideNo = b.CreatePHI(b.getSizeTy(), 2);
-    strideNo->addIncoming(b.getSize(0), block_Entry);
-    uint32_t outIdx = 0;
-    Value * const absPos = b.CreateAdd(strideNo, initialStride);
-    IntegerType * const fieldTy = b.getIntNTy(mFieldWidth);
+    PHINode * const positionPhi = b.CreatePHI(b.getSizeTy(), 2);
+    positionPhi->addIncoming(b.getSize(0), block_Entry);
+
+    size_t outIdx = 0;
     for (auto const & binding : mOperation.bindings) {
         auto const & name = binding.first;
-        for (auto const & idx : binding.second) {
-            Value * const ptr = b.getRawInputPointer(name, b.getInt32(idx), absPos);
-            Value * const val = b.CreateLoad(fieldTy, ptr);
-            b.CreateStore(val, b.getRawOutputPointer("output", b.getInt32(outIdx), absPos));
+        for (auto const inIdx : binding.second) {
+            for (unsigned i = 0; i < mFieldWidth; ++i) {
+                Value * const val = b.loadInputStreamPack(name, b.getSize(inIdx), b.getSize(i), positionPhi);
+                b.storeOutputStreamPack("output",  b.getSize(outIdx), b.getSize(i), positionPhi, val);
+            }
             outIdx++;
         }
-        b.setProcessedItemCount(name, b.CreateAdd(b.getProcessedItemCount(name), b.getSize(1)));
     }
-    b.setProducedItemCount("output", b.CreateAdd(b.getProducedItemCount("output"), b.getSize(1)));
-    Value * const nextStrideNo = b.CreateAdd(strideNo, b.getSize(1));
-    strideNo->addIncoming(nextStrideNo, block_Loop);
-    b.CreateCondBr(b.CreateICmpNE(nextStrideNo, numOfStrides), block_Loop, block_Exit);
+    Value * const nextPosition = b.CreateAdd(positionPhi, b.getSize(1));
+    positionPhi->addIncoming(nextPosition, block_Loop);
+    b.CreateCondBr(b.CreateICmpNE(nextPosition, numOfStrides), block_Loop, block_Exit);
 
     b.SetInsertPoint(block_Exit);
 }

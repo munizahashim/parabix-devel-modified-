@@ -17,7 +17,9 @@
 #include <pablo/pablo_kernel.h>
 #include <pablo/pablo_toolchain.h>
 #include <pablo/bixnum/bixnum.h>
+#include <boost/intrusive/detail/math.hpp>
 
+using boost::intrusive::detail::floor_log2;
 using namespace llvm;
 using namespace pablo;
 using namespace kernel;
@@ -430,7 +432,7 @@ void FieldDepositKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value 
         Constant * const ZERO = b.getSize(0);
         Value * numOfBlocks = numOfStrides;
         if (getStride() != b.getBitBlockWidth()) {
-            numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
+            numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
         }
         b.CreateBr(processBlock);
 
@@ -469,7 +471,7 @@ void PDEPFieldDepositLogic(KernelBuilder & b, llvm::Value * const numOfStrides, 
     const unsigned fieldsPerBlock = b.getBitBlockWidth()/fieldWidth;
     Value * numOfBlocks = numOfStrides;
     if (stride != b.getBitBlockWidth()) {
-        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(stride/b.getBitBlockWidth())));
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(stride/b.getBitBlockWidth())));
     }
     b.CreateBr(processBlock);
     b.SetInsertPoint(processBlock);
@@ -578,7 +580,7 @@ void PDEPkernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfS
 
     Value * numOfBlocks = numOfStrides;
     if (getStride() != b.getBitBlockWidth()) {
-        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
     }
     Value * const initialSourceOffset = b.CreateURem(sourceItemCount, BLOCK_WIDTH);
     b.CreateBr(processBlock);

@@ -612,6 +612,8 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
 
     auto nextRateId = l;
 
+    const auto useIOProcessThread = codegen::UseProcessThreadForIO && !IsNestedPipeline;
+
     flat_map<unsigned, unsigned> zeroExtendMap;
 
     for (unsigned i = 0; i < m; ++i) {
@@ -633,7 +635,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
             assert (V.any() || kernelObj == mPipelineKernel);
 
             // Check whether this (internal) kernel could terminate early
-            bool useNewRateId = (in_degree(i, G) == 0);
+            bool useNewRateId = (in_degree(i, G) == 0) || (useIOProcessThread && out_degree(i, G) == 0);
             bool demarcateOutputs = (kernelObj == mPipelineKernel) || useNewRateId;
 
             if (kernelObj != mPipelineKernel) {
@@ -855,9 +857,9 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
 
     RenumberingGraph T(partitionCount);
 
-    for (unsigned i = 1; i < partitionCount; ++i) {
-        add_edge(0, i, 0, T);
-    }
+//    for (unsigned i = 1; i < partitionCount; ++i) {
+//        add_edge(0, i, 0, T);
+//    }
 
     for (unsigned i = 1; i < m; ++i) {
         const auto u = sequence[i];
@@ -878,9 +880,43 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
         }
     }
 
+    llvm::BitVector V(partitionCount);
+
+    for (unsigned i = 1; i < (partitionCount - 1); ++i) {
+        if (in_degree(i, T) == 0) {
+            add_edge(0, i, 0, T);
+            for (const auto e : make_iterator_range(out_edges(i, T))) {
+                V.set(target(e, T));
+            }
+        }
+    }
+
+    for (const auto e : make_iterator_range(out_edges(0, T))) {
+        const auto s = target(e, T);
+        for (auto j = V.find_first(); j != -1; j = V.find_next(j)) {
+            if (!edge(s, j, T).second) {
+                add_edge(s, j, 0, T);
+            }
+        }
+    }
+
+    V.reset();
+
     for (unsigned i = 1; i < (partitionCount - 1); ++i) {
         if (out_degree(i, T) == 0) {
+            for (const auto e : make_iterator_range(in_edges(i, T))) {
+                V.set(source(e, T));
+            }
             add_edge(i, partitionCount - 1, 0, T);
+        }
+    }
+
+    for (const auto e : make_iterator_range(in_edges(partitionCount - 1, T))) {
+        const auto t = source(e, T);
+        for (auto j = V.find_first(); j != -1; j = V.find_next(j)) {
+            if (!edge(j, t, T).second) {
+                add_edge(j, t, 0, T);
+            }
         }
     }
 
@@ -1083,7 +1119,7 @@ PartitionGraph PipelineAnalysis::postDataflowAnalysisPartitioningPass(PartitionG
 void PipelineAnalysis::determinePartitionJumpIndices() {
      PartitionJumpTargetId.resize(PartitionCount);
 #ifdef DISABLE_PARTITION_JUMPING
-    for (unsigned i = 0; i < (PartitionCount - 1); ++i) {
+    for (unsigned i = FirstComputePartitionId; i <= LastComputePartitionId; ++i) {
         mPartitionJumpIndex[i] = i + 1;
     }
     mPartitionJumpIndex[(PartitionCount - 1)] = (PartitionCount - 1);
@@ -1153,7 +1189,7 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
     END_SCOPED_REGION
 
     if (in_degree(PartitionCount - 1, J) == 0) {
-        for (unsigned partitionId = 1; partitionId < (PartitionCount - 1); ++partitionId) {
+        for (auto partitionId = 1U; partitionId < PartitionCount; ++partitionId) {
             if (LLVM_UNLIKELY(out_degree(partitionId, J) == 0)) {
                 add_edge(partitionId, PartitionCount - 1, J);
             }
@@ -1167,17 +1203,17 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
     BitSet intersection;
     expandCapacity(intersection);
 
-    for (unsigned i = 1; i < PartitionCount; ++i) { // topological ordering
-        auto & ds = rateDomSet[i];
+    for (auto partitionId = 1U; partitionId < PartitionCount; ++partitionId) { // topological ordering
+        auto & ds = rateDomSet[partitionId];
 
-        if (out_degree(i, J) == 0) {
+        if (out_degree(partitionId, J) == 0) {
             ds.reset();
         } else {
-            if (in_degree(i, J) > 0) {
+            if (in_degree(partitionId, J) > 0) {
                 intersection.set();
-                for (const auto e : make_iterator_range(in_edges(i, J))) {
+                for (const auto e : make_iterator_range(in_edges(partitionId, J))) {
                     const unsigned producerId = source(e, J);
-                    assert (producerId < i);
+                    assert (producerId <= partitionId);
                     intersection &= rateDomSet[producerId];
                 }
                 ds |= intersection;
@@ -1194,9 +1230,8 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
         }
     }
 
-    PartitionJumpTargetId[0] = 0;
 
-    for (unsigned i = 1; i < (PartitionCount - 1); ++i) {
+    for (size_t i = 1U; i < PartitionCount - 1; ++i) {
         const BitSet & prior =  rateDomSet[i - 1];
         const BitSet & current =  rateDomSet[i];
         auto j = i + 1U;
@@ -1210,9 +1245,39 @@ void PipelineAnalysis::determinePartitionJumpIndices() {
             }
         }
         assert (j > i);
+
         PartitionJumpTargetId[i] = j;
     }
 
+    if (LLVM_UNLIKELY(!IsNestedPipeline && codegen::EnableJumpGuidedSynchronizationVariables)) {
+        const auto lastComputeKernel = FirstKernelInPartition[LastComputePartitionId + 1U] - 1U;
+        for (auto partId = FirstComputePartitionId; partId <= LastComputePartitionId; ++partId) {
+            if (LLVM_UNLIKELY(PartitionJumpTargetId[partId] == (PartitionCount - 1))) {
+                const auto kernelId = FirstKernelInPartition[partId];
+                if (kernelId < lastComputeKernel) {
+                    mBufferGraph[kernelId].Type |= StartsNestedSynchronizationRegion;
+                }
+            }
+        }
+    }
+
+    PartitionJumpTargetId[0] = 0;
+    assert (FirstComputePartitionId > 0);
+    for (size_t i = 2; i < FirstComputePartitionId; ++i) {
+        PartitionJumpTargetId[i - 1] = i;
+    }
+    assert ((FirstComputePartitionId - 1) < (LastComputePartitionId + 1));
+    PartitionJumpTargetId[(FirstComputePartitionId - 1)] = (LastComputePartitionId + 1);
+    assert (LastComputePartitionId < (PartitionCount - 1));
+    for (size_t i = FirstComputePartitionId; i <= LastComputePartitionId; ++i) {
+        if (PartitionJumpTargetId[i] > LastComputePartitionId) {
+            PartitionJumpTargetId[i] = (PartitionCount - 1);
+        }
+    }
+    assert (PartitionCount > 1);
+    for (auto i = (LastComputePartitionId + 1); i < (PartitionCount - 1); ++i) {
+        PartitionJumpTargetId[i] = (i + 1);
+    }
     PartitionJumpTargetId[(PartitionCount - 1)] = (PartitionCount - 1);
 
 #endif

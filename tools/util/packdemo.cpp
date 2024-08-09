@@ -18,7 +18,9 @@
 #include <llvm/ADT/StringRef.h>
 #include <kernel/pipeline/pipeline_builder.h>
 #include <fcntl.h>
+#include <boost/intrusive/detail/math.hpp>
 
+using boost::intrusive::detail::floor_log2;
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
 #define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
@@ -65,7 +67,7 @@ void PackKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfS
     Constant * const ZERO = b.getSize(0);
     Value * numOfBlocks = numOfStrides;
     if (getStride() != b.getBitBlockWidth()) {
-        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
         llvm::errs() << "stride = " << getStride() << "\n";
     }
     b.CreateBr(packLoop);

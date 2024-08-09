@@ -837,7 +837,7 @@ void PipelineAnalysis::buildZeroInputGraph() {
             add_vertex(G);
         }
 
-        for (auto k = 0; k < l; ++k) {
+        for (size_t k = 0U; k < l; ++k) {
             const auto portNum = entries[k].second;
             add_edge(kernel - FirstKernel, n + k, portNum, G);
         }
