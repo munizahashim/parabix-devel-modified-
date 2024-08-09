@@ -1023,6 +1023,11 @@ Value * IDISA_Builder::mvmd_compress(unsigned fw, Value * v, Value * select_mask
     return selected;
 }
 
+Value * IDISA_Builder::mvmd_expand(unsigned fw, Value * v, Value * select_mask) {
+    // TODO: implement a default method here
+    UnsupportedFieldWidthError(fw, "mvmd_expand");
+}
+
 Value * IDISA_Builder::bitblock_any(Value * a) {
     if (a->getType()->isIntegerTy()) {
         return CreateICmpNE(a, ConstantInt::getNullValue(a->getType()));
