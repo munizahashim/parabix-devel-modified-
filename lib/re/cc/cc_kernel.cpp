@@ -76,16 +76,16 @@ void CharacterClassKernelBuilder::generatePabloMethod() {
     std::unique_ptr<cc::CC_Compiler> ccc;
     bool useDirectCC = getInput(0)->getType()->getArrayNumElements() == 1;
     if (useDirectCC) {
-        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), pb.createExtract(getInput(0), pb.getInteger(0)));
+        ccc = std::make_unique<cc::Direct_CC_Compiler>(pb.createExtract(getInput(0), pb.getInteger(0)));
     } else {
-        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), getInputStreamSet("sourceStream"));
+        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getInputStreamSet("sourceStream"));
     }
     Var * outputVar = getOutputStreamVar("ccStream");
     if (mAbortOnNull) {
-        pb.createTerminateAt(ccc->compileCC(makeCC(0, &cc::Byte)), pb.getInteger(0));
+        pb.createTerminateAt(ccc->compileCC(makeCC(0, &cc::Byte), pb), pb.getInteger(0));
     }
     for (unsigned i = 0; i < mCharClasses.size(); ++i) {
-        PabloAST * cc = ccc->compileCC(mCharClasses[i]);
+        PabloAST * cc = ccc->compileCC(mCharClasses[i], pb);
         pb.createAssign(pb.createExtract(outputVar, i), cc);
     }
 }

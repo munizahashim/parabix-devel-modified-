@@ -377,7 +377,6 @@ bool SchedulingPrePass::optimize(PabloKernel * const kernel) {
     #else
     SchedulingPrePassContainer S;
     S.run(kernel->getEntryScope());
-    PabloVerifier::verify(kernel, "post-scheduling-prepass");
     return true;
     #endif
 }

@@ -142,7 +142,7 @@ void TranscoderKernelBuilder::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> basis = getInputStreamSet("sourceBasis");
     Var * outputVar = getOutputStreamVar("UnicodeBasis");
-    cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), basis);
+    cc::Parabix_CC_Compiler_Builder ccc(basis);
     std::vector<CC *> bitXfrmClasses;
     std::vector<CC *> outputBitClasses;
     auto xClasses = transcoderClasses(mAlphabet);
@@ -150,12 +150,12 @@ void TranscoderKernelBuilder::generatePabloMethod() {
     outputBitClasses = xClasses.second;
     unsigned K = bitXfrmClasses.size();
     for (unsigned i = 0; i < K; i++) {
-        PabloAST * xfrmStrm = ccc.compileCC(bitXfrmClasses[i]);
+        PabloAST * xfrmStrm = ccc.compileCC(bitXfrmClasses[i], pb);
         PabloAST * outStrm = pb.createXor(xfrmStrm, basis[i]);
         pb.createAssign(pb.createExtract(outputVar, i), outStrm);
     }
     for (unsigned i = 0; i < outputBitClasses.size(); i++) {
-        PabloAST * outStrm = ccc.compileCC(outputBitClasses[i]);
+        PabloAST * outStrm = ccc.compileCC(outputBitClasses[i], pb);
         pb.createAssign(pb.createExtract(outputVar, K + i), outStrm);
     }
     for (unsigned i = K + outputBitClasses.size(); i < 16; i++) {

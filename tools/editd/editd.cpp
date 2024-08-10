@@ -187,11 +187,11 @@ PreprocessKernel::PreprocessKernel(KernelBuilder & b, StreamSet * BasisBits, Str
 
 void PreprocessKernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), getInputStreamSet("basis"));
-    PabloAST * A = ccc.compileCC(re::makeCC(re::makeCC(0x41), re::makeCC(0x61)));
-    PabloAST * C = ccc.compileCC(re::makeCC(re::makeCC(0x43), re::makeCC(0x63)));
-    PabloAST * T = ccc.compileCC(re::makeCC(re::makeCC(0x54), re::makeCC(0x74)));
-    PabloAST * G = ccc.compileCC(re::makeCC(re::makeCC(0x47), re::makeCC(0x67)));
+    cc::Parabix_CC_Compiler_Builder ccc(getInputStreamSet("basis"));
+    PabloAST * A = ccc.compileCC(re::makeCC(re::makeCC(0x41), re::makeCC(0x61)), pb);
+    PabloAST * C = ccc.compileCC(re::makeCC(re::makeCC(0x43), re::makeCC(0x63)), pb);
+    PabloAST * T = ccc.compileCC(re::makeCC(re::makeCC(0x54), re::makeCC(0x74)), pb);
+    PabloAST * G = ccc.compileCC(re::makeCC(re::makeCC(0x47), re::makeCC(0x67)), pb);
     Var * const pat = getOutputStreamVar("pat");
     pb.createAssign(pb.createExtract(pat, 0), A);
     pb.createAssign(pb.createExtract(pat, 1), C);

@@ -127,7 +127,7 @@ static cl::opt<bool, true> WithFilenameOption("H", cl::location(WithFilenameFlag
 static cl::alias WithFilenameAlias("with-filename", cl::desc("Alias for -H"), cl::aliasopt(WithFilenameOption));
 
 bool NoFilenameFlag;
-static cl::opt<bool, true> NoFilenameOption("h", cl::location(NoFilenameFlag), cl::desc("Do not show filenames with maches."), cl::cat(Output_Options), cl::Grouping);
+static cl::opt<bool, true> NoFilenameOption("h", cl::location(NoFilenameFlag), cl::desc("Do not show filenames with matches."), cl::cat(Output_Options), cl::Grouping);
 static cl::alias NoFilenameAlias("no-filename", cl::desc("Alias for -h"), cl::aliasopt(NoFilenameOption));
 
 bool NullFlag;

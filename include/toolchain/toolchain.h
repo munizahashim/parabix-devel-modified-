@@ -17,6 +17,8 @@ namespace llvm { namespace cl { class OptionCategory; } }
 
 namespace codegen {
 
+extern llvm::cl::OptionCategory CodeGenOptions;
+
 const llvm::cl::OptionCategory * LLVM_READONLY codegen_flags();
 
 // Command Parameters

@@ -62,7 +62,9 @@ TEST_CASE(scan_index_integration,
     auto Basis = P->CreateStreamSet(8, 1);
     P->CreateKernelCall<S2PKernel>(Input<0>(T), Basis);
     auto Marker = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<ByteClassesKernel>(std::vector<re::CC *>{re::makeByte('.')}, Basis, Marker);
+    std::vector<re::CC *> ccs;
+    ccs.push_back(re::makeByte('.'));
+    P->CreateKernelCall<ByteClassesKernel>(ccs, Basis, Marker);
     auto Collapsed = streamutils::Collapse(P, Marker);
     auto Indices = scan::ToIndices(P, Collapsed);
     AssertEQ(P, Indices, Input<1>(T));

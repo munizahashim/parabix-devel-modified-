@@ -88,9 +88,17 @@ void PipelineCompiler::addCycleCounterProperties(KernelBuilder & b, const unsign
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief updateOptionalCycleCounter
+ ** ------------------------------------------------------------------------------------------------------------- */
+inline bool isSynchronizationCounter(const CycleCounter type) {
+    return type == CycleCounter::KERNEL_SYNCHRONIZATION || type == CycleCounter::PARTITION_JUMP_SYNCHRONIZATION;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief startCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::startCycleCounter(KernelBuilder & b, const CycleCounter type) {
+    assert (EnableCycleCounter || isSynchronizationCounter(type));
     Value * const counter = b.CreateReadCycleCounter();
     mCycleCounters[(unsigned)type] = counter;
 }
@@ -99,11 +107,10 @@ void PipelineCompiler::startCycleCounter(KernelBuilder & b, const CycleCounter t
  * @brief startCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::startCycleCounter(KernelBuilder & b, const std::initializer_list<CycleCounter> types) {
-    Value * counter = nullptr;
+    Value * counter = b.CreateReadCycleCounter();
+    assert (types.size() > 0);
     for (auto type : types) {
-        if (counter == nullptr) {
-            counter = b.CreateReadCycleCounter();
-        }
+        assert (EnableCycleCounter || isSynchronizationCounter(type));
         mCycleCounters[(unsigned)type] = counter;
     }
 }
@@ -113,25 +120,23 @@ void PipelineCompiler::startCycleCounter(KernelBuilder & b, const std::initializ
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kernelId, const CycleCounter type) {
     assert (FirstKernel <= kernelId && kernelId <= PipelineOutput);
-    assert (EnableCycleCounter || (type == KERNEL_SYNCHRONIZATION || type == PARTITION_JUMP_SYNCHRONIZATION));
+    assert (EnableCycleCounter || isSynchronizationCounter(type));
+
     Value * const end = b.CreateReadCycleCounter();
     Value * const start = mCycleCounters[(unsigned)type]; assert (start);
     Value * const duration = b.CreateSub(end, start);
 
     IntegerType * sizeTy = b.getSizeTy();
-
-    if (LLVM_UNLIKELY(mUseDynamicMultithreading && (type == KERNEL_SYNCHRONIZATION || type == PARTITION_JUMP_SYNCHRONIZATION))) {
+    if (mUseDynamicMultithreading && isSynchronizationCounter(type)) {
         Value * const cur = b.CreateLoad(sizeTy, mAccumulatedSynchronizationTimePtr);
         Value * const accum = b.CreateAdd(cur, duration);
         b.CreateStore(accum, mAccumulatedSynchronizationTimePtr);
     }
 
     if (EnableCycleCounter) {
-
         const auto prefix = makeKernelName(kernelId);
         Value * ptr; Type * ty;
         std::tie(ptr, ty) = b.getScalarFieldPtr(prefix  + STATISTICS_CYCLE_COUNT_SUFFIX);
-
         FixedArray<Value *, 2> index;
         index[0] = b.getInt32(0);
         index[1] = b.getInt32(type);

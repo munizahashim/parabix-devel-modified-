@@ -15,6 +15,9 @@
 #include <kernel/pipeline/driver/driver.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <toolchain/toolchain.h>
+#include <boost/intrusive/detail/math.hpp>
+
+using boost::intrusive::detail::floor_log2;
 
 using namespace llvm;
 
@@ -136,7 +139,7 @@ void S2PKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfSt
     Constant * const ZERO = b.getSize(0);
     Value * numOfBlocks = numOfStrides;
     if (getStride() != b.getBitBlockWidth()) {
-        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
     }
     b.CreateBr(s2pLoop);
 
@@ -241,7 +244,7 @@ void BitPairsKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const nu
     Constant * const ZERO = b.getSize(0);
     Value * numOfBlocks = numOfStrides;
     if (getStride() != b.getBitBlockWidth()) {
-        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
     }
     b.CreateBr(bitPairLoop);
     b.SetInsertPoint(bitPairLoop);
@@ -281,7 +284,7 @@ void BitQuadsKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const nu
     Constant * const ZERO = b.getSize(0);
     Value * numOfBlocks = numOfStrides;
     if (getStride() != b.getBitBlockWidth()) {
-        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
     }
     b.CreateBr(bitQuadLoop);
     b.SetInsertPoint(bitQuadLoop);
@@ -322,7 +325,7 @@ void S2P_CompletionKernel::generateMultiBlockLogic(KernelBuilder & b, Value * co
     Constant * const ZERO = b.getSize(0);
     Value * numOfBlocks = numOfStrides;
     if (getStride() != b.getBitBlockWidth()) {
-        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
     }
     b.CreateBr(s2pLoop);
     b.SetInsertPoint(s2pLoop);
@@ -398,7 +401,7 @@ void S2P_i21_3xi8::generateMultiBlockLogic(KernelBuilder & b, Value * const numO
 
     Value * numOfBlocks = numOfStrides;
     if (getStride() != b.getBitBlockWidth()) {
-        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
     }
     b.CreateBr(processBlock);
 
@@ -448,7 +451,7 @@ void S2P_3xi8_21xi1::generateMultiBlockLogic(KernelBuilder & b, Value * const nu
 
     Value * numOfBlocks = numOfStrides;
     if (getStride() != b.getBitBlockWidth()) {
-        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
     }
     b.CreateBr(processBlock);
 
@@ -526,7 +529,7 @@ void S2P_21Kernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numO
 
     Value * numOfBlocks = numOfStrides;
     if (getStride() != b.getBitBlockWidth()) {
-        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
     }
     b.CreateBr(processBlock);
 
@@ -602,7 +605,7 @@ void S2P_21Kernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numO
 
 void S2P_PabloKernel::generatePabloMethod() {
     pablo::PabloBlock * const pb = getEntryScope();
-    const unsigned steps = std::log2(mCodeUnitWidth);
+    const unsigned steps = floor_log2(mCodeUnitWidth);
     SmallVector<std::vector<PabloAST *>, 8> streamSet(steps + 1);
     for (unsigned i = 0; i <= steps; i++) {
         streamSet[i].resize(1<<i);

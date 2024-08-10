@@ -353,41 +353,57 @@ struct AssignmentSet {
 
 private:
     const AssignmentSet * const mParent;
-    SmallSet<const PabloAST *, 32> mSet;
+    DenseSet<const PabloAST *> mSet;
 };
 
-void verifyVariableUsages(const PabloBlock * block, const AssignmentSet & parent) {
+void verifyDefUseInformation(const PabloBlock * block, const AssignmentSet & parent) {
     AssignmentSet A(parent);
+    SmallVector<PabloAST *, 16> stack;
     for (const Statement * stmt : *block) {
         if (isa<Assign>(stmt)) {
             PabloAST * var = cast<Assign>(stmt)->getVariable();
             A.insert(cast<Var>(var));
         } else {
-            for (unsigned i = 0; i != stmt->getNumOperands(); ++i) {
-                const PabloAST * op = stmt->getOperand(i);
-                if (LLVM_LIKELY(isa<Var>(op) || isa<Extract>(op))) {
-                    while (isa<Extract>(op)) {
-                        op = cast<Extract>(op)->getArray();
-                    }
-                    if (LLVM_UNLIKELY(!A.contains(op))) {
-                        std::string tmp;
-                        raw_string_ostream out(tmp);
-                        PabloPrinter::print(op, out);
-                        out << " does not dominate ";
-                        PabloPrinter::print(stmt, out);
-                        throw std::runtime_error(out.str());
-                    }
-                }
-            }
-        }
 
-        if (LLVM_UNLIKELY(isa<Branch>(stmt))) {
-            verifyVariableUsages(cast<Branch>(stmt)->getBody(), A);
+            std::function<void(PabloAST *)> checkValue = [&](PabloAST * op) {
+                while (LLVM_UNLIKELY(isa<Extract>(op))) {
+                    op = cast<Extract>(op)->getArray();
+                }
+                if (LLVM_UNLIKELY(isa<Branch>(op) || isa<Assign>(op))) {
+                    std::string tmp;
+                    raw_string_ostream out(tmp);
+                    out << "Neither a Branch nor Assign node can be an argument of ";
+                    PabloPrinter::print(stmt, out);
+                    throw std::runtime_error(out.str());
+                }
+                if (isa<Integer>(op) || isa<Ones>(op) || isa<Zeroes>(op)) {
+                    return;
+                }
+                if (LLVM_UNLIKELY(isa<Operator>(op))) {
+                    checkValue(cast<Operator>(op)->getLH());
+                    checkValue(cast<Operator>(op)->getRH());
+                } else if (LLVM_UNLIKELY(!A.contains(op))) {
+                    std::string tmp;
+                    raw_string_ostream out(tmp);
+                    PabloPrinter::print(op, out);
+                    out << " does not dominate ";
+                    PabloPrinter::print(stmt, out);
+                    throw std::runtime_error(out.str());
+                }
+            };
+            for (unsigned i = 0; i != stmt->getNumOperands(); ++i) {
+                checkValue(stmt->getOperand(i));
+            }
+            if (LLVM_UNLIKELY(isa<Branch>(stmt))) {
+                verifyDefUseInformation(cast<Branch>(stmt)->getBody(), A);
+            } else {
+                A.insert(stmt);
+            }
         }
     }
 }
 
-void verifyVariableUsages(const PabloKernel * kernel) {
+void verifyDefUseInformation(const PabloKernel * kernel) {
     AssignmentSet A;
     for (unsigned i = 0; i != kernel->getNumOfInputs(); ++i) {
         A.insert(kernel->getInput(i));
@@ -395,16 +411,15 @@ void verifyVariableUsages(const PabloKernel * kernel) {
     for (unsigned i = 0; i != kernel->getNumOfOutputs(); ++i) {
         A.insert(kernel->getOutput(i));
     }
-    verifyVariableUsages(kernel->getEntryScope(), A);
+    verifyDefUseInformation(kernel->getEntryScope(), A);
 }
-
 
 
 void PabloVerifier::verify(const PabloKernel * kernel, const std::string & location) {
     try {
         verifyProgramStructure(kernel);
         verifyUseDefInformation(kernel);
-        verifyVariableUsages(kernel);
+        verifyDefUseInformation(kernel);
     } catch(std::runtime_error & err) {
         PabloPrinter::print(kernel, errs());
         errs().flush();

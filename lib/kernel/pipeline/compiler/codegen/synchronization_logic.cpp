@@ -246,6 +246,7 @@ Value * PipelineCompiler::getSynchronizationLockPtrForKernel(KernelBuilder & b, 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief obtainNextSegmentNumber
  ** ------------------------------------------------------------------------------------------------------------- */
+
 Value * PipelineCompiler::obtainNextSegmentNumber(KernelBuilder & b) {
     assert (UseJumpGuidedSynchronization);
     Value * ptr; Type * ty;

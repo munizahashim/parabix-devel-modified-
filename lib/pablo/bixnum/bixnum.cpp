@@ -10,6 +10,9 @@
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_compiler_target.h>
 #include <llvm/Support/raw_ostream.h>
+#include <boost/intrusive/detail/math.hpp>
+
+using boost::intrusive::detail::floor_log2;
 
 using namespace cc;
 using namespace re;
@@ -183,7 +186,7 @@ BixNum BixNumCompiler::HighBits(BixNum value, unsigned highBitCount) {
 }
 
 BixNum BixNumCompiler::Create(unsigned value) {
-    unsigned value_bits = std::log2(value)+1;
+    unsigned value_bits = floor_log2(value)+1;
     BixNum v(value_bits);
     for (unsigned i = 0; i < value_bits; i++) {
         if ((value & (1<<i)) == 0) {
@@ -258,7 +261,7 @@ BixNum BixNumCompiler::MulModular(BixNum multiplicand, unsigned multiplier) {
     if (multiplier == 0) {
         return product;
     }
-    const auto multiplier_bits = std::log2(multiplier) + 1;
+    const auto multiplier_bits = floor_log2(multiplier) + 1;
     for (unsigned i = 0; i < multiplier_bits; i++) {
         if ((multiplier & (1 << i)) != 0) {
             PabloAST * carry = mPB.createZeroes();
@@ -274,7 +277,7 @@ BixNum BixNumCompiler::MulModular(BixNum multiplicand, unsigned multiplier) {
 
 BixNum BixNumCompiler::AddFull(BixNum augend, unsigned addend) {
     if (addend == 0) return augend;
-    unsigned long addend_bits = std::log2(addend)+1;
+    unsigned long addend_bits = floor_log2(addend)+1;
     return AddModular(ZeroExtend(augend, std::max(augend.size(), addend_bits) + 1), addend);
 }
 
@@ -295,7 +298,7 @@ BixNum BixNumCompiler::AddFull(BixNum augend, BixNum addend) {
 }
 
 BixNum BixNumCompiler::MulFull(BixNum multiplicand, unsigned multiplier) {
-    unsigned multiplier_bits = std::log2(multiplier)+1;
+    unsigned multiplier_bits = floor_log2(multiplier)+1;
     BixNum product(multiplicand.size() + multiplier_bits, mPB.createZeroes());
     // Choose between the addition-based and subtraction-based strategies based
     // on the number of 1 bits in the multiplier.
@@ -363,7 +366,7 @@ unsigned BixNumTableCompiler::computeOutputBitsForRange(unsigned lo, unsigned hi
         OrAccum |= mTable[i];  // zero bits will be zero for all lo..hi
         AndAccum &= mTable[i]; // one bits will be one for all lo..hi
     }
-    return std::log2(OrAccum & ~AndAccum) + 1;
+    return floor_log2(OrAccum & ~AndAccum) + 1;
 }
 
 void BixNumTableCompiler::compileSubTable(PabloBuilder & pb, unsigned lo, PabloAST * subtableSelect) {
@@ -378,7 +381,7 @@ void BixNumTableCompiler::innerLogic(PabloBuilder & pb,
                                           unsigned outputBitsToSet) {
     unsigned hi = std::min(mInputMax, lo + (1 << mPartitionBits.back()) - 1);
     assert (hi > lo);
-    const unsigned bitsPerInputUnit = std::log2(hi-lo)+1;
+    const unsigned bitsPerInputUnit = floor_log2(hi-lo)+1;
     assert(mInput.size() >= bitsPerInputUnit);
     const unsigned xfrmBits = bitsPerInputUnit;
     std::vector<CC *> bitXfrmClasses;
@@ -432,14 +435,14 @@ void BixNumTableCompiler::innerLogic(PabloBuilder & pb,
     }
     BixNumCompiler bnc(pb);
     assert(bitsPerInputUnit <= 8);
-    cc::Parabix_CC_Compiler_Builder inputUnitCompiler(pb.getPabloBlock(), bnc.ZeroExtend(bnc.Truncate(mInput, bitsPerInputUnit),8));
+    cc::Parabix_CC_Compiler_Builder inputUnitCompiler(bnc.ZeroExtend(bnc.Truncate(mInput, bitsPerInputUnit),8));
     BixNum output(outputBitsToSet, pb.createZeroes());
     for (unsigned i = 0; i < xfrmBits; i++) {
-        PabloAST * xfrmStrm = inputUnitCompiler.compileCC(bitXfrmClasses[i]);
+        PabloAST * xfrmStrm = inputUnitCompiler.compileCC(bitXfrmClasses[i], pb);
         output[i] = pb.createXor(xfrmStrm, mInput[i], "tbl_xfrm[" + std::to_string(i) + "]");
     }
     for (unsigned i = xfrmBits; i < outputBitsToSet; i++) {
-        output[i] = inputUnitCompiler.compileCC(outputBitClasses[i - xfrmBits]);
+        output[i] = inputUnitCompiler.compileCC(outputBitClasses[i - xfrmBits], pb);
     }
     if (max_seq_lgth >= CONSECUTIVE_SEQ_OPTIMIZATION_MINIMUM) {
         output = BixNumCompiler(pb).AddModular(output, static_cast<unsigned>(best_offset));
@@ -478,7 +481,7 @@ unsigned BixNumRangeTableCompiler::consecutiveFrom(unsigned inputVal) {
 }
 
 unsigned BixNumRangeTableCompiler::computeOutputBitsForRange(unsigned lo, unsigned hi) {
-    return std::log2(getTableVal(lo) ^ getTableVal(hi)) + 1;
+    return floor_log2(getTableVal(lo) ^ getTableVal(hi)) + 1;
 }
 
 void BixNumRangeTableCompiler::compileTable(PabloBuilder & pb, PabloAST * partitionSelect) {

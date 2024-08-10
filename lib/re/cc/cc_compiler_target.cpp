@@ -14,15 +14,14 @@ using namespace re;
 
 namespace cc {
 
-Parabix_CC_Compiler_Builder::Parabix_CC_Compiler_Builder(pablo::PabloBlock * scope, std::vector<pablo::PabloAST *> basisBitSet)
-: CC_Compiler(scope) {
+Parabix_CC_Compiler_Builder::Parabix_CC_Compiler_Builder(std::vector<pablo::PabloAST *> basisBitSet) {
     bool use_binary = codegen::CCCOption.compare("binary") == 0;
     // Workaround because Parabix_Ternary_CC_Compiler only works with UTF-8.
     use_binary |= basisBitSet.size() != 8;
     if (use_binary) {
-        ccc = std::make_unique<Parabix_CC_Compiler>(scope, basisBitSet);
+        ccc = std::make_unique<Parabix_CC_Compiler>(basisBitSet);
     } else {
-        ccc = std::make_unique<Parabix_Ternary_CC_Compiler>(scope, basisBitSet);
+        ccc = std::make_unique<Parabix_Ternary_CC_Compiler>(basisBitSet);
     }
 }
 

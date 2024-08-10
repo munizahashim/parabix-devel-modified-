@@ -1304,9 +1304,6 @@ flat_set<const Statement *>         mSideEffecting;
 bool Simplifier::optimize(PabloKernel * kernel) {
     SimplifierPassContainer pc;
     pc.run(kernel);
-    #ifndef NDEBUG
-    PabloVerifier::verify(kernel, "post-simplification");
-    #endif
     return true;
 }
 

@@ -158,7 +158,7 @@ protected:
 
 NFD_Translation::NFD_Translation (KernelBuilder & b, NFD_BixData & BixData,
                                   StreamSet * Basis, StreamSet * Output)
-: PabloKernel(b, "NFD_Translation" + std::to_string(Basis->getNumElements()) + "x1",
+: PabloKernel(b, "NFD_Translation" + std::to_string(Basis->getNumElements()) + "x1" + UTF::kernelAnnotation(),
 // inputs
 {Binding{"basis", Basis}},
 // output
@@ -172,35 +172,41 @@ void NFD_Translation::generatePabloMethod() {
     unicode::BitTranslationSets NFD2 = mBixData.NFD_2nd_BitCCs();
     unicode::BitTranslationSets NFD3 = mBixData.NFD_3rd_BitCCs();
     unicode::BitTranslationSets NFD4 = mBixData.NFD_4th_BitCCs();
-    std::vector<Var *> NFD1_Vars;
-    std::vector<Var *> NFD2_Vars;
-    std::vector<Var *> NFD3_Vars;
-    std::vector<Var *> NFD4_Vars;
+    std::vector<Var *> NFD1_Vars(NFD1.size());
+    std::vector<Var *> NFD2_Vars(NFD2.size());
+    std::vector<Var *> NFD3_Vars(NFD3.size());
+    std::vector<Var *> NFD4_Vars(NFD4.size());
+    std::vector<Var *> all_targets(NFD1.size() + NFD2.size() + NFD3.size() + NFD4.size());
+    std::vector<re::CC *> all_CCs(NFD1.size() + NFD2.size() + NFD3.size() + NFD4.size());
+
     for (unsigned i = 0; i < NFD1.size(); i++) {
         Var * v = pb.createVar("NFD1_bit" + std::to_string(i), pb.createZeroes());
-        NFD1_Vars.push_back(v);
-        unicodeCompiler.addTarget(v, re::makeCC(NFD1[i], &cc::Unicode));
+        NFD1_Vars[i] = v;
+        all_targets[i] = v;
+        all_CCs[i] = re::makeCC(NFD1[i], &cc::Unicode);
     }
+    unsigned base = NFD1.size();
     for (unsigned i = 0; i < NFD2.size(); i++) {
         Var * v = pb.createVar("NFD2_bit" + std::to_string(i), pb.createZeroes());
-        NFD2_Vars.push_back(v);
-        unicodeCompiler.addTarget(v, re::makeCC(NFD2[i], &cc::Unicode));
+        NFD2_Vars[i] = v;
+        all_targets[base + i] = v;
+        all_CCs[base + i] = re::makeCC(NFD2[i], &cc::Unicode);
     }
+    base = base + NFD2.size();
     for (unsigned i = 0; i < NFD3.size(); i++) {
         Var * v = pb.createVar("NFD3_bit" + std::to_string(i), pb.createZeroes());
-        NFD3_Vars.push_back(v);
-        unicodeCompiler.addTarget(v, re::makeCC(NFD3[i], &cc::Unicode));
+        NFD3_Vars[i] = v;
+        all_targets[base + i] = v;
+        all_CCs[base + i] = re::makeCC(NFD3[i], &cc::Unicode);
     }
+    base = base + NFD3.size();
     for (unsigned i = 0; i < NFD4.size(); i++) {
         Var * v = pb.createVar("NFD4_bit" + std::to_string(i), pb.createZeroes());
-        NFD4_Vars.push_back(v);
-        unicodeCompiler.addTarget(v, re::makeCC(NFD4[i], &cc::Unicode));
+        NFD4_Vars[i] = v;
+        all_targets[base + i] = v;
+        all_CCs[base + i] = re::makeCC(NFD4[i], &cc::Unicode);
     }
-    if (LLVM_UNLIKELY(re::AlgorithmOptionIsSet(re::DisableIfHierarchy))) {
-        unicodeCompiler.compile(UTF::UTF_Compiler::IfHierarchy::None);
-    } else {
-        unicodeCompiler.compile();
-    }
+    unicodeCompiler.compile(all_targets, all_CCs);
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     Var * outputVar = getOutputStreamVar("Output");
     std::vector<PabloAST *> output_basis(basis.size());
@@ -324,10 +330,10 @@ void Hangul_VT_Indices::generatePabloMethod() {
     // Given the VT_index value as a basis, we can compute
     // the V_index from a set of five CCs.
     std::vector<re::CC *> V_CCs = VIndexBixNumCCs();
-    cc::Parabix_CC_Compiler ccc(nested.getPabloBlock(), VT_index);
+    cc::Parabix_CC_Compiler ccc(VT_index);
     std::vector<PabloAST *> V_index(5);
     for (unsigned i = 0; i < 5; i++) {
-        V_index[i] = ccc.compileCC(V_CCs[i]);
+        V_index[i] = ccc.compileCC(V_CCs[i], nested);
         nested.createAssign(V_indexVar[i], V_index[i]);
     }
     BixNum V_offset = bnc.ZeroExtend(V_index, 10);

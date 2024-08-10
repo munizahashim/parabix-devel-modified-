@@ -171,13 +171,13 @@ Marker RE_Block_Compiler::compileCC(CC * const cc, Marker marker) {
     while (i < mMain.mAlphabets.size() && (a != mMain.mAlphabets[i])) i++;
     if (i < mMain.mAlphabets.size()) {
         //llvm::errs() << "Found alphabet: " << i << ", " << mMain.mAlphabets[i]->getName() << "\n";
-        PabloAST * ccStrm = mPB.createAnd(mMain.mMatchable, mMain.mAlphabetCompilers[i]->compileCC(cc));
+        PabloAST * ccStrm = mPB.createAnd(mMain.mMatchable, mMain.mAlphabetCompilers[i]->compileCC(cc, mPB));
         mLocallyCompiledCCs.emplace(cc, ccStrm);
         return Marker(mPB.createAnd(nextPos, ccStrm));
     }
     if (a == &cc::Byte) {
         //llvm::errs() << "Using alphabet 0: for Byte\n";
-        PabloAST * ccStrm = mPB.createAnd(mMain.mMatchable, mMain.mAlphabetCompilers[0]->compileCC(cc));
+        PabloAST * ccStrm = mPB.createAnd(mMain.mMatchable, mMain.mAlphabetCompilers[0]->compileCC(cc, mPB));
         mLocallyCompiledCCs.emplace(cc, ccStrm);
         return Marker(mPB.createAnd(nextPos, ccStrm));
     }
@@ -754,9 +754,9 @@ void RE_Compiler::addAlphabet(const cc::Alphabet * a, std::vector<pablo::PabloAS
     bool useDirectCC = cast<VectorType>(basis_set[0]->getType())->getElementType()->getIntegerBitWidth() > 1;
     std::unique_ptr<cc::CC_Compiler> ccc;
     if (useDirectCC) {
-        ccc = std::make_unique<cc::Direct_CC_Compiler>(mEntryScope, basis_set[0]);
+        ccc = std::make_unique<cc::Direct_CC_Compiler>(basis_set[0]);
     } else {
-        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(mEntryScope, basis_set);
+        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(basis_set);
     }
     mAlphabetCompilers.push_back(std::move(ccc));
 }

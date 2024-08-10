@@ -41,7 +41,7 @@ GrepOptions = [[boolean, "i", "ignore-case", "Ignore case distinctions in the pa
 
 
                   [boolean, "H", "with-filename", "Show the file name with each matching line.", "Output_Options"],
-                  [boolean, "h", "no-filename", "Do not show filenames with maches.", "Output_Options"],
+                  [boolean, "h", "no-filename", "Do not show filenames with matches.", "Output_Options"],
                   [boolean, "Z", "null", "Write NUL characters after filenames generated to output.", "Output_Options"],
                   [boolean, "n", "line-number", "Show the line number with each matching line.", "Output_Options"],
 

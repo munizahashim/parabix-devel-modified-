@@ -100,6 +100,8 @@ public:
 
         P.mapInternallyGeneratedStreamSets();
 
+        P.identifySynchronizationVariableLevels();
+
         // Finish the buffer graph
 
         P.determineInitialThreadLocalBufferLayout(b, rng);
@@ -258,6 +260,10 @@ private:
 
     void mapInternallyGeneratedStreamSets();
 
+    // Synchronization Level Analysis
+
+    void identifySynchronizationVariableLevels();
+
 public:
 
     // Debug functions
@@ -327,6 +333,7 @@ public:
     TerminationPropagationGraph         mTerminationPropagationGraph;
     InternallyGeneratedStreamSetGraph   mInternallyGeneratedStreamSetGraph;
     BitVector                           HasTerminationSignal;
+    std::vector<unsigned>               SynchronizationVariableNumber;
 
     FamilyScalarGraph               mFamilyScalarGraph;
     ZeroInputGraph                  mZeroInputGraph;

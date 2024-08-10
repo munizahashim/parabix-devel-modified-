@@ -1843,9 +1843,6 @@ private:
 bool DistributivePass::optimize(PabloKernel * const kernel) {
     DistributivePassContainer C;
     C.run(kernel);
-    #ifndef NDEBUG
-    PabloVerifier::verify(kernel, "post-distributive-pass");
-    #endif
     Simplifier::optimize(kernel);
     return true;
 }

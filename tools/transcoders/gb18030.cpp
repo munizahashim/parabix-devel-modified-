@@ -86,9 +86,9 @@ GB_18030_Parser::GB_18030_Parser (KernelBuilder & b, StreamSet * basis, StreamSe
 
 void GB_18030_Parser::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), getInputStreamSet("basis"));
-    PabloAST * x81_FE = ccc.compileCC(makeByte(0x081, 0xFE));
-    PabloAST * x30_39 = ccc.compileCC(makeByte(0x030, 0x39));
+    cc::Parabix_CC_Compiler_Builder ccc(getInputStreamSet("basis"));
+    PabloAST * x81_FE = ccc.compileCC(makeByte(0x081, 0xFE), pb);
+    PabloAST * x30_39 = ccc.compileCC(makeByte(0x030, 0x39), pb);
     //
     // GB 10830 sequences may be decoded by analysis of sequences of bytes
     // in the range 0x81-FE.   Such a byte occurring as the first byte of
@@ -146,12 +146,12 @@ void GB_18030_Parser::generatePabloMethod() {
     //  are ASCII or error.
     //
     PabloAST * GB_single = pb.createInFile(pb.createNot(pb.createOr(GB_keys, GB_data), "gb_single"));
-    PabloAST * wf1 = pb.createAnd(GB_single, ccc.compileCC(makeByte(0, 0x7F)));
+    PabloAST * wf1 = pb.createAnd(GB_single, ccc.compileCC(makeByte(0, 0x7F), pb));
     PabloAST * scope3 = pb.createAdvance(GB_k2, 1);
     PabloAST * GB_prefix = pb.createAnd(GB_keys, pb.createNot(scope3), "gb_prefix");
     PabloAST * scope2 = pb.createAnd(pb.createAdvance(GB_prefix, 1), pb.createNot(GB_k2), "gb_scope2");
     // A well formed 2 byte sequence has a key 0x81-0xFE byte followed by a byte in 0x40-0xFE except 0x7F.
-    PabloAST * wf2 = pb.createAnd(scope2, ccc.compileCC(makeCC(makeByte(0x040, 0x7E), makeByte(0x080, 0xFE))));
+    PabloAST * wf2 = pb.createAnd(scope2, ccc.compileCC(makeCC(makeByte(0x040, 0x7E), makeByte(0x080, 0xFE)), pb));
     PabloAST * scope4 = pb.createAdvance(scope3, 1);
     // A well formed 4 byte sequence has two consecutive pairs of 0x81-FE 0x30-39 bytes
     PabloAST * wf4 = pb.createAnd(scope4, GB_4_data, "gb_wf4");
@@ -225,8 +225,8 @@ void GB_18030_ExtractionMasks::generatePabloMethod() {
         // mask2 is for selecting the low 4 bits of bytes 2 and 3.
         // mask3 selects data from bytes 3 and 4.
         // mask4 selects data from bytes 1 and 4.
-        cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), getInputStreamSet("basis"));
-        PabloAST * aboveSMP = pb.createAnd(GB_checkedPrefix4, ccc.compileCC(makeByte(0x090, 0xFE)));
+        cc::Parabix_CC_Compiler_Builder ccc(getInputStreamSet("basis"));
+        PabloAST * aboveSMP = pb.createAnd(GB_checkedPrefix4, ccc.compileCC(makeByte(0x090, 0xFE), pb));
         mask1 = pb.createOr(mask1, pb.createAdvance(aboveSMP, 1), "gb_mask1_u16");
         mask2 = pb.createOr(mask2, pb.createAdvance(aboveSMP, 2), "gb_mask2_u16");
         mask3 = pb.createOr(mask3, pb.createAdvance(aboveSMP, 3), "gb_mask3_u16");

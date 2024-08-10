@@ -24,7 +24,7 @@ void UTF8_Decoder::generatePabloMethod() {
     //  output: 21 basis bit streams for Unicode codepoint values.
     Var * Unicode_bit[21];
     
-    cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), UTF8_bit);
+    cc::Parabix_CC_Compiler_Builder ccc(UTF8_bit);
     Zeroes * zeroes = main.createZeroes();
     //
     // 1.  ASCII decoding

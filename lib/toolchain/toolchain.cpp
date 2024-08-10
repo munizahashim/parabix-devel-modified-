@@ -35,7 +35,7 @@ inline unsigned getPageSize() {
     return boost::interprocess::mapped_region::get_page_size();
 }
 
-static cl::OptionCategory CodeGenOptions("Code Generation Options", "These options control code generation.");
+cl::OptionCategory CodeGenOptions("Code Generation Options", "These options control code generation.");
 
 static cl::bits<DebugFlags>
 DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run the IR verification pass."),

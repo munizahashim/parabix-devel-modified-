@@ -685,7 +685,6 @@ protected:
     Value *                                     mPipelineProgress = nullptr;
     Value *                                     mThreadLocalMemorySizePtr = nullptr;
 
-//    BasicBlock *                                mPipelineLoop = nullptr;
     BasicBlock *                                mKernelLoopStart = nullptr;
     BasicBlock *                                mKernelLoopEntry = nullptr;
     BasicBlock *                                mKernelCheckOutputSpace = nullptr;
@@ -699,7 +698,6 @@ protected:
     BasicBlock *                                mKernelLoopExit = nullptr;
     BasicBlock *                                mKernelLoopExitPhiCatch = nullptr;
     BasicBlock *                                mKernelExit = nullptr;
-//    BasicBlock *                                mPipelineEnd = nullptr;
     BasicBlock *                                mRethrowException = nullptr;
 
     Value *                                     mThreadLocalStreamSetBaseAddress = nullptr;

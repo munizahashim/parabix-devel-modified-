@@ -81,6 +81,7 @@ public:
     llvm::Value * mvmd_shuffle2(unsigned fw, llvm::Value * table0, llvm::Value * table1, llvm::Value * index_vector) override;
     llvm::Value * mvmd_compress(unsigned fw, llvm::Value * a, llvm::Value * select_mask) override;
     llvm::Value * mvmd_srl(unsigned fw, llvm::Value * a, llvm::Value * shift, const bool safe) override;
+    llvm::Value * mvmd_expand(unsigned fw, llvm::Value * a, llvm::Value * select_mask) override;
     llvm::Value * mvmd_sll(unsigned fw, llvm::Value * a, llvm::Value * shift, const bool safe) override;
     llvm::Value * simd_if(unsigned fw, llvm::Value * cond, llvm::Value * a, llvm::Value * b) override;
     llvm::Value * simd_ternary(unsigned char mask, llvm::Value * a, llvm::Value * b, llvm::Value * c) override;

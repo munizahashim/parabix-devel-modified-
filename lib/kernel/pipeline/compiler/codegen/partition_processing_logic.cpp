@@ -1,4 +1,4 @@
-#include "../pipeline_compiler.hpp"
+﻿#include "../pipeline_compiler.hpp"
 
 namespace kernel {
 
@@ -505,9 +505,6 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(KernelBuilder & b, co
 
     assert (!mIsIOProcessThread);
 
-    // TODO: fix me
-
-
     const auto afterLastComputeKernel = FirstKernelInPartition[LastComputePartitionId + 1];
     if (firstKernelInTargetPartition >= afterLastComputeKernel) {
         const auto lastComputeKernel = afterLastComputeKernel - 1U;
@@ -599,8 +596,6 @@ void PipelineCompiler::acquirePartitionSynchronizationLock(KernelBuilder & b, co
         #endif
     }
 
-
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -664,6 +659,7 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(KernelBuilder & b) 
         const auto targetKernelId = FirstKernelInPartition[nextPartitionId];
 
         Value * nextSegNo = mSegNo;
+
         if (mUsesNestedSynchronizationVariable) {
             assert (mIsPartitionRoot);
             if (LLVM_UNLIKELY(isDataParallel(mKernelId))) {
@@ -675,7 +671,6 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(KernelBuilder & b) 
         acquirePartitionSynchronizationLock(b, targetKernelId, nextSegNo);
         phiOutPartitionStateAndReleaseSynchronizationLocks(b, targetKernelId, nextPartitionId, true);
         zeroAnySkippedTransitoryConsumedItemCountsUntil(b, targetKernelId);
-
 
         mKernelInitiallyTerminatedExit = b.GetInsertBlock();
         if (LLVM_UNLIKELY(mPartitionExitSegNoPhi)) {
@@ -728,7 +723,7 @@ void PipelineCompiler::writeInitiallyTerminatedPartitionExit(KernelBuilder & b) 
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief writeOnInitialTerminationJumpToNextPartitionToCheck
+ * @brief writeJumpToNextPartition
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::writeJumpToNextPartition(KernelBuilder & b) {
 
@@ -830,8 +825,13 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
             startPAPIMeasurement(b, {PAPIKernelCounter::PAPI_KERNEL_SYNCHRONIZATION, PAPIKernelCounter::PAPI_KERNEL_TOTAL});
         }
         #endif
-        if (LLVM_UNLIKELY(EnableCycleCounter || mUseDynamicMultithreading)) {
-            startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
+        if (LLVM_UNLIKELY(EnableCycleCounter || (mUseDynamicMultithreading && !mIsIOProcessThread))) {
+            if (EnableCycleCounter) {
+                startCycleCounter(b, {CycleCounter::KERNEL_SYNCHRONIZATION, CycleCounter::TOTAL_TIME});
+            } else {
+                assert (!mIsIOProcessThread);
+                startCycleCounter(b, CycleCounter::KERNEL_SYNCHRONIZATION);
+            }
         }
         if (LLVM_LIKELY(!mIsIOProcessThread)) {
             const auto type = isDataParallel(nextKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
@@ -904,7 +904,6 @@ void PipelineCompiler::checkForPartitionExit(KernelBuilder & b) {
             }
         }
     }
-
 }
 
 } // end of namespace kernel

@@ -67,7 +67,7 @@ unsigned EncodingInfo::prefixLengthOffset(unsigned lgth) const {
 }
 
 WordMarkKernel::WordMarkKernel(KernelBuilder & kb, StreamSet * BasisBits, StreamSet * WordMarks)
-: PabloKernel(kb, "WordMarks", {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
+: PabloKernel(kb, "WordMarks" + UTF::kernelAnnotation(), {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
 
 void WordMarkKernel::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
@@ -76,8 +76,7 @@ void WordMarkKernel::generatePabloMethod() {
     re::CC * word_CC = cast<re::CC>(cast<re::PropertyExpression>(word_prop)->getResolvedRE());
     Var * wordChar = pb.createVar("word");
     UTF::UTF_Compiler unicodeCompiler(getInputStreamVar("source"), pb);
-    unicodeCompiler.addTarget(wordChar, word_CC);
-    unicodeCompiler.compile();
+    unicodeCompiler.compile({wordChar}, {word_CC});
     pb.createAssign(pb.createExtract(getOutputStreamVar("WordMarks"), pb.getInteger(0)), wordChar);
 }
 
@@ -176,20 +175,20 @@ void ZTF_DecodeLengths::generatePabloMethod() {
 void ZTF_Symbols::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> basis = getInputStreamSet("basisBits");
-    cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), basis);
+    cc::Parabix_CC_Compiler_Builder ccc(basis);
     pablo::PabloAST * wordChar = getInputStreamSet("wordChar")[0];
     // Find start bytes of word characters.
-    PabloAST * ASCII = ccc.compileCC(re::makeCC(0x0, 0x7F));
-    PabloAST * prefix2 = ccc.compileCC(re::makeCC(0xC2, 0xDF));
-    PabloAST * prefix3 = ccc.compileCC(re::makeCC(0xE0, 0xEF));
-    PabloAST * prefix4 = ccc.compileCC(re::makeCC(0xF0, 0xF4));
+    PabloAST * ASCII = ccc.compileCC(re::makeCC(0x0, 0x7F), pb);
+    PabloAST * prefix2 = ccc.compileCC(re::makeCC(0xC2, 0xDF), pb);
+    PabloAST * prefix3 = ccc.compileCC(re::makeCC(0xE0, 0xEF), pb);
+    PabloAST * prefix4 = ccc.compileCC(re::makeCC(0xF0, 0xF4), pb);
     PabloAST * wc1 = pb.createAnd(ASCII, wordChar);
     wc1 = pb.createOr(wc1, pb.createAnd(prefix2, pb.createLookahead(wordChar, 1)));
     wc1 = pb.createOr(wc1, pb.createAnd(prefix3, pb.createLookahead(wordChar, 2)));
     wc1 = pb.createOr(wc1, pb.createAnd(prefix4, pb.createLookahead(wordChar, 3)));
     //
     // ZTF Code symbols
-    PabloAST * anyPfx = ccc.compileCC(re::makeCC(0xC0, 0xFF));
+    PabloAST * anyPfx = ccc.compileCC(re::makeCC(0xC0, 0xFF), pb);
     PabloAST * ZTF_sym = pb.createAnd(pb.createAdvance(anyPfx, 1), ASCII);
     PabloAST * ZTF_prefix = pb.createAnd(anyPfx, pb.createNot(pb.createLookahead(basis[7], 1)));
     // Filter out ZTF code symbols from word characters.
@@ -197,8 +196,8 @@ void ZTF_Symbols::generatePabloMethod() {
     //
     PabloAST * wordStart = pb.createAnd(pb.createNot(pb.createAdvance(wordChar, 1)), wc1, "wordStart");
     // Nulls, Linefeeds and ZTF_symbols are also treated as symbol starts.
-    PabloAST * LF = ccc.compileCC(re::makeByte(0x0A));
-    PabloAST * Null = ccc.compileCC(re::makeByte(0x0));
+    PabloAST * LF = ccc.compileCC(re::makeByte(0x0A), pb);
+    PabloAST * Null = ccc.compileCC(re::makeByte(0x0), pb);
     PabloAST * fileStart = pb.createNot(pb.createAdvance(pb.createOnes(), 1));
     PabloAST * symStart = pb.createOr3(wordStart, ZTF_prefix, pb.createOr3(LF, Null, fileStart));
     // The next character after a ZTF symbol or a line feed also starts a new symbol.

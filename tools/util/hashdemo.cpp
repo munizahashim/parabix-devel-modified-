@@ -74,7 +74,7 @@ protected:
 };
 
 WordMarkKernel::WordMarkKernel(KernelBuilder & b, StreamSet * BasisBits, StreamSet * WordMarks)
-: PabloKernel(b, "WordMarks", {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
+: PabloKernel(b, "WordMarks" + UTF::kernelAnnotation(), {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
 
 void WordMarkKernel::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
@@ -83,8 +83,7 @@ void WordMarkKernel::generatePabloMethod() {
     re::CC * word_CC = cast<re::CC>(cast<re::PropertyExpression>(word_prop)->getResolvedRE());
     Var * wordChar = pb.createVar("word");
     UTF::UTF_Compiler unicodeCompiler(getInputStreamVar("source"), pb);
-    unicodeCompiler.addTarget(wordChar, word_CC);
-    unicodeCompiler.compile();
+    unicodeCompiler.compile({wordChar}, {word_CC});
     pb.createAssign(pb.createExtract(getOutputStreamVar("WordMarks"), pb.getInteger(0)), wordChar);
 }
 
@@ -103,13 +102,13 @@ protected:
 void ParseSymbols::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> basis = getInputStreamSet("basisBits");
-    cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), basis);
+    cc::Parabix_CC_Compiler_Builder ccc(basis);
     pablo::PabloAST * wordChar = getInputStreamSet("wordChar")[0];
     // Find start bytes of word characters.
-    PabloAST * ASCII = ccc.compileCC(re::makeCC(0x0, 0x7F));
-    PabloAST * prefix2 = ccc.compileCC(re::makeCC(0xC2, 0xDF));
-    PabloAST * prefix3 = ccc.compileCC(re::makeCC(0xE0, 0xEF));
-    PabloAST * prefix4 = ccc.compileCC(re::makeCC(0xF0, 0xF4));
+    PabloAST * ASCII = ccc.compileCC(re::makeCC(0x0, 0x7F), pb);
+    PabloAST * prefix2 = ccc.compileCC(re::makeCC(0xC2, 0xDF), pb);
+    PabloAST * prefix3 = ccc.compileCC(re::makeCC(0xE0, 0xEF), pb);
+    PabloAST * prefix4 = ccc.compileCC(re::makeCC(0xF0, 0xF4), pb);
     PabloAST * wc1 = pb.createAnd(ASCII, wordChar);
     // Prefixes of word characters
     PabloAST * wprefix2 = pb.createAnd(prefix2, pb.createLookahead(wordChar, 1));

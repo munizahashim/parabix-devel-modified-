@@ -106,7 +106,7 @@ protected:
 };
 
 WordCountKernel::WordCountKernel (KernelBuilder & b, StreamSet * const countable)
-: PabloKernel(b, "wc_" + wc_modes,
+: PabloKernel(b, "wc_" + wc_modes + UTF::kernelAnnotation(),
     {Bind("countable", countable, Principal())},
     {},
     {},
@@ -118,15 +118,15 @@ void WordCountKernel::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::unique_ptr<cc::CC_Compiler> ccc;
     if (CountWords || CountChars) {
-        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), getInputStreamSet("countable"));
+        ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getInputStreamSet("countable"));
     } else {
-        ccc = std::make_unique<cc::Direct_CC_Compiler>(getEntryScope(), pb.createExtract(getInput(0), pb.getInteger(0)));
+        ccc = std::make_unique<cc::Direct_CC_Compiler>(pb.createExtract(getInput(0), pb.getInteger(0)));
     }
 
     PabloAST * u8final = nullptr;
     if (CountWords || CountChars) {
         Zeroes * const ZEROES = pb.createZeroes();
-        PabloAST * const u8pfx = ccc->compileCC(re::makeByte(0xC0, 0xFF));
+        PabloAST * const u8pfx = ccc->compileCC(re::makeByte(0xC0, 0xFF), pb);
 
         Var * const nonFinal = pb.createVar("nonFinal", u8pfx);
         Var * const u8invalid = pb.createVar("u8invalid", ZEROES);
@@ -208,7 +208,7 @@ void WordCountKernel::generatePabloMethod() {
     Var * cc = getOutputScalarVar("charCount");
 
     if (CountLines) {
-        PabloAST * LF = ccc->compileCC(re::makeByte(0x0A));
+        PabloAST * LF = ccc->compileCC(re::makeByte(0x0A), pb);
         pb.createAssign(lc, pb.createCount(LF));
     }
     if (CountWords) {
@@ -217,8 +217,7 @@ void WordCountKernel::generatePabloMethod() {
         re::CC * WS_CC = cast<re::CC>(cast<PropertyExpression>(WS_prop)->getResolvedRE());
         Var * WS = pb.createVar("space");
         UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
-        unicodeCompiler.addTarget(WS, WS_CC);
-        unicodeCompiler.compile();
+        unicodeCompiler.compile({WS}, {WS_CC});
         //PabloAST * WS = ccc->compileCC(re::makeCC(re::re::makeByte(0x09, 0x0D), re::re::makeByte(0x20)));
         PabloAST * wordChar = pb.createAnd(pb.createNot(WS), u8final, "wordChar");
         // WS_follow_or_start = 1 past WS or at start of file

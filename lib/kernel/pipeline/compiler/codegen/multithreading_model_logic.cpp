@@ -1010,6 +1010,7 @@ StructType * PipelineCompiler::getThreadStuctType(KernelBuilder & b, const std::
         fields[ACCUMULATED_SEGMENT_TIME] = emptyTy;
         fields[ACCUMULATED_SYNCHRONIZATION_TIME] = emptyTy;
     }
+
     IntegerType * const pThreadTy = IntegerType::getIntNTy(b.getContext(), sizeof(pthread_t) * CHAR_BIT);
     assert (pThreadTy == b.getModule()->getFunction("pthread_self")->getReturnType());
     fields[CURRENT_THREAD_ID] = pThreadTy;
@@ -1179,7 +1180,7 @@ void PipelineCompiler::linkPThreadLibrary(KernelBuilder & b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
     assert (!mUseDynamicMultithreading);
-    if (LLVM_UNLIKELY(mIsNestedPipeline)) {
+    if (LLVM_LIKELY(mIsNestedPipeline)) {
         mSegNo = mExternalSegNo; assert (mExternalSegNo);
     } else {
         mSegNo = b.getSize(0);
@@ -1219,17 +1220,6 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
         setActiveKernel(b, i, true);
         executeKernel(b);
     }
-    // A pipeline will end for one or two reasons:
-
-    // 1) Process has *halted* due to insufficient external I/O.
-
-    // 2) All pipeline sinks have terminated (i.e., any kernel that writes
-    // to a pipeline output, is marked as having a side-effect, or produces
-    // an input for some call in which no dependent kernels is a pipeline
-    // sink).
-
-    // TODO: if we determine that all of the pipeline I/O is consumed in one invocation of the
-    // pipeline, we can avoid testing at the end whether its terminated.
 
     Value * terminated = nullptr;
     if (mIsNestedPipeline || mUseDynamicMultithreading) {

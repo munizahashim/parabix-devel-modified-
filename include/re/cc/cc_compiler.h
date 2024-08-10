@@ -15,9 +15,6 @@ namespace cc {
 
 class CC_Compiler {
 public:
-    virtual pablo::PabloAST * compileCC(const re::CC *cc) {
-        return compileCC(cc, mBuilder);
-    }
     virtual pablo::PabloAST * compileCC(const re::CC *cc, pablo::PabloBlock & block) {
         return compileCC(cc->canonicalName(), cc, block);
     }
@@ -29,8 +26,7 @@ public:
     virtual ~CC_Compiler(){}
 
 protected:
-    CC_Compiler(pablo::PabloBlock * scope);
-    pablo::PabloBuilder             mBuilder;
+    CC_Compiler() = default;
 };
 
 
@@ -60,7 +56,7 @@ class Parabix_CC_Compiler : public CC_Compiler, public CC_Compiler_Common {
 public:
     using CC_Compiler::compileCC;
 
-    Parabix_CC_Compiler(pablo::PabloBlock * scope, std::vector<pablo::PabloAST *> basisBitSet);
+    Parabix_CC_Compiler(std::vector<pablo::PabloAST *> basisBitSet);
     pablo::PabloAST * compileCC(const std::string & name, const re::CC *cc, pablo::PabloBlock & block) override;
     pablo::PabloAST * compileCC(const std::string & name, const re::CC *cc, pablo::PabloBuilder & builder) override;
     ~Parabix_CC_Compiler() {}
@@ -83,7 +79,7 @@ class Direct_CC_Compiler : public CC_Compiler {
 public:
     using CC_Compiler::compileCC;
 
-    Direct_CC_Compiler(pablo::PabloBlock * scope, pablo::PabloAST * codeUnitStream);
+    Direct_CC_Compiler(pablo::PabloAST * codeUnitStream);
     pablo::PabloAST * compileCC(const std::string & name, const re::CC *cc, pablo::PabloBlock & block) override;
     pablo::PabloAST * compileCC(const std::string & name, const re::CC *cc, pablo::PabloBuilder & builder) override;
     ~Direct_CC_Compiler() {}
@@ -100,7 +96,7 @@ public:
     using octet_pair_t = std::pair<re::codepoint_t, uint8_t>;
     using octets_intervals_union_t = std::pair<std::vector<octet_pair_t>, std::vector<re::interval_t>>;
 
-    Parabix_Ternary_CC_Compiler(pablo::PabloBlock * scope, std::vector<pablo::PabloAST *> basisBitSet);
+    Parabix_Ternary_CC_Compiler(std::vector<pablo::PabloAST *> basisBitSet);
     pablo::PabloAST * compileCC(const std::string & name, const re::CC *cc, pablo::PabloBlock & block) override;
     pablo::PabloAST * compileCC(const std::string & name, const re::CC *cc, pablo::PabloBuilder & builder) override;
     ~Parabix_Ternary_CC_Compiler() {}

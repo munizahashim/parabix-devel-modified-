@@ -71,11 +71,11 @@ enum {markLF = 0, markCR = 1, markDQ = 2, markComma = 3, markEOF = 4};
 void CSVlexer::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
     std::unique_ptr<cc::CC_Compiler> ccc;
-    ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), getInputStreamSet("Source"));
-    PabloAST * LF = ccc->compileCC(re::makeCC(charLF, &cc::Byte));
-    PabloAST * CR = ccc->compileCC(re::makeCC(charCR, &cc::Byte));
-    PabloAST * DQ = ccc->compileCC(re::makeCC(charDQ, &cc::Byte));
-    PabloAST * Comma = ccc->compileCC(re::makeCC(charComma, &cc::Byte));
+    ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getInputStreamSet("Source"));
+    PabloAST * LF = ccc->compileCC(re::makeCC(charLF, &cc::Byte), pb);
+    PabloAST * CR = ccc->compileCC(re::makeCC(charCR, &cc::Byte), pb);
+    PabloAST * DQ = ccc->compileCC(re::makeCC(charDQ, &cc::Byte), pb);
+    PabloAST * Comma = ccc->compileCC(re::makeCC(charComma, &cc::Byte), pb);
     PabloAST * EOFbit = pb.createAtEOF(pb.createAdvance(pb.createOnes(), 1));
     Var * lexOut = getOutputStreamVar("CSVlexical");
     pb.createAssign(pb.createExtract(lexOut, pb.getInteger(markLF)), LF);

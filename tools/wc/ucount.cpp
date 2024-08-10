@@ -51,6 +51,7 @@ static cl::OptionCategory ucFlags("Command Flags", "ucount options");
 static cl::opt<std::string> CC_expr(cl::Positional, cl::desc("<Unicode character class expression>"), cl::Required, cl::cat(ucFlags));
 static cl::list<std::string> inputFiles(cl::Positional, cl::desc("<input file ...>"), cl::OneOrMore, cl::cat(ucFlags));
 
+static cl::opt<bool> Lookahead("lookahead", cl::desc("Use UTF Compiler lookahead mode"), cl::cat(ucFlags));
 static cl::opt<bool> U21("u21", cl::desc("Use Unicode 21 bits"), cl::cat(ucFlags));
 
 std::vector<fs::path> allFiles;
@@ -100,7 +101,8 @@ UCountFunctionType pipelineGen(CPUDriver & pxDriver, re::Name * CC_name) {
     std::map<std::string, StreamSet *> propertyStreamMap;
     auto nameString = CC_name->getFullName();
     propertyStreamMap.emplace(nameString, CCstream);
-    P->CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(CC_name, BasisBits, CCstream);
+    pablo::BitMovementMode mode = Lookahead ? pablo::BitMovementMode::LookAhead : pablo::BitMovementMode::Advance;
+    P->CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(CC_name, BasisBits, CCstream, mode);
 
     P->CreateKernelCall<PopcountKernel>(CCstream, P->getOutputScalar("countResult"));
 

@@ -118,8 +118,8 @@ void ZTF_Run_Length_Decoder::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     std::unique_ptr<cc::CC_Compiler> ccc;
-    ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(getEntryScope(), basis);
-    PabloAST * const runCodeCC = ccc->compileCC(re::makeByte(0xF9, 0xFF));
+    ccc = std::make_unique<cc::Parabix_CC_Compiler_Builder>(basis);
+    PabloAST * const runCodeCC = ccc->compileCC(re::makeByte(0xF9, 0xFF), pb);
     Var * lengthVar = getOutputStreamVar("runLengths");
     for (unsigned i = 0; i < mLengthBits; i++) {
         PabloAST * lengthData = pb.createAdvance(pb.createAnd(basis[i], runCodeCC), 1);

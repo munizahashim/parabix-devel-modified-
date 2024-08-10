@@ -3,6 +3,7 @@
  *  SPDX-License-Identifier: OSL-3.0
  */
 #include <unicode/utf/utf_encoder.h>
+#include <llvm/Support/raw_ostream.h>
 
 using codepoint_t = UCD::codepoint_t;
 
@@ -79,10 +80,12 @@ unsigned UTF_Encoder::nthCodeUnit(codepoint_t cp, unsigned n) {
 
 codepoint_t UTF_Encoder::minCodePointWithCommonCodeUnits(codepoint_t cp, unsigned common) {
     const auto length = UTF_Encoder::encoded_length(cp);
+    if (length == 1) return 0;
     if (mCodeUnitBits == 8) {
         const auto mask = (static_cast<codepoint_t>(1) << (length - common) * 6) - 1;
         const auto lo_cp = cp &~ mask;
-        return (lo_cp == 0) ? mask + 1 : lo_cp;
+        //
+        return std::max(lo_cp, max_codepoint_of_length(length - 1) + 1);
     } else if (mCodeUnitBits == 16) {
         if (length == 1) return 0;
         else if (common == 1) {
@@ -95,8 +98,9 @@ codepoint_t UTF_Encoder::minCodePointWithCommonCodeUnits(codepoint_t cp, unsigne
 codepoint_t UTF_Encoder::maxCodePointWithCommonCodeUnits(codepoint_t cp, unsigned common) {
     const auto length = UTF_Encoder::encoded_length(cp);
     if (mCodeUnitBits == 8) {
+        if (length == 1) return 0x7F;
         const auto mask = (static_cast<codepoint_t>(1) << (length - common) * 6) - 1;
-        return cp | mask;
+        return std::min(cp | mask, max_codepoint_of_length(length));
     } else if (mCodeUnitBits == 16) {
         if (length == 1) return 0xFFFF;
         else if (common == 1) {
@@ -104,4 +108,13 @@ codepoint_t UTF_Encoder::maxCodePointWithCommonCodeUnits(codepoint_t cp, unsigne
         }
         else return cp;
     } else return 0x10FFFF;
+}
+
+unsigned UTF_Encoder::common_code_units(codepoint_t cp1, codepoint_t cp2) {
+    if (cp1 == cp2) return encoded_length(cp1);
+    unsigned common = 0;
+    while (nthCodeUnit(cp1, common+1) == nthCodeUnit(cp2, common+1)) {
+        common++;
+    }
+    return common;
 }

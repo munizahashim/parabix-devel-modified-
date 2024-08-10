@@ -453,7 +453,7 @@ void GrepEngine::initRE(re::RE * re) {
             mExternalTable.declareExternal(indexing, nameStr, r);
             auto f = RCCSnamer.mInfoMap.find(nameStr);
             if (f != RCCSnamer.mInfoMap.end()) {
-                const re::CC * varCC = f->second.first;
+                re::CC * varCC = f->second.first;
                 unsigned fixed= f->second.second;
                 auto maskName = nameStr + "mask";
                 auto e1 = new CCmask(mIndexAlphabet, varCC);

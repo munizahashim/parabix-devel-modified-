@@ -14,10 +14,13 @@
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <kernel/core/streamset.h>
 #include <kernel/io/stdout_kernel.h>
+#include <kernel/basis/s2p_kernel.h>
 #include <llvm/ADT/StringRef.h>
 #include <kernel/pipeline/pipeline_builder.h>
 #include <fcntl.h>
+#include <boost/intrusive/detail/math.hpp>
 
+using boost::intrusive::detail::floor_log2;
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
 #define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
@@ -29,28 +32,34 @@ using namespace codegen;
 static cl::OptionCategory PackDemoOptions("Pack Demo Options", "Pack demo options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(PackDemoOptions));
 
-static constexpr unsigned inputRate = 2;
-static constexpr unsigned outputRate = 1;
-
+enum class PackOption {packh, packl};
 class PackKernel final : public MultiBlockKernel {
 public:
     PackKernel(KernelBuilder & b,
-              StreamSet * const byteStream,
-              StreamSet * const Packed);
+              StreamSet * const i16Stream,
+              StreamSet * const i8Stream,
+              PackOption opt);
 protected:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
+private:
+    PackOption mOption;
 };
 
-PackKernel::PackKernel(KernelBuilder & b, StreamSet * const byteStream, StreamSet * const Packed)
-: MultiBlockKernel(b, "pack_kernel",
-{Binding{"byteStream", byteStream, FixedRate(inputRate)}},
-    {Binding{"Packed", Packed, FixedRate(outputRate)}}, {}, {}, {})  {}
+std::string packOptionString(PackOption opt) {
+    if (opt == PackOption::packh) return "packh";
+    return "packl";
+}
+
+PackKernel::PackKernel(KernelBuilder & b, StreamSet * const i16Stream, StreamSet * const i8Stream, PackOption opt)
+: MultiBlockKernel(b, packOptionString(opt) ,
+{Binding{"i16Stream", i16Stream}},
+    {Binding{"i8Stream", i8Stream}}, {}, {}, {}), mOption(opt)  {}
 
 
 void PackKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
     const unsigned fw = 8;
-    const unsigned inputPacksPerStride = fw * inputRate;
-    const unsigned outputPacksPerStride = fw * outputRate;
+    const unsigned inputPacksPerStride = 2*fw;
+    const unsigned outputPacksPerStride = fw;
 
     BasicBlock * entry = b.GetInsertBlock();
     BasicBlock * packLoop = b.CreateBasicBlock("packLoop");
@@ -58,21 +67,25 @@ void PackKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfS
     Constant * const ZERO = b.getSize(0);
     Value * numOfBlocks = numOfStrides;
     if (getStride() != b.getBitBlockWidth()) {
-        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
         llvm::errs() << "stride = " << getStride() << "\n";
     }
     b.CreateBr(packLoop);
     b.SetInsertPoint(packLoop);
     PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
     blockOffsetPhi->addIncoming(ZERO, entry);
-    Value * bytepack[inputPacksPerStride];
+    Value * i16pack[inputPacksPerStride];
     for (unsigned i = 0; i < inputPacksPerStride; i++) {
-        bytepack[i] = b.loadInputStreamPack("byteStream", ZERO, b.getInt32(i), blockOffsetPhi);
+        i16pack[i] = b.loadInputStreamPack("i16Stream", ZERO, b.getInt32(i), blockOffsetPhi);
     }
     Value * packed[outputPacksPerStride];
     for (unsigned i = 0; i < outputPacksPerStride; i++) {
-        packed[i] = b.hsimd_packh(16, bytepack[2*i], bytepack[2*i+1]);
-        b.storeOutputStreamPack("Packed", ZERO, b.getInt32(i), blockOffsetPhi, packed[i]);
+        if (mOption == PackOption::packh) {
+            packed[i] = b.hsimd_packh(2*fw, i16pack[2*i], i16pack[2*i+1]);
+        } else {
+            packed[i] = b.hsimd_packl(2*fw, i16pack[2*i], i16pack[2*i+1]);
+        }
+        b.storeOutputStreamPack("i8Stream", ZERO, b.getInt32(i), blockOffsetPhi, packed[i]);
     }
     Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
     blockOffsetPhi->addIncoming(nextBlk, packLoop);
@@ -92,14 +105,26 @@ PackDemoFunctionType packdemo_gen (CPUDriver & driver) {
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
 
     // Source data
-    StreamSet * const codeUnitStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
-    SHOW_BYTES(codeUnitStream);
+    StreamSet * const i16Stream = P->CreateStreamSet(1, 16);
+    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, i16Stream);
 
-    StreamSet * const packedStream = P->CreateStreamSet(1, 8); P->CreateKernelCall<PackKernel>(codeUnitStream, packedStream); SHOW_BYTES(packedStream); SHOW_BIXNUM(packedStream);
-    SHOW_BYTES(packedStream);
+    StreamSet * const packedStreamL = P->CreateStreamSet(1, 8);
+    P->CreateKernelCall<PackKernel>(i16Stream, packedStreamL, PackOption::packl);
+    SHOW_BYTES(packedStreamL);
 
-    P->CreateKernelCall<StdOutKernel>(packedStream);
+    StreamSet * const BasisBitsL = P->CreateStreamSet(8, 1);
+    P->CreateKernelCall<S2PKernel>(packedStreamL, BasisBitsL);
+    SHOW_BIXNUM(BasisBitsL);
+
+    StreamSet * const packedStreamH = P->CreateStreamSet(1, 8);
+    P->CreateKernelCall<PackKernel>(i16Stream, packedStreamH, PackOption::packh);
+    SHOW_BYTES(packedStreamH);
+
+    StreamSet * const BasisBitsH = P->CreateStreamSet(8, 1);
+    P->CreateKernelCall<S2PKernel>(packedStreamH, BasisBitsH);
+    SHOW_BIXNUM(BasisBitsH);
+
+    P->CreateKernelCall<StdOutKernel>(packedStreamH);
 
     return reinterpret_cast<PackDemoFunctionType>(P->compile());
 }

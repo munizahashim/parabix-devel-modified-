@@ -179,7 +179,7 @@ public:
         ExternalStreamObject(Kind::CC_External), mCharClass(cc) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
-    re::CC * const mCharClass;
+    re::CC * mCharClass;
 };
 
 class RE_External final : public ExternalStreamObject {
@@ -351,13 +351,13 @@ public:
         return false;
     }
     const std::vector<std::string> getParameters() override;
-    CCmask(const cc::Alphabet * indexAlphabet, const re::CC * CC_to_mask) :
+    CCmask(const cc::Alphabet * indexAlphabet, re::CC * CC_to_mask) :
         ExternalStreamObject(Kind::CCmask, std::make_pair(1, 1)),
             mIndexAlphabet(indexAlphabet), mCC_to_mask(CC_to_mask) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
     const cc::Alphabet * mIndexAlphabet;
-    const re::CC * mCC_to_mask;
+    re::CC * mCC_to_mask;
 };
 
 class CCselfTransitionMask final : public ExternalStreamObject {
@@ -369,11 +369,11 @@ public:
         return false;
     }
     const std::vector<std::string> getParameters() override;
-    CCselfTransitionMask(const std::vector<const re::CC *> transitionCCs) :
+    CCselfTransitionMask(const std::vector<re::CC *> transitionCCs) :
         ExternalStreamObject(Kind::CCselfTransitionMask, std::make_pair(1, 1)),  mTransitionCCs(transitionCCs) {}
     void resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) override;
 private:
-    const std::vector<const re::CC *> mTransitionCCs;
+    const std::vector<re::CC *> mTransitionCCs;
 };
 
 //
@@ -634,11 +634,11 @@ private:
 
 class MaskCC final : public pablo::PabloKernel {
 public:
-    MaskCC(KernelBuilder & b, const re::CC * CC_to_mask, StreamSet * basis, StreamSet * mask, StreamSet * index = nullptr);
+    MaskCC(KernelBuilder & b, re::CC * CC_to_mask, StreamSet * basis, StreamSet * mask, StreamSet * index = nullptr);
 protected:
     void generatePabloMethod() override;
 private:
-    const re::CC * mCC_to_mask;
+    re::CC * mCC_to_mask;
     StreamSet * mIndexStrm;
 };
 
@@ -657,12 +657,12 @@ private:
 
 class MaskSelfTransitions final : public pablo::PabloKernel {
 public:
-    MaskSelfTransitions(KernelBuilder & b, const std::vector<const re::CC *> transitionCCs,
+    MaskSelfTransitions(KernelBuilder & b, const std::vector<re::CC *> transitionCCs,
                         StreamSet * basis, StreamSet * mask, StreamSet * index = nullptr);
 protected:
     void generatePabloMethod() override;
 private:
-    const std::vector<const re::CC *> mTransitionCCs;
+    const std::vector<re::CC *> mTransitionCCs;
     StreamSet * mIndexStrm;
 };
 }

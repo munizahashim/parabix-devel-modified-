@@ -24,7 +24,6 @@ static cl::bits<RE_PrintFlags>
 
 static cl::bits<RE_AlgorithmFlags>
     AlgorithmOptions(cl::values(clEnumVal(DisableLog2BoundedRepetition, "disable log2 optimizations for bounded repetition of bytes"),
-                              clEnumVal(DisableIfHierarchy, "disable nested if hierarchy for generated Unicode classes (not recommended)"),
                               clEnumVal(DisableMatchStar, "disable MatchStar optimization")), cl::cat(RegexOptions));
 
 
@@ -56,9 +55,6 @@ std::string AnnotateWithREflags(std::string name) {
     }
     if (re::AlgorithmOptionIsSet(re::DisableLog2BoundedRepetition)) {
         name += "-log2rep";
-    }
-    if (re::AlgorithmOptionIsSet(re::DisableIfHierarchy)) {
-        name += "-UCDifHierarchy";
     }
     if (IfInsertionGap != DefaultIfInsertionGap) {
         name += "+ifGap="+std::to_string(IfInsertionGap);

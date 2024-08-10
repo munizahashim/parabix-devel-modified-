@@ -146,9 +146,9 @@ void Hexify::generatePabloMethod() {
     PabloAST * insertMask = getInputStreamSet("insertMask")[0];
     std::vector<PabloAST *> spreadBasis = getInputStreamSet("spreadBasis");
     // ccc is an object that can compile character classes from a set of 8 parallel bit streams.
-    cc::Parabix_CC_Compiler_Builder ccc(getEntryScope(), spreadBasis);
+    cc::Parabix_CC_Compiler_Builder ccc(spreadBasis);
     // Compute the stream marking LFs.
-    PabloAST * LF = ccc.compileCC(re::makeByte(0xA));
+    PabloAST * LF = ccc.compileCC(re::makeByte(0xA), pb);
 
     // Compute a set of 4 bit streams as described in STEP 2 above.
     std::vector<PabloAST *> lo(4);
