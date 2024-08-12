@@ -66,8 +66,7 @@ EncodingInfo encodingScheme1(8,
                              {{3, 3, 2, 0xC0, 8, 0}, {4, 4, 2, 0xC4, 8, 0}, {5, 8, 2, 0xC8, 8, 0}, {9, 16, 2, 0xD0, 8, 0}});
 ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
 
-    auto & b = driver.getBuilder();
-    Type * const int32Ty = b.getInt32Ty();
+    Type * const int32Ty = driver.getInt32Ty();
     auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
 
     Scalar * const fileDescriptor = P->getInputScalar("fd");
@@ -131,8 +130,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
 }
 
 ztfHashFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
-    auto & b = driver.getBuilder();
-    Type * const int32Ty = b.getInt32Ty();
+    Type * const int32Ty = driver.getInt32Ty();
     auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
     Scalar * const fileDescriptor = P->getInputScalar("fd");
 

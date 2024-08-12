@@ -518,8 +518,8 @@ void UTF8_index::generatePabloMethod() {
     pb.createAssign(pb.createExtract(u8index, pb.getInteger(0)), u8final);
 }
 
-UTF8_index::UTF8_index(KernelBuilder & kb, StreamSet * Source, StreamSet * u8index, StreamSet * u8_LB)
-: PabloKernel(kb, [&]() -> std::string {
+UTF8_index::UTF8_index(VirtualDriver &driver, StreamSet * Source, StreamSet * u8index, StreamSet * u8_LB)
+: PabloKernel(driver, [&]() -> std::string {
     std::stringstream s;
     s << "UTF8_index_";
     s << Source->getNumElements() << "x" << Source->getFieldWidth();
@@ -638,8 +638,8 @@ std::string GrepKernelOptions::makeSignature() {
     return mSignature;
 }
 
-ICGrepKernel::ICGrepKernel(KernelBuilder & b, std::unique_ptr<GrepKernelOptions> && options)
-: PabloKernel(b, AnnotateWithREflags("ic") + getStringHash(options->makeSignature()),
+ICGrepKernel::ICGrepKernel(VirtualDriver &driver, std::unique_ptr<GrepKernelOptions> && options)
+: PabloKernel(driver, AnnotateWithREflags("ic") + getStringHash(options->makeSignature()),
 options->streamSetInputBindings(),
 options->streamSetOutputBindings(),
 options->scalarInputBindings(),
@@ -714,8 +714,8 @@ void MatchedLinesKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(matchedLines, pb.getInteger(0)), pb.createAnd(match_follow, lineBreaks, "matchedLines"));
 }
 
-MatchedLinesKernel::MatchedLinesKernel (KernelBuilder & b, StreamSet * Matches, StreamSet * LineBreakStream, StreamSet * MatchedLines)
-: PabloKernel(b, "MatchedLines" + std::to_string(Matches->getNumElements()),
+MatchedLinesKernel::MatchedLinesKernel (VirtualDriver &driver, StreamSet * Matches, StreamSet * LineBreakStream, StreamSet * MatchedLines)
+: PabloKernel(driver, "MatchedLines" + std::to_string(Matches->getNumElements()),
 // inputs
 {Binding{"matchResults", Matches}
 ,Binding{"lineBreaks", LineBreakStream, FixedRate()}},
@@ -731,8 +731,8 @@ void InvertMatchesKernel::generateDoBlockMethod(KernelBuilder & b) {
     b.storeOutputStreamBlock("nonMatches", b.getInt32(0), inverted);
 }
 
-InvertMatchesKernel::InvertMatchesKernel(KernelBuilder & b, StreamSet * Matches, StreamSet * LineBreakStream, StreamSet * InvertedMatches)
-: BlockOrientedKernel(b, "Invert" + std::to_string(Matches->getNumElements()),
+InvertMatchesKernel::InvertMatchesKernel(VirtualDriver &driver, StreamSet * Matches, StreamSet * LineBreakStream, StreamSet * InvertedMatches)
+: BlockOrientedKernel(driver, "Invert" + std::to_string(Matches->getNumElements()),
 // Inputs
 {Binding{"matchedLines", Matches},
  Binding{"lineBreaks", LineBreakStream}},
@@ -743,8 +743,8 @@ InvertMatchesKernel::InvertMatchesKernel(KernelBuilder & b, StreamSet * Matches,
 
 }
 
-FixedMatchSpansKernel::FixedMatchSpansKernel(KernelBuilder & b, unsigned length, unsigned offset, StreamSet * MatchMarks, StreamSet * MatchSpans)
-: PabloKernel(b, "FixedMatchSpansKernel" + std::to_string(MatchMarks->getNumElements()) + "x1_by" + std::to_string(length) + '@' + std::to_string(offset),
+FixedMatchSpansKernel::FixedMatchSpansKernel(VirtualDriver &driver, unsigned length, unsigned offset, StreamSet * MatchMarks, StreamSet * MatchSpans)
+: PabloKernel(driver, "FixedMatchSpansKernel" + std::to_string(MatchMarks->getNumElements()) + "x1_by" + std::to_string(length) + '@' + std::to_string(offset),
 {Binding{"MatchMarks", MatchMarks, FixedRate(1), LookAhead(round_up_to_blocksize(length))}}, {Binding{"MatchSpans", MatchSpans}}),
 mMatchLength(length), mOffset(offset) {
 }
@@ -772,8 +772,8 @@ void FixedMatchSpansKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(matchSpansVar, 0), consecutive);
 }
 
-SpansToMarksKernel::SpansToMarksKernel(KernelBuilder & b, StreamSet * Spans, StreamSet * Marks)
-: PabloKernel(b, "SpansToMarksKernel",
+SpansToMarksKernel::SpansToMarksKernel(VirtualDriver &driver, StreamSet * Spans, StreamSet * Marks)
+: PabloKernel(driver, "SpansToMarksKernel",
 {Binding{"Spans", Spans}}, {Binding{"Marks", Marks}}) {}
 
 void SpansToMarksKernel::generatePabloMethod() {
@@ -786,8 +786,8 @@ void SpansToMarksKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(matchEndsVar, 1), follows);
 }
 
-U8Spans::U8Spans(KernelBuilder & b, StreamSet * marks, StreamSet * u8index, StreamSet * spans, pablo::BitMovementMode m)
-: PabloKernel(b, "U8Spans_" + pablo::BitMovementMode_string(m), {}, {Binding{"spans", spans}}),
+U8Spans::U8Spans(VirtualDriver &driver, StreamSet * marks, StreamSet * u8index, StreamSet * spans, pablo::BitMovementMode m)
+: PabloKernel(driver, "U8Spans_" + pablo::BitMovementMode_string(m), {}, {Binding{"spans", spans}}),
     mBitMovement(m) {
         if (m == pablo::BitMovementMode::LookAhead) {
             mInputStreamSets.push_back(Binding{"marks", marks, FixedRate(1), LookAhead(3)});
@@ -826,8 +826,8 @@ void PopcountKernel::generatePabloMethod() {
     pb->createAssign(countResult, newCount);
 }
 
-PopcountKernel::PopcountKernel (KernelBuilder & b, StreamSet * const toCount, Scalar * countResult)
-: PabloKernel(b, "Popcount",
+PopcountKernel::PopcountKernel (VirtualDriver &driver, StreamSet * const toCount, Scalar * countResult)
+: PabloKernel(driver, "Popcount",
 {Binding{"toCount", toCount}},
 {},
 {},
@@ -861,8 +861,8 @@ void FixedDistanceMatchesKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(MatchVar, pb.getInteger(0)), pb.createNot(mismatch, "matches"));
 }
 
-FixedDistanceMatchesKernel::FixedDistanceMatchesKernel (KernelBuilder & b, unsigned distance, StreamSet * Basis, StreamSet * Matches, StreamSet * ToCheck)
-: PabloKernel(b, "Distance_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1" + (ToCheck == nullptr ? "" : "_withCheck"),
+FixedDistanceMatchesKernel::FixedDistanceMatchesKernel (VirtualDriver &driver, unsigned distance, StreamSet * Basis, StreamSet * Matches, StreamSet * ToCheck)
+: PabloKernel(driver, "Distance_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1" + (ToCheck == nullptr ? "" : "_withCheck"),
 // inputs
 {Binding{"Basis", Basis}},
 // output
@@ -920,8 +920,8 @@ void CodePointMatchKernel::generatePabloMethod() {
     }
 }
 
-CodePointMatchKernel::CodePointMatchKernel (KernelBuilder & b, UCD::property_t prop, unsigned distance, StreamSet * Basis, StreamSet * Matches)
-: PabloKernel(b, getPropertyEnumName(prop) + "_dist_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1" + UTF::kernelAnnotation(),
+CodePointMatchKernel::CodePointMatchKernel (VirtualDriver &driver, UCD::property_t prop, unsigned distance, StreamSet * Basis, StreamSet * Matches)
+: PabloKernel(driver, getPropertyEnumName(prop) + "_dist_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1" + UTF::kernelAnnotation(),
 // inputs
 {Binding{"Basis", Basis}},
 // output
@@ -1031,8 +1031,8 @@ void AbortOnNull::generateMultiBlockLogic(KernelBuilder & b, Value * const numOf
     b.setProducedItemCount("untilNull", producedCount);
 }
 
-AbortOnNull::AbortOnNull(KernelBuilder & b, StreamSet * const InputStream, StreamSet * const OutputStream, Scalar * callbackObject)
-: MultiBlockKernel(b, "AbortOnNull",
+AbortOnNull::AbortOnNull(VirtualDriver &driver, StreamSet * const InputStream, StreamSet * const OutputStream, Scalar * callbackObject)
+: MultiBlockKernel(driver, "AbortOnNull",
 // inputs
 {Binding{"byteData", InputStream, FixedRate(), Principal()}},
 // outputs
@@ -1044,8 +1044,8 @@ AbortOnNull::AbortOnNull(KernelBuilder & b, StreamSet * const InputStream, Strea
     addAttribute(MayFatallyTerminate());
 }
 
-ContextSpan::ContextSpan(KernelBuilder & b, StreamSet * const markerStream, StreamSet * const contextStream, unsigned before, unsigned after)
-: PabloKernel(b, "ContextSpan-" + std::to_string(before) + "+" + std::to_string(after),
+ContextSpan::ContextSpan(VirtualDriver &driver, StreamSet * const markerStream, StreamSet * const contextStream, unsigned before, unsigned after)
+: PabloKernel(driver, "ContextSpan-" + std::to_string(before) + "+" + std::to_string(after),
               // input
 {Binding{"markerStream", markerStream, FixedRate(1), LookAhead(before)}},
               // output
@@ -1105,8 +1105,8 @@ void kernel::WordBoundaryLogic(ProgBuilderRef P,
     P->CreateKernelCall<BoundaryKernel>(WordStream, U8index, wordBoundary_stream);
 }
 
-LongestMatchMarks::LongestMatchMarks(KernelBuilder & b, StreamSet * start_ends, StreamSet * marks)
-: PabloKernel(b, "LongestMatchMarks"  + std::to_string(marks->getNumElements()) + "x1",
+LongestMatchMarks::LongestMatchMarks(VirtualDriver &driver, StreamSet * start_ends, StreamSet * marks)
+: PabloKernel(driver, "LongestMatchMarks"  + std::to_string(marks->getNumElements()) + "x1",
               {Binding{"start_ends", start_ends, FixedRate(1), LookAhead(1)}},
               {Binding{"marks", marks}}) {}
 
@@ -1134,10 +1134,10 @@ unsigned spanLookAhead(unsigned offset1, unsigned offset2) {
     return round_up_to_blocksize(std::max(offset1, offset2));
 }
 
-InclusiveSpans::InclusiveSpans(KernelBuilder & b,
+InclusiveSpans::InclusiveSpans(VirtualDriver &driver,
                                unsigned prefixOffset, unsigned suffixOffset,
                                StreamSet * marks, StreamSet * spans)
-: PabloKernel(b, "InclusiveSpans@" + std::to_string(prefixOffset) + ":" + std::to_string(suffixOffset),
+: PabloKernel(driver, "InclusiveSpans@" + std::to_string(prefixOffset) + ":" + std::to_string(suffixOffset),
               {Binding{"marks", marks, FixedRate(1),
                                        LookAhead(spanLookAhead(prefixOffset, suffixOffset))}},
               {Binding{"spans", spans}}),
@@ -1168,8 +1168,8 @@ std::string CC_string(std::vector<CC *> transitionCCs, StreamSet * index) {
     return s.str();
 }
 
-MaskCC::MaskCC(KernelBuilder & b, CC * CC_to_mask, StreamSet * basis, StreamSet * mask, StreamSet * index)
-: PabloKernel(b, "MaskCC" + basis->shapeString()
+MaskCC::MaskCC(VirtualDriver &driver, CC * CC_to_mask, StreamSet * basis, StreamSet * mask, StreamSet * index)
+: PabloKernel(driver, "MaskCC" + basis->shapeString()
                  + CC_string(std::vector<CC *>{CC_to_mask}, index)
                  + UTF::kernelAnnotation(),
               {Binding{"basis", basis}},
@@ -1193,8 +1193,8 @@ void MaskCC::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("mask"), pb.getInteger(0)), mask);
 }
 
-MaskSelfTransitions::MaskSelfTransitions(KernelBuilder & b, const std::vector<CC *> transitionCCs, StreamSet * basis, StreamSet * mask, StreamSet * index)
-: PabloKernel(b, "MaskSelfTransitions" + basis->shapeString() + CC_string(transitionCCs, index),
+MaskSelfTransitions::MaskSelfTransitions(VirtualDriver & driver, const std::vector<CC *> transitionCCs, StreamSet * basis, StreamSet * mask, StreamSet * index)
+: PabloKernel(driver, "MaskSelfTransitions" + basis->shapeString() + CC_string(transitionCCs, index),
               {Binding{"basis", basis}},
               {Binding{"mask", mask}}), mTransitionCCs(transitionCCs), mIndexStrm(nullptr) {
                   if (index != nullptr) {

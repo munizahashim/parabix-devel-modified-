@@ -66,8 +66,8 @@ unsigned EncodingInfo::prefixLengthOffset(unsigned lgth) const {
     return suffix_bits_avail < hash_ext_bits ? hash_ext_bits - suffix_bits_avail : 0;
 }
 
-WordMarkKernel::WordMarkKernel(KernelBuilder & kb, StreamSet * BasisBits, StreamSet * WordMarks)
-: PabloKernel(kb, "WordMarks" + UTF::kernelAnnotation(), {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
+WordMarkKernel::WordMarkKernel(VirtualDriver &driver, StreamSet * BasisBits, StreamSet * WordMarks)
+: PabloKernel(driver, "WordMarks" + UTF::kernelAnnotation(), {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
 
 void WordMarkKernel::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
@@ -96,11 +96,11 @@ void ByteRun::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("runMask"), pb.getInteger(0)), matchesprior);
 }
 
-ZTF_ExpansionDecoder::ZTF_ExpansionDecoder(KernelBuilder & b,
+ZTF_ExpansionDecoder::ZTF_ExpansionDecoder(VirtualDriver &driver,
                                            EncodingInfo & encodingScheme,
                                            StreamSet * const basis,
                                            StreamSet * insertBixNum)
-: pablo::PabloKernel(b, "ZTF_ExpansionDecoder" + encodingScheme.uniqueSuffix(),
+: pablo::PabloKernel(driver, "ZTF_ExpansionDecoder" + encodingScheme.uniqueSuffix(),
                      {Binding{"basis", basis, FixedRate(), LookAhead(encodingScheme.maxEncodingBytes() - 1)}},
                      {Binding{"insertBixNum", insertBixNum}}),
     mEncodingScheme(encodingScheme)  {}
@@ -137,11 +137,11 @@ void ZTF_ExpansionDecoder::generatePabloMethod() {
     }
 }
 
-ZTF_DecodeLengths::ZTF_DecodeLengths(KernelBuilder & b,
+ZTF_DecodeLengths::ZTF_DecodeLengths(VirtualDriver &driver,
                                      EncodingInfo & encodingScheme,
                                      StreamSet * basisBits,
                                      StreamSet * groupStreams)
-: PabloKernel(b, "ZTF_DecodeLengths" + encodingScheme.uniqueSuffix(),
+: PabloKernel(driver, "ZTF_DecodeLengths" + encodingScheme.uniqueSuffix(),
               {Binding{"basisBits", basisBits}}, {Binding{"groupStreams", groupStreams}}),
     mEncodingScheme(encodingScheme) { }
 
@@ -208,14 +208,14 @@ void ZTF_Symbols::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("symbolRuns"), pb.getInteger(0)), runs);
 }
 
-ZTF_SymbolEncoder::ZTF_SymbolEncoder(KernelBuilder & b,
+ZTF_SymbolEncoder::ZTF_SymbolEncoder(VirtualDriver &driver,
                       EncodingInfo & encodingScheme,
                       StreamSet * const basis,
                       StreamSet * bixHash,
                       StreamSet * extractionMask,
                       StreamSet * runIdx,
                       StreamSet * encoded)
-    : pablo::PabloKernel(b, "ZTF_SymbolEncoder" + encodingScheme.uniqueSuffix(),
+    : pablo::PabloKernel(driver, "ZTF_SymbolEncoder" + encodingScheme.uniqueSuffix(),
                          {Binding{"basis", basis},
                              Binding{"bixHash", bixHash, FixedRate(), LookAhead(encodingScheme.maxEncodingBytes() - 1)},
                              Binding{"extractionMask", extractionMask},
@@ -306,14 +306,14 @@ std::string LengthSelectorSuffix(EncodingInfo & encodingScheme, unsigned groupNo
     return encodingScheme.uniqueSuffix() + ":" + std::to_string(g.lo) + "_" + std::to_string(g.hi) + "_" + std::to_string(elems);
 }
 
-LengthGroupSelector::LengthGroupSelector(KernelBuilder & b,
+LengthGroupSelector::LengthGroupSelector(VirtualDriver &driver,
                            EncodingInfo & encodingScheme,
                            unsigned groupNo,
                            StreamSet * symbolRun,
                            StreamSet * const lengthBixNum,
                            StreamSet * overflow,
                            StreamSet * selected)
-: PabloKernel(b, "LengthGroupSelector" + LengthSelectorSuffix(encodingScheme, groupNo, lengthBixNum),
+: PabloKernel(driver, "LengthGroupSelector" + LengthSelectorSuffix(encodingScheme, groupNo, lengthBixNum),
               {Binding{"symbolRun", symbolRun, FixedRate(), LookAhead(1)},
                   Binding{"lengthBixNum", lengthBixNum},
                   Binding{"overflow", overflow}},
@@ -340,12 +340,12 @@ void LengthGroupSelector::generatePabloMethod() {
 }
 
 
-LengthSorter::LengthSorter(KernelBuilder & b,
+LengthSorter::LengthSorter(VirtualDriver &driver,
                            EncodingInfo & encodingScheme,
                            StreamSet * symbolRun, StreamSet * const lengthBixNum,
                            StreamSet * overflow,
                            StreamSet * groupStreams)
-: PabloKernel(b, "LengthSorter" + std::to_string(lengthBixNum->getNumElements()) + "x1:" + encodingScheme.uniqueSuffix(),
+: PabloKernel(driver, "LengthSorter" + std::to_string(lengthBixNum->getNumElements()) + "x1:" + encodingScheme.uniqueSuffix(),
               {Binding{"symbolRun", symbolRun, FixedRate(), LookAhead(1)},
                   Binding{"lengthBixNum", lengthBixNum},
                   Binding{"overflow", overflow}},

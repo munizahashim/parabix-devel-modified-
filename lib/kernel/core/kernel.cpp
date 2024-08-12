@@ -1516,7 +1516,7 @@ std::string Kernel::getFamilyName() const {
 }
 
 // CONSTRUCTOR
-Kernel::Kernel(KernelBuilder & b,
+Kernel::Kernel(VirtualDriver & driver,
                const TypeId typeId,
                std::string && kernelName,
                Bindings && stream_inputs,
@@ -1525,7 +1525,7 @@ Kernel::Kernel(KernelBuilder & b,
                Bindings && scalar_outputs,
                InternalScalars && internal_scalars)
 : mTypeId(typeId)
-, mStride(b.getBitBlockWidth())
+, mStride(driver.getBitBlockWidth())
 , mInputStreamSets(std::move(stream_inputs))
 , mOutputStreamSets(std::move(stream_outputs))
 , mInputScalars(std::move(scalar_inputs))
@@ -1535,14 +1535,14 @@ Kernel::Kernel(KernelBuilder & b,
 
 }
 
-Kernel::Kernel(KernelBuilder & b,
+Kernel::Kernel(VirtualDriver & driver,
                const TypeId typeId,
                Bindings && stream_inputs,
                Bindings && stream_outputs,
                Bindings && scalar_inputs,
                Bindings && scalar_outputs)
 : mTypeId(typeId)
-, mStride(b.getBitBlockWidth())
+, mStride(driver.getBitBlockWidth())
 , mInputStreamSets(std::move(stream_inputs))
 , mOutputStreamSets(std::move(stream_outputs))
 , mInputScalars(std::move(scalar_inputs))
@@ -1555,14 +1555,14 @@ Kernel::Kernel(KernelBuilder & b,
 Kernel::~Kernel() { }
 
 // CONSTRUCTOR
-SegmentOrientedKernel::SegmentOrientedKernel(KernelBuilder & b,
+SegmentOrientedKernel::SegmentOrientedKernel(VirtualDriver &driver,
                                              std::string && kernelName,
                                              Bindings && stream_inputs,
                                              Bindings && stream_outputs,
                                              Bindings && scalar_parameters,
                                              Bindings && scalar_outputs,
                                              InternalScalars && internal_scalars)
-: Kernel(b,
+: Kernel(driver,
 TypeId::SegmentOriented, std::move(kernelName),
 std::move(stream_inputs), std::move(stream_outputs),
 std::move(scalar_parameters), std::move(scalar_outputs),

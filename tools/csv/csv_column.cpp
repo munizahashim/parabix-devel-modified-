@@ -52,7 +52,7 @@ static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (
 
 class SelectField : public PabloKernel {
 public:
-    SelectField(KernelBuilder & b, StreamSet * csvMarks,
+    SelectField(VirtualDriver & driver, StreamSet * csvMarks,
                               StreamSet * Record_separators,
                               StreamSet * Field_separators,
                               StreamSet * toKeep,
@@ -62,12 +62,12 @@ protected:
     unsigned mColumnNo;
 };
 
-SelectField::SelectField(KernelBuilder & b,  StreamSet * csvMarks,
+SelectField::SelectField(VirtualDriver &driver,  StreamSet * csvMarks,
                                         StreamSet * Record_separators,
                                         StreamSet * Field_separators,
                                         StreamSet * toKeep,
                                         unsigned columnNo)
-: PabloKernel(b, "SelectField" + std::to_string(columnNo),
+: PabloKernel(driver, "SelectField" + std::to_string(columnNo),
   {Binding{"csvMarks", csvMarks, FixedRate(), LookAhead(1)},
    Binding{"Record_separators", Record_separators},
    Binding{"Field_separators", Field_separators}},
@@ -93,11 +93,10 @@ void SelectField::generatePabloMethod() {
 
 typedef void (*CSVFunctionType)(uint32_t fd);
 
-CSVFunctionType generatePipeline(CPUDriver & pxDriver, const std::vector<std::string> & headers) {
+CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::string> & headers) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
-    auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}}, {});
+    auto P = driver.makePipeline({Binding{driver.getInt32Ty(), "inputFileDecriptor"}}, {});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
     // File data from mmap

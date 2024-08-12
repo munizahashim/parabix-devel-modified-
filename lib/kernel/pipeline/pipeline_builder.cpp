@@ -37,8 +37,6 @@ using Scalars = PipelineKernel::Scalars;
  * @brief compile()
  ** ------------------------------------------------------------------------------------------------------------- */
 void * ProgramBuilder::compile() {
-
-
     Kernel * const kernel = makeKernel();
     if (LLVM_UNLIKELY(kernel == nullptr)) {
         report_fatal_error("Main pipeline contains no kernels nor function calls.");
@@ -565,7 +563,6 @@ Kernel * PipelineBuilder::makeKernel() {
     return mTarget;
 }
 
-
 using AttributeCombineSet = flat_map<AttrId, unsigned>;
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -748,17 +745,17 @@ std::shared_ptr<OptimizationBranchBuilder> PipelineBuilder::CreateOptimizationBr
     auto allZeroScalarOutputs = nonZeroScalarOutputs;
 
     PipelineKernel * const allZero =
-        new PipelineKernel(mDriver.getBuilder(),
+        new PipelineKernel(mDriver,
                            std::move(allZeroStreamInputs), std::move(allZeroStreamOutputs),
                            std::move(allZeroScalarInputs), std::move(allZeroScalarOutputs));
 
     PipelineKernel * const nonZero =
-        new PipelineKernel(mDriver.getBuilder(),
+        new PipelineKernel(mDriver,
                            std::move(nonZeroStreamInputs), std::move(nonZeroStreamOutputs),
                            std::move(nonZeroScalarInputs), std::move(nonZeroScalarOutputs));
 
     PipelineKernel * const branch =
-        new PipelineKernel(mDriver.getBuilder(),
+        new PipelineKernel(mDriver,
                            std::move(stream_inputs), std::move(stream_outputs),
                            std::move(scalar_inputs), std::move(scalar_outputs));
 

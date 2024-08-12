@@ -14,20 +14,20 @@ using namespace llvm;
 
 namespace kernel {
 
-SingleStreamScanKernelTemplate::ScanWordContext::ScanWordContext(KernelBuilder & b, unsigned strideWidth)
+SingleStreamScanKernelTemplate::ScanWordContext::ScanWordContext(VirtualDriver & driver, unsigned strideWidth)
 : width(std::max(minScanWordWidth, strideWidth / strideMaskWidth))
-, wordsPerBlock(b.getBitBlockWidth() / width)
+, wordsPerBlock(driver.getBitBlockWidth() / width)
 , wordsPerStride(strideMaskWidth)
 , fieldWidth(width)
-, Ty(b.getIntNTy(width))
+, Ty(driver.getIntNTy(width))
 , PointerTy(Ty->getPointerTo())
-, StrideMaskTy(b.getIntNTy(strideMaskWidth))
-, WIDTH(b.getSize(width))
-, WORDS_PER_BLOCK(b.getSize(wordsPerBlock))
-, WORDS_PER_STRIDE(b.getSize(wordsPerStride))
-, NUM_BLOCKS_PER_STRIDE(b.getSize(strideWidth / b.getBitBlockWidth()))
+, StrideMaskTy(driver.getIntNTy(strideMaskWidth))
+, WIDTH(driver.getSize(width))
+, WORDS_PER_BLOCK(driver.getSize(wordsPerBlock))
+, WORDS_PER_STRIDE(driver.getSize(wordsPerStride))
+, NUM_BLOCKS_PER_STRIDE(driver.getSize(strideWidth / driver.getBitBlockWidth()))
 {
-    assert (IS_POW_2(strideWidth) && strideWidth >= b.getBitBlockWidth() && strideWidth <= MaxStrideWidth);
+    assert (IS_POW_2(strideWidth) && strideWidth >= driver.getBitBlockWidth() && strideWidth <= MaxStrideWidth);
 }
 
 void SingleStreamScanKernelTemplate::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
@@ -129,17 +129,17 @@ void SingleStreamScanKernelTemplate::generateMultiBlockLogic(KernelBuilder & b, 
 
 const uint32_t SingleStreamScanKernelTemplate::MaxStrideWidth = 4096;
 
-SingleStreamScanKernelTemplate::SingleStreamScanKernelTemplate(KernelBuilder & b, std::string && name, StreamSet * scan)
-: MultiBlockKernel(b, name + "_sb" + std::to_string(codegen::ScanBlocks), {{"scan", scan}}, {}, {}, {}, {})
-, mSW(b, std::min(codegen::ScanBlocks * b.getBitBlockWidth(), MaxStrideWidth))
+SingleStreamScanKernelTemplate::SingleStreamScanKernelTemplate(VirtualDriver &driver, std::string && name, StreamSet * scan)
+: MultiBlockKernel(driver, name + "_sb" + std::to_string(codegen::ScanBlocks), {{"scan", scan}}, {}, {}, {}, {})
+, mSW(driver, std::min(codegen::ScanBlocks * driver.getBitBlockWidth(), MaxStrideWidth))
 {
     assert (scan->getNumElements() == 1 && scan->getFieldWidth() == 1);
-    uint32_t strideWidth = std::min(codegen::ScanBlocks * b.getBitBlockWidth(), MaxStrideWidth);
+    uint32_t strideWidth = std::min(codegen::ScanBlocks * driver.getBitBlockWidth(), MaxStrideWidth);
     if (!IS_POW_2(codegen::ScanBlocks)) {
         report_fatal_error("scan-blocks must be a power of 2");
     }
-    if ((codegen::ScanBlocks * b.getBitBlockWidth()) > MaxStrideWidth) {
-        report_fatal_error(StringRef("scan-blocks exceeds maximum allowed size of ") + std::to_string(MaxStrideWidth / b.getBitBlockWidth()));
+    if ((codegen::ScanBlocks * driver.getBitBlockWidth()) > MaxStrideWidth) {
+        report_fatal_error(StringRef("scan-blocks exceeds maximum allowed size of ") + std::to_string(MaxStrideWidth / driver.getBitBlockWidth()));
     }
     setStride(strideWidth);
 }

@@ -26,7 +26,7 @@ namespace kernel {
  */
 class LineNumberGenerator : public SingleStreamScanKernelTemplate {
 public:
-    LineNumberGenerator(KernelBuilder & b, StreamSet * scan, StreamSet * linebreaks, StreamSet * output);
+    LineNumberGenerator(VirtualDriver & driver, StreamSet * scan, StreamSet * linebreaks, StreamSet * output);
 protected:
     void initialize(KernelBuilder & b) override;
     void willProcessStride(KernelBuilder & b, llvm::Value * const strideNo) override;

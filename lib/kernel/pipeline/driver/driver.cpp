@@ -17,7 +17,7 @@ using RelationshipAllocator = Relationship::Allocator;
  ** ------------------------------------------------------------------------------------------------------------- */
 std::unique_ptr<ProgramBuilder> BaseDriver::makePipelineWithIO(Bindings stream_inputs, Bindings stream_outputs, Bindings scalar_inputs, Bindings scalar_outputs) {
     PipelineKernel * const pipeline =
-        new PipelineKernel(getBuilder(),
+        new PipelineKernel(*this,
                            std::move(stream_inputs), std::move(stream_outputs),
                            std::move(scalar_inputs), std::move(scalar_outputs));
     return std::make_unique<ProgramBuilder>(*this, pipeline);
@@ -28,7 +28,7 @@ std::unique_ptr<ProgramBuilder> BaseDriver::makePipelineWithIO(Bindings stream_i
  ** ------------------------------------------------------------------------------------------------------------- */
 std::unique_ptr<ProgramBuilder> BaseDriver::makePipeline(Bindings scalar_inputs, Bindings scalar_outputs) {
     PipelineKernel * const pipeline =
-        new PipelineKernel(getBuilder(),
+        new PipelineKernel(*this,
                            {}, {},
                            std::move(scalar_inputs), std::move(scalar_outputs));
     return std::make_unique<ProgramBuilder>(*this, pipeline);
@@ -167,6 +167,34 @@ void BaseDriver::addKernel(not_null<Kernel *> kernel) {
         mUncachedKernel.emplace_back(kernel.get());
     }
 
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getBitBlockWidth
+ ** ------------------------------------------------------------------------------------------------------------- */
+unsigned BaseDriver::getBitBlockWidth() const {
+    return mBuilder->getBitBlockWidth();
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getBitBlockType
+ ** ------------------------------------------------------------------------------------------------------------- */
+VectorType * BaseDriver::getBitBlockType() const {
+    return mBuilder->getBitBlockType();
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getStreamTy
+ ** ------------------------------------------------------------------------------------------------------------- */
+VectorType * BaseDriver::getStreamTy(const unsigned FieldWidth) {
+    return mBuilder->getStreamTy(FieldWidth);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getStreamSetTy
+ ** ------------------------------------------------------------------------------------------------------------- */
+ArrayType * BaseDriver::getStreamSetTy(const unsigned NumElements, const unsigned FieldWidth) {
+    return mBuilder->getStreamSetTy(NumElements, FieldWidth);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

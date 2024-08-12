@@ -414,7 +414,7 @@ private:
 //
 class UTF8_index : public pablo::PabloKernel {
 public:
-    UTF8_index(KernelBuilder & kb, StreamSet * Source, StreamSet * u8index, StreamSet * linebreak = nullptr);
+    UTF8_index(VirtualDriver & driver, StreamSet * Source, StreamSet * u8index, StreamSet * linebreak = nullptr);
 protected:
     void generatePabloMethod() override;
 };
@@ -463,7 +463,7 @@ private:
 
 class ICGrepKernel : public pablo::PabloKernel {
 public:
-    ICGrepKernel(KernelBuilder & b,
+    ICGrepKernel(VirtualDriver & driver,
                  std::unique_ptr<GrepKernelOptions> && options);
     llvm::StringRef getSignature() const override;
     bool hasSignature() const override { return true; }
@@ -478,21 +478,21 @@ private:
 
 class MatchedLinesKernel : public pablo::PabloKernel {
 public:
-    MatchedLinesKernel(KernelBuilder & builder, StreamSet * OriginalMatches, StreamSet * LineBreakStream, StreamSet * Matches);
+    MatchedLinesKernel(VirtualDriver & driver, StreamSet * OriginalMatches, StreamSet * LineBreakStream, StreamSet * Matches);
 protected:
     void generatePabloMethod() override;
 };
 
 class InvertMatchesKernel : public BlockOrientedKernel {
 public:
-    InvertMatchesKernel(KernelBuilder & b, StreamSet * OriginalMatches, StreamSet * LineBreakStream, StreamSet * Matches);
+    InvertMatchesKernel(VirtualDriver & driver, StreamSet * OriginalMatches, StreamSet * LineBreakStream, StreamSet * Matches);
 private:
     void generateDoBlockMethod(KernelBuilder & b) override;
 };
 
 class FixedMatchSpansKernel : public pablo::PabloKernel {
 public:
-    FixedMatchSpansKernel(KernelBuilder & builder, unsigned length, unsigned offset, StreamSet * MatchMarks, StreamSet * MatchSpans);
+    FixedMatchSpansKernel(VirtualDriver & driver, unsigned length, unsigned offset, StreamSet * MatchMarks, StreamSet * MatchSpans);
 protected:
     void generatePabloMethod() override;
     unsigned mMatchLength;
@@ -509,7 +509,7 @@ protected:
 //
 class SpansToMarksKernel : public pablo::PabloKernel {
 public:
-    SpansToMarksKernel(KernelBuilder & builder, StreamSet * Spans, StreamSet * EndMarks);
+    SpansToMarksKernel(VirtualDriver & driver, StreamSet * Spans, StreamSet * EndMarks);
 protected:
     void generatePabloMethod() override;
 };
@@ -523,7 +523,7 @@ protected:
 //  in the BitMovementMode::LookAhead mode (default).
 class U8Spans : public pablo::PabloKernel {
 public:
-    U8Spans(KernelBuilder & builder, StreamSet * marks, StreamSet * u8index, StreamSet * spans,
+    U8Spans(VirtualDriver & driver, StreamSet * marks, StreamSet * u8index, StreamSet * spans,
             pablo::BitMovementMode m = pablo::BitMovementMode::LookAhead);
 protected:
     void generatePabloMethod() override;
@@ -533,14 +533,14 @@ private:
 
 class PopcountKernel : public pablo::PabloKernel {
 public:
-    PopcountKernel(KernelBuilder & builder, StreamSet * const toCount, Scalar * countResult);
+    PopcountKernel(VirtualDriver & driver, StreamSet * const toCount, Scalar * countResult);
 protected:
     void generatePabloMethod() override;
 };
 
 class FixedDistanceMatchesKernel : public pablo::PabloKernel {
 public:
-    FixedDistanceMatchesKernel(KernelBuilder & b, unsigned distance, StreamSet * Basis, StreamSet * Matches, StreamSet * ToCheck  = nullptr);
+    FixedDistanceMatchesKernel(VirtualDriver & driver, unsigned distance, StreamSet * Basis, StreamSet * Matches, StreamSet * ToCheck  = nullptr);
 protected:
     void generatePabloMethod() override;
 private:
@@ -550,7 +550,7 @@ private:
 
 class CodePointMatchKernel : public pablo::PabloKernel {
 public:
-    CodePointMatchKernel(KernelBuilder & b, UCD::property_t prop, unsigned distance, StreamSet * Basis, StreamSet * Matches);
+    CodePointMatchKernel(VirtualDriver & driver, UCD::property_t prop, unsigned distance, StreamSet * Basis, StreamSet * Matches);
 protected:
     void generatePabloMethod() override;
 private:
@@ -560,7 +560,7 @@ private:
 
 class AbortOnNull final : public MultiBlockKernel {
 public:
-    AbortOnNull(KernelBuilder &, StreamSet * const InputStream, StreamSet * const OutputStream, Scalar * callbackObject);
+    AbortOnNull(VirtualDriver & driver, StreamSet * const InputStream, StreamSet * const OutputStream, Scalar * callbackObject);
 private:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final;
 
@@ -575,7 +575,7 @@ private:
 
 class ContextSpan final : public pablo::PabloKernel {
 public:
-    ContextSpan(KernelBuilder & b, StreamSet * const markerStream, StreamSet * const contextStream, unsigned before, unsigned after);
+    ContextSpan(VirtualDriver & driver, StreamSet * const markerStream, StreamSet * const contextStream, unsigned before, unsigned after);
 protected:
     void generatePabloMethod() override;
 private:
@@ -606,7 +606,7 @@ void WordBoundaryLogic(ProgBuilderRef P,
 
 class LongestMatchMarks final : public pablo::PabloKernel {
 public:
-    LongestMatchMarks(KernelBuilder & b, StreamSet * start_ends, StreamSet * marks);
+    LongestMatchMarks(VirtualDriver & driver, StreamSet * start_ends, StreamSet * marks);
 protected:
     void generatePabloMethod() override;
 };
@@ -623,7 +623,7 @@ protected:
 //
 class InclusiveSpans final : public pablo::PabloKernel {
 public:
-    InclusiveSpans(KernelBuilder & b, unsigned prefixOffset, unsigned suffixOffset,
+    InclusiveSpans(VirtualDriver & driver, unsigned prefixOffset, unsigned suffixOffset,
                    StreamSet * marks, StreamSet * spans);
 protected:
     void generatePabloMethod() override;
@@ -634,7 +634,7 @@ private:
 
 class MaskCC final : public pablo::PabloKernel {
 public:
-    MaskCC(KernelBuilder & b, re::CC * CC_to_mask, StreamSet * basis, StreamSet * mask, StreamSet * index = nullptr);
+    MaskCC(VirtualDriver & driver, re::CC * CC_to_mask, StreamSet * basis, StreamSet * mask, StreamSet * index = nullptr);
 protected:
     void generatePabloMethod() override;
 private:
@@ -657,7 +657,7 @@ private:
 
 class MaskSelfTransitions final : public pablo::PabloKernel {
 public:
-    MaskSelfTransitions(KernelBuilder & b, const std::vector<re::CC *> transitionCCs,
+    MaskSelfTransitions(VirtualDriver & driver, const std::vector<re::CC *> transitionCCs,
                         StreamSet * basis, StreamSet * mask, StreamSet * index = nullptr);
 protected:
     void generatePabloMethod() override;

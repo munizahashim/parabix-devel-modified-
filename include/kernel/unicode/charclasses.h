@@ -14,11 +14,11 @@ namespace kernel {
 
 class CharClassesKernel final : public pablo::PabloKernel {
 public:
-    CharClassesKernel(KernelBuilder & b, std::vector<re::CC *> ccs, StreamSet * BasisBits, StreamSet * CharClasses);
+    CharClassesKernel(VirtualDriver & driver, std::vector<re::CC *> ccs, StreamSet * BasisBits, StreamSet * CharClasses);
     bool hasSignature() const override { return true; }
     llvm::StringRef getSignature() const override;
 protected:
-    CharClassesKernel(KernelBuilder & b, std::string signature, std::vector<re::CC *> && ccs, StreamSet * BasisBits, StreamSet * CharClasses);
+    CharClassesKernel(VirtualDriver & driver, std::string signature, std::vector<re::CC *> && ccs, StreamSet * BasisBits, StreamSet * CharClasses);
     void generatePabloMethod() override;
 protected:
     const std::vector<re::CC *> mCCs;
@@ -28,11 +28,11 @@ protected:
 
 class ByteClassesKernel final : public pablo::PabloKernel {
 public:
-    ByteClassesKernel(KernelBuilder & b, std::vector<re::CC *> ccs, StreamSet * inputStream, StreamSet * CharClasses);
+    ByteClassesKernel(VirtualDriver & driver, std::vector<re::CC *> ccs, StreamSet * inputStream, StreamSet * CharClasses);
     bool hasSignature() const override { return true; }
     llvm::StringRef getSignature() const override;
 protected:
-    ByteClassesKernel(KernelBuilder & b, std::string signature, std::vector<re::CC *> && ccs, StreamSet * inputStream, StreamSet * CharClasses);
+    ByteClassesKernel(VirtualDriver & driver, std::string signature, std::vector<re::CC *> && ccs, StreamSet * inputStream, StreamSet * CharClasses);
     void generatePabloMethod() override;
 protected:
     const std::vector<re::CC *> mCCs;

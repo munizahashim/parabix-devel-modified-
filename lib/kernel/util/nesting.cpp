@@ -19,11 +19,11 @@ namespace kernel {
 static cl::OptionCategory NestingOptions("Nesting Kernel Flags", "These options control printing for the nesting kernel");
 static cl::opt<bool> PrintStreams("print-nesting-streams", cl::desc("Print stream values"), cl::init(false), cl::cat(NestingOptions));
 
-NestingDepth::NestingDepth(KernelBuilder & b,
-		           StreamSet * brackets,
+NestingDepth::NestingDepth(VirtualDriver &driver,
+                   StreamSet * brackets,
                            StreamSet * depth, StreamSet * errs,
                            unsigned maxDepth)
-    : PabloKernel(b, "NestingDepth" +
+    : PabloKernel(driver, "NestingDepth" +
                      std::to_string(maxDepth) +
                      (PrintStreams ? "_pk" : ""),
                   {Binding{"brackets", brackets}},

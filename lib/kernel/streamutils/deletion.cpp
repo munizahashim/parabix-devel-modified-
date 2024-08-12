@@ -107,14 +107,14 @@ void DeletionKernel::generateFinalBlockMethod(KernelBuilder & b, Value * remaini
     b.storeOutputStreamBlock("unitCounts", b.getInt32(0), b.bitCast(unitCount));
 }
 
-DeletionKernel::DeletionKernel(KernelBuilder & b, StreamSet * input, StreamSet * delMask, StreamSet * output, StreamSet * unitCounts)
-: BlockOrientedKernel(b, "del" + std::to_string(b.getBitBlockWidth()/output->getNumElements()) + "_" + std::to_string(output->getNumElements()),
+DeletionKernel::DeletionKernel(VirtualDriver &driver, StreamSet * input, StreamSet * delMask, StreamSet * output, StreamSet * unitCounts)
+: BlockOrientedKernel(driver, "del" + std::to_string(driver.getBitBlockWidth()/output->getNumElements()) + "_" + std::to_string(output->getNumElements()),
 {Binding{"inputStreamSet", input},
   Binding{"delMaskSet", delMask}},
 {Binding{"outputStreamSet", output},
-  Binding{"unitCounts", unitCounts, FixedRate(), RoundUpTo(b.getBitBlockWidth())}},
+  Binding{"unitCounts", unitCounts, FixedRate(), RoundUpTo(driver.getBitBlockWidth())}},
 {}, {}, {})
-, mDeletionFieldWidth(b.getBitBlockWidth() / output->getNumElements())
+, mDeletionFieldWidth(driver.getBitBlockWidth() / output->getNumElements())
 , mStreamCount(output->getNumElements()) {
 }
 
@@ -170,12 +170,12 @@ void FieldCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value
     b.SetInsertPoint(done);
 }
 
-FieldCompressKernel::FieldCompressKernel(KernelBuilder & b,
+FieldCompressKernel::FieldCompressKernel(VirtualDriver &driver,
                                          SelectOperation const & maskOp,
                                          SelectOperationList const & inputOps,
                                          StreamSet * outputStreamSet,
                                          unsigned fieldWidth)
-: MultiBlockKernel(b, "fieldCompress" + std::to_string(fieldWidth) + "_" +
+: MultiBlockKernel(driver, "fieldCompress" + std::to_string(fieldWidth) + "_" +
                    streamutils::genSignature(maskOp) +
                    ":" + streamutils::genSignature(inputOps),
 {},
@@ -236,23 +236,23 @@ void PEXTFieldCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::V
     b.SetInsertPoint(done);
 }
 
-PEXTFieldCompressKernel::PEXTFieldCompressKernel(KernelBuilder & b, const unsigned fieldWidth, const unsigned streamCount)
-: MultiBlockKernel(b, "PEXTfieldCompress" + std::to_string(fieldWidth) + "_" + std::to_string(streamCount),
-                   {Binding{b.getStreamSetTy(streamCount), "inputStreamSet"},
-                       Binding{b.getStreamSetTy(), "extractionMask"}},
-                   {Binding{b.getStreamSetTy(streamCount), "outputStreamSet"}},
+PEXTFieldCompressKernel::PEXTFieldCompressKernel(VirtualDriver &driver, const unsigned fieldWidth, const unsigned streamCount)
+: MultiBlockKernel(driver, "PEXTfieldCompress" + std::to_string(fieldWidth) + "_" + std::to_string(streamCount),
+                   {Binding{driver.getStreamSetTy(streamCount), "inputStreamSet"},
+                       Binding{driver.getStreamSetTy(), "extractionMask"}},
+                   {Binding{driver.getStreamSetTy(streamCount), "outputStreamSet"}},
                    {}, {}, {})
 , mPEXTWidth(fieldWidth)
 , mStreamCount(streamCount) {
     if ((fieldWidth != 32) && (fieldWidth != 64)) llvm::report_fatal_error("Unsupported PEXT width for PEXTFieldCompressKernel");
 }
 
-StreamCompressKernel::StreamCompressKernel(KernelBuilder & b
+StreamCompressKernel::StreamCompressKernel(VirtualDriver &driver
                                            , StreamSet * extractionMask
                                            , StreamSet * source
                                            , StreamSet * compressedOutput
                                            , const unsigned FieldWidth)
-: MultiBlockKernel(b, "streamCompress" + std::to_string(FieldWidth) + "_" + std::to_string(source->getNumElements()),
+: MultiBlockKernel(driver, "streamCompress" + std::to_string(FieldWidth) + "_" + std::to_string(source->getNumElements()),
 {Bind("extractionMask", extractionMask, Principal()),
  Bind("sourceStreamSet", source, ZeroExtended())},
 {Bind("compressedOutput", compressedOutput, PopcountOf("extractionMask"), EmptyWriteOverflow(), MaximumDistribution())},
@@ -260,9 +260,9 @@ StreamCompressKernel::StreamCompressKernel(KernelBuilder & b
 , mFW(FieldWidth)
 , mStreamCount(source->getNumElements()) {
     for (unsigned i = 0; i < mStreamCount; i++) {
-        addInternalScalar(b.getBitBlockType(), "pendingOutputBlock_" + std::to_string(i));
+        addInternalScalar(driver.getBitBlockType(), "pendingOutputBlock_" + std::to_string(i));
     }
-    setStride(4 * b.getBitBlockWidth());
+    setStride(4 * driver.getBitBlockWidth());
 }
 
 void StreamCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) {
@@ -815,17 +815,17 @@ Bindings makeSwizzledDeleteByPEXTOutputBindings(const std::vector<StreamSet *> &
     return outputs;
 }
 
-SwizzledDeleteByPEXTkernel::SwizzledDeleteByPEXTkernel(KernelBuilder & b,
+SwizzledDeleteByPEXTkernel::SwizzledDeleteByPEXTkernel(VirtualDriver &driver,
                                                        StreamSet * selectors, StreamSet * inputStreamSet,
                                                        const std::vector<StreamSet *> & outputStreamSets,
                                                        const unsigned PEXTWidth)
 
-: MultiBlockKernel(b, "PEXTdel" + std::to_string(PEXTWidth) + "_" + std::to_string(inputStreamSet->getNumElements()),
+: MultiBlockKernel(driver, "PEXTdel" + std::to_string(PEXTWidth) + "_" + std::to_string(inputStreamSet->getNumElements()),
 {Binding{"selectors", selectors}, Binding{"inputStreamSet", inputStreamSet}},
  makeSwizzledDeleteByPEXTOutputBindings(outputStreamSets, PEXTWidth),
 {}, {}, {})
 , mStreamCount(inputStreamSet->getNumElements())
-, mSwizzleFactor(b.getBitBlockWidth() / PEXTWidth)
+, mSwizzleFactor(driver.getBitBlockWidth() / PEXTWidth)
 , mSwizzleSetCount(ceil_udiv(mStreamCount, mSwizzleFactor))
 , mPEXTWidth(PEXTWidth) {
 
@@ -836,10 +836,10 @@ SwizzledDeleteByPEXTkernel::SwizzledDeleteByPEXTkernel(KernelBuilder & b,
     assert (outputStreamSets.size() == mSwizzleSetCount);
     assert (outputStreamSets[0]->getNumElements() == mSwizzleFactor);
 
-    addInternalScalar(b.getBitBlockType(), "pendingSwizzleData0");
+    addInternalScalar(driver.getBitBlockType(), "pendingSwizzleData0");
     for (unsigned i = 1; i < outputStreamSets.size(); ++i) {
         assert (outputStreamSets[i]->getNumElements() == mSwizzleFactor);
-        addInternalScalar(b.getBitBlockType(), "pendingSwizzleData" + std::to_string(i));
+        addInternalScalar(driver.getBitBlockType(), "pendingSwizzleData" + std::to_string(i));
     }
 }
 
@@ -1082,17 +1082,17 @@ void DeleteByPEXTkernel::generateProcessingLoop(KernelBuilder & b, Value * delMa
     b.storeOutputStreamBlock("deletionCounts", b.getInt32(0), b.bitCast(delCount));
 }
 
-DeleteByPEXTkernel::DeleteByPEXTkernel(KernelBuilder & b, unsigned fw, unsigned streamCount, unsigned PEXT_width)
-: BlockOrientedKernel(b, "PEXTdel" + std::to_string(fw) + "_" + std::to_string(streamCount) + "_" + std::to_string(PEXT_width),
-              {Binding{b.getStreamSetTy(streamCount), "inputStreamSet"},
-                  Binding{b.getStreamSetTy(), "delMaskSet"}},
+DeleteByPEXTkernel::DeleteByPEXTkernel(VirtualDriver &driver, unsigned fw, unsigned streamCount, unsigned PEXT_width)
+: BlockOrientedKernel(driver, "PEXTdel" + std::to_string(fw) + "_" + std::to_string(streamCount) + "_" + std::to_string(PEXT_width),
+              {Binding{driver.getStreamSetTy(streamCount), "inputStreamSet"},
+                  Binding{driver.getStreamSetTy(), "delMaskSet"}},
               {}, {}, {}, {})
 , mDelCountFieldWidth(fw)
 , mStreamCount(streamCount)
-, mSwizzleFactor(b.getBitBlockWidth() / PEXT_width)
+, mSwizzleFactor(driver.getBitBlockWidth() / PEXT_width)
 , mPEXTWidth(PEXT_width) {
-    mOutputStreamSets.emplace_back(b.getStreamSetTy(mStreamCount), "outputStreamSet", PopcountOfNot("delMaskSet"));
-    mOutputStreamSets.emplace_back(b.getStreamSetTy(), "deletionCounts");
+    mOutputStreamSets.emplace_back(driver.getStreamSetTy(mStreamCount), "outputStreamSet", PopcountOfNot("delMaskSet"));
+    mOutputStreamSets.emplace_back(driver.getStreamSetTy(), "deletionCounts");
 }
 
 
@@ -1112,24 +1112,24 @@ DeleteByPEXTkernel::DeleteByPEXTkernel(KernelBuilder & b, unsigned fw, unsigned 
 // Note: that both input streams and output streams are stored in swizzled form.
 //
 
-SwizzledBitstreamCompressByCount::SwizzledBitstreamCompressByCount(KernelBuilder & b, unsigned bitStreamCount, unsigned fieldWidth)
-: BlockOrientedKernel(b, "swizzled_compress" + std::to_string(fieldWidth) + "_" + std::to_string(bitStreamCount),
-                     {Binding{b.getStreamSetTy(), "countsPerStride"}}, {}, {}, {}, {})
+SwizzledBitstreamCompressByCount::SwizzledBitstreamCompressByCount(VirtualDriver &driver, unsigned bitStreamCount, unsigned fieldWidth)
+: BlockOrientedKernel(driver, "swizzled_compress" + std::to_string(fieldWidth) + "_" + std::to_string(bitStreamCount),
+                     {Binding{driver.getStreamSetTy(), "countsPerStride"}}, {}, {}, {}, {})
 , mBitStreamCount(bitStreamCount)
 , mFieldWidth(fieldWidth)
-, mSwizzleFactor(b.getBitBlockWidth() / fieldWidth)
+, mSwizzleFactor(driver.getBitBlockWidth() / fieldWidth)
 , mSwizzleSetCount((mBitStreamCount + mSwizzleFactor - 1)/mSwizzleFactor) {
     assert((fieldWidth > 0) && ((fieldWidth & (fieldWidth - 1)) == 0) && "fieldWidth must be a power of 2");
     assert(mSwizzleFactor > 1 && "fieldWidth must be less than the block width");
-    mInputStreamSets.push_back(Binding{b.getStreamSetTy(mSwizzleFactor, 1), "inputSwizzle0"});
-    mOutputStreamSets.push_back(Binding{b.getStreamSetTy(mSwizzleFactor, 1), "outputSwizzle0", BoundedRate(0, 1)});
-    addInternalScalar(b.getBitBlockType(), "pendingSwizzleData0");
+    mInputStreamSets.push_back(Binding{driver.getStreamSetTy(mSwizzleFactor, 1), "inputSwizzle0"});
+    mOutputStreamSets.push_back(Binding{driver.getStreamSetTy(mSwizzleFactor, 1), "outputSwizzle0", BoundedRate(0, 1)});
+    addInternalScalar(driver.getBitBlockType(), "pendingSwizzleData0");
     for (unsigned i = 1; i < mSwizzleSetCount; i++) {
-        mInputStreamSets.push_back(Binding{b.getStreamSetTy(mSwizzleFactor, 1), "inputSwizzle" + std::to_string(i)});
-        mOutputStreamSets.push_back(Binding{b.getStreamSetTy(mSwizzleFactor, 1), "outputSwizzle" + std::to_string(i), RateEqualTo("outputSwizzle0")});
-        addInternalScalar(b.getBitBlockType(), "pendingSwizzleData" + std::to_string(i));
+        mInputStreamSets.push_back(Binding{driver.getStreamSetTy(mSwizzleFactor, 1), "inputSwizzle" + std::to_string(i)});
+        mOutputStreamSets.push_back(Binding{driver.getStreamSetTy(mSwizzleFactor, 1), "outputSwizzle" + std::to_string(i), RateEqualTo("outputSwizzle0")});
+        addInternalScalar(driver.getBitBlockType(), "pendingSwizzleData" + std::to_string(i));
     }
-    addInternalScalar(b.getSizeTy(), "pendingOffset");
+    addInternalScalar(driver.getSizeTy(), "pendingOffset");
 }
 
 void SwizzledBitstreamCompressByCount::generateDoBlockMethod(KernelBuilder & b) {
@@ -1214,18 +1214,18 @@ void SwizzledBitstreamCompressByCount::generateFinalBlockMethod(KernelBuilder & 
 
 const unsigned MIN_STREAMS_TO_SWIZZLE = 4;
 
-FilterByMaskKernel::FilterByMaskKernel(KernelBuilder & b,
+FilterByMaskKernel::FilterByMaskKernel(VirtualDriver &driver,
                                          SelectOperation const & maskOp,
                                          SelectOperationList const & inputOps,
                                          StreamSet * filteredOutput,
                                          unsigned fieldWidth,
                                          ProcessingRateProbabilityDistribution insertionProbabilityDistribution)
-: MultiBlockKernel(b, "FilterByMask" + std::to_string(fieldWidth) + "_" +
+: MultiBlockKernel(driver, "FilterByMask" + std::to_string(fieldWidth) + "_" +
                    streamutils::genSignature(maskOp) +
                    ":" + streamutils::genSignature(inputOps),
 {}, {}, {}, {}, {})
 , mFW(fieldWidth)
-, mFieldsPerBlock(b.getBitBlockWidth() / fieldWidth)
+, mFieldsPerBlock(driver.getBitBlockWidth() / fieldWidth)
 , mStreamCount(filteredOutput->getNumElements()) {
     mMaskOp.operation = maskOp.operation;
     mMaskOp.bindings.push_back(std::make_pair("extractionMask", maskOp.bindings[0].second));
@@ -1240,17 +1240,17 @@ FilterByMaskKernel::FilterByMaskKernel(KernelBuilder & b,
     mOutputStreamSets.push_back(Bind("filteredOutput", filteredOutput, PopcountOf("extractionMask"), insertionProbabilityDistribution));
     assert (mOutputStreamSets.back().getDistribution().getTypeId() == insertionProbabilityDistribution.getTypeId());
     if (mStreamCount >= MIN_STREAMS_TO_SWIZZLE) {
-        mPendingType = b.getBitBlockType();
+        mPendingType = driver.getBitBlockType();
         mPendingSetCount = (mStreamCount + mFieldsPerBlock - 1)/mFieldsPerBlock;
     } else {
-        mPendingType = b.getIntNTy(mFW);
+        mPendingType = driver.getIntNTy(mFW);
         mPendingSetCount = mStreamCount;
     }
     for (unsigned i = 0; i < mPendingSetCount; i++) {
         addInternalScalar(mPendingType, "pendingData" + std::to_string(i));
     }
-    addInternalScalar(b.getSizeTy(), "pendingOffset");
-    setStride(16 * b.getBitBlockWidth());
+    addInternalScalar(driver.getSizeTy(), "pendingOffset");
+    setStride(16 * driver.getBitBlockWidth());
 }
 
 void FilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfStrides) {

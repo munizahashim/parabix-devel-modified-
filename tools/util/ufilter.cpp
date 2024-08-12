@@ -63,12 +63,10 @@ static cl::opt<bool> UseDefaultFilter("default-filter", cl::desc("Use the defaul
 
 typedef uint64_t (*UFiltertFunctionType)(uint32_t fd);
 
-UFiltertFunctionType pipelineGen(CPUDriver & pxDriver, re::Name * CC_name) {
+UFiltertFunctionType pipelineGen(CPUDriver & driver, re::Name * CC_name) {
 
-    auto & b = pxDriver.getBuilder();
-
-    auto P = pxDriver.makePipeline(
-                {Binding{b.getInt32Ty(), "fileDescriptor"}});
+    auto P = driver.makePipeline(
+                {Binding{driver.getInt32Ty(), "fileDescriptor"}});
 
     Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
 

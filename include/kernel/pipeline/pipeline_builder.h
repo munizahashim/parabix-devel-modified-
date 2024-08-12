@@ -1,6 +1,7 @@
 #pragma once
 
 #include <kernel/pipeline/pipeline_kernel.h>
+#include <llvm/IR/Constants.h>
 #include <boost/integer.hpp>
 
 class BaseDriver;
@@ -27,12 +28,12 @@ public:
 
     template<typename KernelType, typename... Args>
     Kernel * CreateKernelCall(Args &&... args) {
-        return initializeKernel(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), 0U);
+        return initializeKernel(new KernelType(mDriver, std::forward<Args>(args) ...), 0U);
     }
 
     template<typename KernelType, typename... Args>
     Kernel * CreateKernelFamilyCall(Args &&... args) {
-        return initializeKernel(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::Family);
+        return initializeKernel(new KernelType(mDriver, std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::Family);
     }
 
     Kernel * AddKernelCall(Kernel * kernel, const unsigned flags) {
@@ -41,12 +42,12 @@ public:
 
     template<typename KernelType, typename... Args>
     PipelineKernel * CreateNestedPipelineCall(Args &&... args) {
-        return initializeNestedPipeline(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), 0U);
+        return initializeNestedPipeline(new KernelType(mDriver, std::forward<Args>(args) ...), 0U);
     }
 
     template<typename KernelType, typename... Args>
     PipelineKernel * CreateNestedPipelineFamilyCall(Args &&... args) {
-        return initializeNestedPipeline(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::Family);
+        return initializeNestedPipeline(new KernelType(mDriver, std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::Family);
     }
 
     std::shared_ptr<OptimizationBranchBuilder>
@@ -164,6 +165,160 @@ public:
     void captureBitstream(llvm::StringRef streamName, StreamSet * bitstream, char zeroCh = '.', char oneCh = '1');
 
     void captureBixNum(llvm::StringRef streamName, StreamSet * bixnum, char hexBase = 'A');
+
+    /// Get a constant value representing either true or false.
+    llvm::ConstantInt * LLVM_READNONE getInt1(bool V) {
+      return llvm::ConstantInt::get(getInt1Ty(), V);
+    }
+
+    /// Get the constant value for i1 true.
+    llvm::ConstantInt * LLVM_READNONE getTrue() {
+      return llvm::ConstantInt::getTrue(mDriver.getContext());
+    }
+
+    /// Get the constant value for i1 false.
+    llvm::ConstantInt * LLVM_READNONE getFalse() {
+      return llvm::ConstantInt::getFalse(mDriver.getContext());
+    }
+
+    /// Get a constant 8-bit value.
+    llvm::ConstantInt * LLVM_READNONE getInt8(uint8_t C) {
+      return llvm::ConstantInt::get(getInt8Ty(), C);
+    }
+
+    /// Get a constant 16-bit value.
+    llvm::ConstantInt * LLVM_READNONE getInt16(uint16_t C) {
+      return llvm::ConstantInt::get(getInt16Ty(), C);
+    }
+
+    /// Get a constant 32-bit value.
+    llvm::ConstantInt * LLVM_READNONE getInt32(uint32_t C) {
+      return llvm::ConstantInt::get(getInt32Ty(), C);
+    }
+
+    /// Get a constant 64-bit value.
+    llvm::ConstantInt * getInt64(uint64_t C) {
+      return llvm::ConstantInt::get(getInt64Ty(), C);
+    }
+
+    /// Get a constant 64-bit value.
+    llvm::ConstantInt * getSize(size_t C) {
+      return llvm::ConstantInt::get(getSizeTy(), C);
+    }
+
+    /// Get a constant N-bit value, zero extended or truncated from
+    /// a 64-bit value.
+    llvm::ConstantInt *getIntN(unsigned N, uint64_t C) {
+      return llvm::ConstantInt::get(getIntNTy(N), C);
+    }
+
+    /// Get a constant integer value.
+    llvm::ConstantInt *getInt(const llvm::APInt &AI) {
+      return llvm::ConstantInt::get(mDriver.getContext(), AI);
+    }
+
+    llvm::Constant * getDouble(const double C) {
+        return llvm::ConstantFP::get(getDoubleTy(), C);
+    }
+
+    llvm::Constant * getFloat(const float C) {
+        return llvm::ConstantFP::get(getFloatTy(), C);
+    }
+
+    /// Fetch the type representing a single bit
+    llvm::IntegerType * getInt1Ty() {
+      return llvm::Type::getInt1Ty(mDriver.getContext());
+    }
+
+    /// Fetch the type representing an 8-bit integer.
+    llvm::IntegerType * getInt8Ty() {
+      return llvm::Type::getInt8Ty(mDriver.getContext());
+    }
+
+    /// Fetch the type representing a pointer to an 8-bit integer value.
+    llvm::PointerType * getInt8PtrTy(unsigned AddrSpace = 0) {
+      return llvm::PointerType::getInt8PtrTy(mDriver.getContext(), AddrSpace);
+    }
+
+    /// Fetch the type representing a 16-bit integer.
+    llvm::IntegerType * getInt16Ty() {
+      return llvm::Type::getInt16Ty(mDriver.getContext());
+    }
+
+    /// Fetch the type representing a pointer to an 8-bit integer value.
+    llvm::PointerType * getInt16PtrTy(unsigned AddrSpace = 0) {
+      return llvm::PointerType::getInt16PtrTy(mDriver.getContext(), AddrSpace);
+    }
+
+    /// Fetch the type representing a 32-bit integer.
+    llvm::IntegerType * getInt32Ty() {
+      return llvm::Type::getInt32Ty(mDriver.getContext());
+    }
+
+    /// Fetch the type representing a pointer to an 8-bit integer value.
+    llvm::PointerType * getInt32PtrTy(unsigned AddrSpace = 0) {
+      return llvm::PointerType::getInt32PtrTy(mDriver.getContext(), AddrSpace);
+    }
+
+    /// Fetch the type representing a 64-bit integer.
+    llvm::IntegerType * getInt64Ty() {
+      return llvm::Type::getInt64Ty(mDriver.getContext());
+    }
+
+    /// Fetch the type representing a 64-bit integer.
+    llvm::IntegerType * getSizeTy() {
+      return llvm::IntegerType::get(mDriver.getContext(), sizeof(size_t) * 8);
+    }
+
+    /// Fetch the type representing a pointer to an 8-bit integer value.
+    llvm::PointerType * getInt64PtrTy(unsigned AddrSpace = 0) {
+      return llvm::PointerType::getInt64PtrTy(mDriver.getContext(), AddrSpace);
+    }
+
+    /// Fetch the type representing a 128-bit integer.
+    llvm::IntegerType * LLVM_READNONE getInt128Ty() {
+        return llvm::Type::getInt128Ty(mDriver.getContext());
+    }
+
+    /// Fetch the type representing an N-bit integer.
+    llvm::IntegerType * LLVM_READNONE getIntNTy(unsigned N) {
+      return llvm::Type::getIntNTy(mDriver.getContext(), N);
+    }
+
+    /// Fetch the type representing a 16-bit floating point value.
+    llvm::Type * LLVM_READNONE getHalfTy() {
+      return llvm::Type::getHalfTy(mDriver.getContext());
+    }
+
+    /// Fetch the type representing a 16-bit brain floating point value.
+    llvm::Type * LLVM_READNONE getBFloatTy() {
+      return llvm::Type::getBFloatTy(mDriver.getContext());
+    }
+
+    /// Fetch the type representing a 32-bit floating point value.
+    llvm::Type * LLVM_READNONE getFloatTy() {
+      return llvm::Type::getFloatTy(mDriver.getContext());
+    }
+
+    /// Fetch the type representing a 64-bit floating point value.
+    llvm::Type * LLVM_READNONE getDoubleTy() {
+      return llvm::Type::getDoubleTy(mDriver.getContext());
+    }
+
+    /// Fetch the type representing void.
+    llvm::Type * LLVM_READNONE getVoidTy() {
+      return llvm::Type::getVoidTy(mDriver.getContext());
+    }
+
+    /// Fetch the type of an integer with size at least as big as that of a
+    /// pointer in the given address space.
+    llvm::IntegerType * LLVM_READNONE getIntPtrTy(unsigned AddrSpace = 0) {
+        return mDriver.getIntPtrTy(AddrSpace);
+    }
+
+    llvm::IntegerType * LLVM_READNONE getIntAddrTy() const {
+        return mDriver.getIntAddrTy();
+    }
 
 protected:
 

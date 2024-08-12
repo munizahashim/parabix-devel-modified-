@@ -62,13 +62,13 @@ void LineNumberGenerator::didProcessStride(KernelBuilder & b, Value * const /*st
     b.setScalarField("finalStrideLineNum", nextFinalStrideLineNum);
 }
 
-LineNumberGenerator::LineNumberGenerator(KernelBuilder & b, StreamSet * scan, StreamSet * linebreaks, StreamSet * output)
-: SingleStreamScanKernelTemplate(b, "LineNumberGenerator", scan)
+LineNumberGenerator::LineNumberGenerator(VirtualDriver &driver, StreamSet * scan, StreamSet * linebreaks, StreamSet * output)
+: SingleStreamScanKernelTemplate(driver, "LineNumberGenerator", scan)
 {
     assert (scan->getNumElements() == 1 && scan->getFieldWidth() == 1);
     assert (linebreaks->getNumElements() == 1 && linebreaks->getFieldWidth() == 1);
     assert (output->getNumElements() == 1 && output->getFieldWidth() == 64);
-    addInternalScalar(b.getInt64Ty(), "finalStrideLineNum");
+    addInternalScalar(driver.getInt64Ty(), "finalStrideLineNum");
     mInputStreamSets.push_back({"lines", linebreaks});
     mOutputStreamSets.push_back({"output", output, BoundedRate(0, 1)});
 }

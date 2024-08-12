@@ -6,7 +6,7 @@
 #include <kernel/core/kernel.h>
 #include <kernel/core/relationship.h>
 #include <util/slab_allocator.h>
-#include <boost/integer.hpp>
+#include <llvm/IR/Constants.h>
 #include <kernel/illustrator/illustrator.h>
 #include <string>
 #include <vector>
@@ -14,12 +14,15 @@
 
 namespace llvm { class Function; }
 namespace kernel { class KernelBuilder; }
+namespace kernel { class PipelineBuilder; }
 namespace kernel { class ProgramBuilder; }
+
 class CBuilder;
 class ParabixObjectCache;
 
-class BaseDriver : public codegen::VirtualDriver {
+class BaseDriver : public VirtualDriver {
     friend class CBuilder;
+    friend class kernel::PipelineBuilder;
     friend class kernel::ProgramBuilder;
     friend class kernel::Kernel;
 public:
@@ -30,14 +33,9 @@ public:
     using KernelSet = std::vector<std::unique_ptr<Kernel>>;
     using KernelMap = llvm::StringMap<std::unique_ptr<Kernel>>;
 
-
     std::unique_ptr<kernel::ProgramBuilder> makePipelineWithIO(Bindings stream_inputs = {}, Bindings stream_outputs = {}, Bindings scalar_inputs = {}, Bindings scalar_outputs = {});
 
     std::unique_ptr<kernel::ProgramBuilder> makePipeline(Bindings scalar_inputs = {}, Bindings scalar_outputs = {});
-
-    kernel::KernelBuilder & getBuilder() {
-        return *mBuilder;
-    }
 
     kernel::StreamSet * CreateStreamSet(const unsigned NumElements = 1, const unsigned FieldWidth = 1) noexcept;
 
@@ -63,7 +61,7 @@ public:
 
     virtual ~BaseDriver();
 
-    llvm::LLVMContext & getContext() const {
+    llvm::LLVMContext & getContext() const final {
         return *mContext.get();
     }
 
@@ -79,6 +77,14 @@ public:
         mPreservesKernels = value;
     }
 
+    unsigned getBitBlockWidth() const final;
+
+    llvm::VectorType * getBitBlockType() const final;
+
+    llvm::VectorType * getStreamTy(const unsigned FieldWidth = 1) final;
+
+    llvm::ArrayType * getStreamSetTy(const unsigned NumElements = 1, const unsigned FieldWidth = 1) final;
+
 protected:
 
     BaseDriver(std::string && moduleName);
@@ -87,6 +93,10 @@ protected:
     void LinkFunction(not_null<Kernel *> kernel, llvm::StringRef name, ExternalFunctionType & functionPtr) const;
 
     virtual llvm::Function * addLinkFunction(llvm::Module * mod, llvm::StringRef name, llvm::FunctionType * type, void * functionPtr) const = 0;
+
+    kernel::KernelBuilder & getBuilder() {
+        return *mBuilder;
+    }
 
 protected:
 

@@ -53,11 +53,11 @@ static cl::opt<std::string, true> inputFileOption(cl::Positional, cl::location(i
 
 typedef void(*XMLProcessFunctionType)(uint32_t fd);
 
-XMLProcessFunctionType xmlPipelineGen(CPUDriver & pxDriver, std::shared_ptr<PabloParser> parser, std::shared_ptr<SourceFile> xmlPabloSrc) {
+XMLProcessFunctionType xmlPipelineGen(CPUDriver & driver, std::shared_ptr<PabloParser> parser, std::shared_ptr<SourceFile> xmlPabloSrc) {
     const size_t ERROR_STREAM_COUNT = 9;
-    auto & b = pxDriver.getBuilder();
-    Type * const i32Ty = b.getInt32Ty();
-    auto P = pxDriver.makePipeline({Binding{i32Ty, "fd"}});
+
+    Type * const i32Ty = driver.getInt32Ty();
+    auto P = driver.makePipeline({Binding{i32Ty, "fd"}});
     Scalar * const fileDescriptor = P->getInputScalar("fd");
 
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
@@ -179,7 +179,7 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & pxDriver, std::shared_ptr<Pabl
         StreamSet * const EndIndices = scan::ToIndices(P, su::Select(P, PostProcessTagMatchingStreams, 1));
         StreamSet * const BasisStreams = su::Select(P, PostProcessTagMatchingStreams, su::Range(2, 5));
         StreamSet * const Codes = su::Multiplex(P, BasisStreams);
-        scan::Reader(P, pxDriver,
+        scan::Reader(P, driver,
             SCAN_CALLBACK(postproc_tagMatcher),
             ByteStream,
             { StartIndices, EndIndices },
@@ -235,7 +235,7 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & pxDriver, std::shared_ptr<Pabl
         P->CreateKernelCall<ScanIndexGenerator>(su::Merge(P, TagCallouts, {3, 9}), EndIndices);
 
         StreamSet * const Codes = su::Multiplex(P, BasisStreams);
-        scan::Reader(P, pxDriver, 
+        scan::Reader(P, driver,
             SCAN_CALLBACK(postproc_duplicateAttrDetector), 
             ByteStream, 
             { StartIndices, EndIndices },
@@ -263,7 +263,7 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & pxDriver, std::shared_ptr<Pabl
         StreamSet * const LineNumbers = scan::LineNumbers(P, Errs, LineBreakStream);
         StreamSet * const Spans = scan::FilterLineSpans(P, LineNumbers, LineSpans);
         StreamSet * const Codes = su::MultiplexWithMask(P, su::Select(P, Errors, su::Range(0, 8)), /*mask:*/ Errs);
-        scan::Reader(P, pxDriver,  
+        scan::Reader(P, driver,
             SCAN_CALLBACK(postproc_errorStreamsCallback),
             ByteStream, 
             { Indices, Spans },
@@ -277,7 +277,7 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & pxDriver, std::shared_ptr<Pabl
     StreamSet * const ScanPositions = scan::ToIndices(P, ScanStream); \
     StreamSet * const LineNumbers = scan::LineNumbers(P, ScanStream, LineBreakStream); \
     StreamSet * const Spans = scan::FilterLineSpans(P, LineNumbers, LineSpans); \
-    scan::Reader(P, pxDriver, SCAN_CALLBACK(CALLBACK), ByteStream, { ScanPositions, Spans }, { LineNumbers }); \
+    scan::Reader(P, driver, SCAN_CALLBACK(CALLBACK), ByteStream, { ScanPositions, Spans }, { LineNumbers }); \
 }
 
     POSTPROCESS_SCAN_KERNEL(su::Select(P, CheckStreams, 0), postproc_validateNameStart);
@@ -295,7 +295,7 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & pxDriver, std::shared_ptr<Pabl
     {
         StreamSet * const Marker = su::Select(P, CCPCallouts, 8);
         StreamSet * const Indices = scan::ToIndices(P, Marker);
-        scan::Reader(P, pxDriver,
+        scan::Reader(P, driver,
             SCAN_CALLBACK(postproc_validateXmlDecl),
             ByteStream,
             { Indices },

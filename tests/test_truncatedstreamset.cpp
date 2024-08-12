@@ -36,13 +36,13 @@ static cl::opt<bool> optVerbose("v", cl::desc("Verbose output"), cl::init(false)
 
 class CopyKernel final : public SegmentOrientedKernel {
 public:
-    CopyKernel(KernelBuilder & b, StreamSet * input, StreamSet * output, Scalar * upTo);
+    CopyKernel(VirtualDriver & driver, StreamSet * input, StreamSet * output, Scalar * upTo);
 protected:
     void generateDoSegmentMethod(KernelBuilder & b) override;
 };
 
-CopyKernel::CopyKernel(KernelBuilder & b, StreamSet * input, StreamSet * output, Scalar * upTo)
-: SegmentOrientedKernel(b, [&]() {
+CopyKernel::CopyKernel(VirtualDriver &driver, StreamSet * input, StreamSet * output, Scalar * upTo)
+: SegmentOrientedKernel(driver, [&]() {
     std::string backing;
     raw_string_ostream str(backing);
     str << "copykernel"
@@ -133,13 +133,13 @@ void CopyKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
 class PassThroughKernel final : public SegmentOrientedKernel {
 public:
-    PassThroughKernel(KernelBuilder & b, TruncatedStreamSet * output, Scalar * upTo);
+    PassThroughKernel(VirtualDriver & driver, TruncatedStreamSet * output, Scalar * upTo);
 protected:
     void generateDoSegmentMethod(KernelBuilder & b) override;
 };
 
-PassThroughKernel::PassThroughKernel(KernelBuilder & b, TruncatedStreamSet * output, Scalar * upTo)
-: SegmentOrientedKernel(b, "passThroughKernel",
+PassThroughKernel::PassThroughKernel(VirtualDriver &driver, TruncatedStreamSet * output, Scalar * upTo)
+: SegmentOrientedKernel(driver, "passThroughKernel",
 // input streams
 {},
 // output stream
@@ -174,19 +174,18 @@ class StreamEq : public MultiBlockKernel {
 public:
     enum class Mode { EQ, NE };
 
-    StreamEq(KernelBuilder & b, StreamSet * x, StreamSet * y, Scalar * outPtr);
+    StreamEq(VirtualDriver & driver, StreamSet * x, StreamSet * y, Scalar * outPtr);
     void generateInitializeMethod(KernelBuilder & b) override;
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
     void generateFinalizeMethod(KernelBuilder & b) override;
 
 };
 
-StreamEq::StreamEq(
-    KernelBuilder & b,
+StreamEq::StreamEq(VirtualDriver &driver,
     StreamSet * lhs,
     StreamSet * rhs,
     Scalar * outPtr)
-    : MultiBlockKernel(b, [&]() -> std::string {
+    : MultiBlockKernel(driver, [&]() -> std::string {
        std::string backing;
        raw_string_ostream str(backing);
        str << "StreamEq::["
@@ -201,7 +200,7 @@ StreamEq::StreamEq(
     {},
     {{"result_ptr", outPtr}},
     {},
-    {InternalScalar(b.getInt1Ty(), "accum")})
+    {InternalScalar(driver.getInt1Ty(), "accum")})
 {
     assert(lhs->getFieldWidth() == rhs->getFieldWidth());
     assert(lhs->getNumElements() == rhs->getNumElements());
@@ -298,7 +297,7 @@ void StreamEq::generateFinalizeMethod(KernelBuilder & b) {
 
 typedef void (*TestFunctionType)(uint64_t copyCount, uint64_t passCount, uint32_t * output);
 
-bool runRepeatingStreamSetTest(CPUDriver & pxDriver,
+bool runRepeatingStreamSetTest(CPUDriver & driver,
                                uint64_t numElements,
                                uint64_t fieldWidth,
                                uint64_t patternLength,
@@ -306,12 +305,10 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver,
                                uint64_t passCountVal,
                                std::default_random_engine & rng) {
 
-    auto & b = pxDriver.getBuilder();
+    IntegerType * const int64Ty = driver.getInt64Ty();
+    PointerType * const int32PtrTy = driver.getInt32Ty()->getPointerTo();
 
-    IntegerType * const int64Ty = b.getInt64Ty();
-    PointerType * const int32PtrTy = b.getInt32Ty()->getPointerTo();
-
-    auto P = pxDriver.makePipeline(
+    auto P = driver.makePipeline(
                 {Binding{int64Ty, "copyCount"},
                  Binding{int64Ty, "passCount"},
                  Binding{int32PtrTy, "output"}},

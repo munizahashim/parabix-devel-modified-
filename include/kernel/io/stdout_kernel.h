@@ -12,7 +12,7 @@ namespace kernel {
 
 class StdOutKernel final : public SegmentOrientedKernel {
 public:
-    StdOutKernel(KernelBuilder & b, StreamSet * codeUnitBuffer);
+    StdOutKernel(VirtualDriver & driver, StreamSet * codeUnitBuffer);
 private:
     void linkExternalMethods(KernelBuilder & b) override;
     void generateDoSegmentMethod(KernelBuilder & b) override;
@@ -23,7 +23,7 @@ private:
 
 class FileSink final : public SegmentOrientedKernel {
 public:
-    FileSink(KernelBuilder & b, Scalar * outputFileName, StreamSet * codeUnitBuffer);
+    FileSink(VirtualDriver & driver, Scalar * outputFileName, StreamSet * codeUnitBuffer);
 protected:
     void linkExternalMethods(KernelBuilder & b) override;
     void generateInitializeMethod(KernelBuilder & b) override;

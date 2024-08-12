@@ -100,17 +100,17 @@ extern "C" {
 
 class WordCountKernel final: public pablo::PabloKernel {
 public:
-    WordCountKernel(KernelBuilder & b, StreamSet * const countable);
+    WordCountKernel(VirtualDriver & driver, StreamSet * const countable);
 protected:
     void generatePabloMethod() override;
 };
 
-WordCountKernel::WordCountKernel (KernelBuilder & b, StreamSet * const countable)
-: PabloKernel(b, "wc_" + wc_modes + UTF::kernelAnnotation(),
+WordCountKernel::WordCountKernel (VirtualDriver &driver, StreamSet * const countable)
+: PabloKernel(driver, "wc_" + wc_modes + UTF::kernelAnnotation(),
     {Bind("countable", countable, Principal())},
     {},
     {},
-    {Bind(b.getSizeTy(), "lineCount"), Bind(b.getSizeTy(), "wordCount"), Bind(b.getSizeTy(), "charCount")}) {
+    {Bind(driver.getSizeTy(), "lineCount"), Bind(driver.getSizeTy(), "wordCount"), Bind(driver.getSizeTy(), "charCount")}) {
 
 }
 
@@ -234,9 +234,7 @@ typedef void (*WordCountFunctionType)(uint32_t fd, uint32_t fileIdx);
 
 WordCountFunctionType wcPipelineGen(CPUDriver & pxDriver) {
 
-    auto & b = pxDriver.getBuilder();
-
-    Type * const int32Ty = b.getInt32Ty();
+    Type * const int32Ty = pxDriver.getInt32Ty();
 
     auto P = pxDriver.makePipeline({Binding{int32Ty, "fd"}, Binding{int32Ty, "fileIdx"}});
 

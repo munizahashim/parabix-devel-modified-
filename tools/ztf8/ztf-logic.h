@@ -36,15 +36,15 @@ public:
 
 class WordMarkKernel : public pablo::PabloKernel {
 public:
-    WordMarkKernel(KernelBuilder & kb, StreamSet * BasisBits, StreamSet * WordMarks);
+    WordMarkKernel(VirtualDriver & driver, StreamSet * BasisBits, StreamSet * WordMarks);
 protected:
     void generatePabloMethod() override;
 };
 
 class ByteRun final: public pablo::PabloKernel {
 public:
-    ByteRun(KernelBuilder & b, StreamSet * const basis, StreamSet * excluded, StreamSet * runMask)
-    : pablo::PabloKernel(b, "byteRun", {Binding{"basis", basis}, Binding{"excluded", excluded}}, {Binding{"runMask", runMask}}) {}
+    ByteRun(VirtualDriver & driver, StreamSet * const basis, StreamSet * excluded, StreamSet * runMask)
+    : pablo::PabloKernel(driver, "byteRun", {Binding{"basis", basis}, Binding{"excluded", excluded}}, {Binding{"runMask", runMask}}) {}
 protected:
     void generatePabloMethod() override;
 };
@@ -58,7 +58,7 @@ protected:
 
 class ZTF_ExpansionDecoder final: public pablo::PabloKernel {
 public:
-    ZTF_ExpansionDecoder(KernelBuilder & b,
+    ZTF_ExpansionDecoder(VirtualDriver & driver,
                          EncodingInfo & encodingScheme,
                          StreamSet * const basis,
                          StreamSet * insertBixNum);
@@ -69,7 +69,7 @@ protected:
 
 class ZTF_DecodeLengths : public pablo::PabloKernel {
 public:
-    ZTF_DecodeLengths(KernelBuilder & b,
+    ZTF_DecodeLengths(VirtualDriver & driver,
                       EncodingInfo & encodingScheme,
                       StreamSet * basisBits,
                       StreamSet * groupStreams);
@@ -83,9 +83,9 @@ protected:
 // with 1 bits.   Each 0 bit represents a start of a new symbol.
 class ZTF_Symbols : public pablo::PabloKernel {
 public:
-    ZTF_Symbols(KernelBuilder & kb,
+    ZTF_Symbols(VirtualDriver & driver,
                 StreamSet * basisBits, StreamSet * wordChar, StreamSet * symbolRuns)
-    : pablo::PabloKernel(kb, "ZTF_Symbols",
+    : pablo::PabloKernel(driver, "ZTF_Symbols",
                          {Binding{"basisBits", basisBits, FixedRate(1), LookAhead(1)},
                              Binding{"wordChar", wordChar, FixedRate(1), LookAhead(3)}},
                          {Binding{"symbolRuns", symbolRuns}}) { }
@@ -96,9 +96,9 @@ protected:
 // Given parsed symbol runs, produce a stream marking end positions only.
 class ZTF_SymbolEnds : public pablo::PabloKernel {
 public:
-    ZTF_SymbolEnds(KernelBuilder & kb,
+    ZTF_SymbolEnds(VirtualDriver & driver,
                    StreamSet * symbolRuns, StreamSet * overflow, StreamSet * symbolEnds)
-    : pablo::PabloKernel(kb, "ZTF_SymbolEnds",
+    : pablo::PabloKernel(driver, "ZTF_SymbolEnds",
                          {Binding{"symbolRuns", symbolRuns, FixedRate(1), LookAhead(1)},
                           Binding{"overflow", overflow}},
                          {Binding{"symbolEnds", symbolEnds}}) { }
@@ -108,7 +108,7 @@ protected:
 
 class ZTF_SymbolEncoder final: public pablo::PabloKernel {
 public:
-    ZTF_SymbolEncoder(KernelBuilder & b,
+    ZTF_SymbolEncoder(VirtualDriver & driver,
                       EncodingInfo & encodingScheme,
                       StreamSet * const basis,
                       StreamSet * bixHash,
@@ -122,7 +122,7 @@ protected:
 
 class LengthGroupSelector final: public pablo::PabloKernel {
 public:
-    LengthGroupSelector(KernelBuilder & b,
+    LengthGroupSelector(VirtualDriver & driver,
                  EncodingInfo & encodingScheme,
                     unsigned groupNo,
                  StreamSet * symbolRun, StreamSet * const lengthBixNum,
@@ -136,7 +136,7 @@ protected:
 
 class LengthSorter final: public pablo::PabloKernel {
 public:
-    LengthSorter(KernelBuilder & b,
+    LengthSorter(VirtualDriver & driver,
                  EncodingInfo & encodingScheme,
                  StreamSet * symbolRun, StreamSet * const lengthBixNum,
                  StreamSet * overflow,

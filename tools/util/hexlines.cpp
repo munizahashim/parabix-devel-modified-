@@ -128,8 +128,8 @@ static cl::opt<bool> LowerHex("l", cl::desc("Use lower case hex output (default 
 //
 class Hexify : public PabloKernel {
 public:
-    Hexify(KernelBuilder & kb, StreamSet * insertMask, StreamSet * spreadBasis, StreamSet * hexBasis)
-        : PabloKernel(kb, LowerHex ? "Hexify_lc" : "Hexify",
+    Hexify(VirtualDriver & driver, StreamSet * insertMask, StreamSet * spreadBasis, StreamSet * hexBasis)
+        : PabloKernel(driver, LowerHex ? "Hexify_lc" : "Hexify",
                       {Binding{"insertMask", insertMask}, Binding{"spreadBasis", spreadBasis}},
                       {Binding{"hexBasis", hexBasis}}) {}
 protected:
@@ -182,11 +182,10 @@ void Hexify::generatePabloMethod() {
 
 typedef void (*HexLinesFunctionType)(uint32_t fd);
 
-HexLinesFunctionType generatePipeline(CPUDriver & pxDriver) {
+HexLinesFunctionType generatePipeline(CPUDriver & driver) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
-    auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}}, {});
+    auto P = driver.makePipeline({Binding{driver.getInt32Ty(), "inputFileDecriptor"}}, {});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
     StreamSet * ByteStream = P->CreateStreamSet(1, 8);

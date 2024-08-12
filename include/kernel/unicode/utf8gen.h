@@ -62,7 +62,8 @@ void U21_to_UTF8(ProgBuilderRef P, kernel::StreamSet * U21, kernel::StreamSet * 
 
 class UTF8fieldDepositMask final : public kernel::BlockOrientedKernel {
 public:
-    UTF8fieldDepositMask(kernel::KernelBuilder & b, kernel::StreamSet * u32basis, kernel::StreamSet * u8fieldMask, kernel::StreamSet * u8unitCounts, unsigned depositFieldWidth = sizeof(size_t) * 8);
+    UTF8fieldDepositMask(VirtualDriver & driver, kernel::StreamSet * u32basis, kernel::StreamSet * u8fieldMask, kernel::StreamSet * u8unitCounts,
+                         unsigned depositFieldWidth = sizeof(size_t) * 8);
 private:
     void generateDoBlockMethod(kernel::KernelBuilder & b) override;
     void generateFinalBlockMethod(kernel::KernelBuilder & b, llvm::Value * const remainingBytes) override;
@@ -76,7 +77,8 @@ private:
 //
 class UTF8_DepositMasks : public pablo::PabloKernel {
 public:
-    UTF8_DepositMasks(kernel::KernelBuilder & b, kernel::StreamSet * u8final, kernel::StreamSet * u8initial, kernel::StreamSet * u8mask12_17, kernel::StreamSet * u8mask6_11);
+    UTF8_DepositMasks(VirtualDriver & driver, kernel::StreamSet * u8final, kernel::StreamSet * u8initial,
+                      kernel::StreamSet * u8mask12_17, kernel::StreamSet * u8mask6_11);
 protected:
     void generatePabloMethod() override;
 };
@@ -87,7 +89,7 @@ protected:
 //
 class UTF8assembly : public pablo::PabloKernel {
 public:
-    UTF8assembly(KernelBuilder & kb,
+    UTF8assembly(VirtualDriver & driver,
                  kernel::StreamSet * deposit18_20, kernel::StreamSet * deposit12_17, kernel::StreamSet * deposit6_11, kernel::StreamSet * deposit0_5,
                  kernel::StreamSet * u8initial, kernel::StreamSet * u8final, kernel::StreamSet * u8mask6_11, kernel::StreamSet * u8mask12_17,
                  kernel::StreamSet * u8basis);

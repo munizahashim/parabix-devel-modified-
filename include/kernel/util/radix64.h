@@ -19,14 +19,14 @@ namespace kernel {
 
 class expand3_4Kernel final : public MultiBlockKernel {
 public:
-    expand3_4Kernel(KernelBuilder & b, StreamSet * input, StreamSet * expandedOutput);
+    expand3_4Kernel(VirtualDriver & driver, StreamSet * input, StreamSet * expandedOutput);
 private:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };
 
 class radix64Kernel final : public BlockOrientedKernel {
 public:
-    radix64Kernel(KernelBuilder &, StreamSet * input, StreamSet * output);
+    radix64Kernel(VirtualDriver & driver, StreamSet * input, StreamSet * output);
 private:
     virtual void generateDoBlockMethod(KernelBuilder & b) override;
     virtual void generateFinalBlockMethod(KernelBuilder & b, llvm::Value * remainingBytes) override;
@@ -35,7 +35,7 @@ private:
 
 class base64Kernel final : public BlockOrientedKernel {
 public:
-    base64Kernel(KernelBuilder &, StreamSet * input, StreamSet * output);
+    base64Kernel(VirtualDriver & driver, StreamSet * input, StreamSet * output);
 private:
     virtual void generateDoBlockMethod(KernelBuilder & b) override;
     virtual void generateFinalBlockMethod(KernelBuilder & b, llvm::Value * remainingBytes) override;

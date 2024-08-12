@@ -18,8 +18,8 @@ using namespace pablo;
 
 class EveryNthKernel : public PabloKernel {
 public:
-    EveryNthKernel(KernelBuilder & b, StreamSet * const input, StreamSet * output, uint64_t n)
-    : PabloKernel(b,
+    EveryNthKernel(VirtualDriver & driver, StreamSet * const input, StreamSet * output, uint64_t n)
+    : PabloKernel(driver,
                   "everyNthKernel" + std::to_string(n),
                   {Binding{"input", input}},
                   {Binding{"output", output}}),

@@ -126,8 +126,8 @@ SelectOperation Intersect(std::vector<StreamSet *> sets) {
     return __selops::__selop_init(__selops::__op::__intersect, std::move(sets));
 }
 
-StreamSelect::StreamSelect(KernelBuilder & b, StreamSet * output, SelectOperation operation)
-: BlockOrientedKernel(b, "StreamSelect" + streamutils::genSignature(operation), {}, {{"output", output}}, {}, {}, {})
+StreamSelect::StreamSelect(VirtualDriver &driver, StreamSet * output, SelectOperation operation)
+: BlockOrientedKernel(driver, "StreamSelect" + streamutils::genSignature(operation), {}, {{"output", output}}, {}, {}, {})
 {
 //    assert (resultStreamCount(operation) == output->getNumElements());
     for (auto const & kv : operation.bindings) {
@@ -142,8 +142,8 @@ StreamSelect::StreamSelect(KernelBuilder & b, StreamSet * output, SelectOperatio
     }
 }
 
-StreamSelect::StreamSelect(KernelBuilder & b, StreamSet * output, SelectOperationList operations)
-: BlockOrientedKernel(b, "StreamSelect" + streamutils::genSignature(operations), {}, {{"output", output}}, {}, {}, {})
+StreamSelect::StreamSelect(VirtualDriver &driver, StreamSet * output, SelectOperationList operations)
+: BlockOrientedKernel(driver, "StreamSelect" + streamutils::genSignature(operations), {}, {{"output", output}}, {}, {}, {})
 {
 //    assert (resultStreamCount(operations) == output->getNumElements());
     std::unordered_map<StreamSet *, std::string> inputBindings;
@@ -160,9 +160,8 @@ void StreamSelect::generateDoBlockMethod(KernelBuilder & b) {
     }
 }
 
-
-IStreamSelect::IStreamSelect(KernelBuilder & b, StreamSet * output, SelectOperation operation)
-: MultiBlockKernel(b, "IStreamSelect" + streamutils::genSignature(operation),
+IStreamSelect::IStreamSelect(VirtualDriver &driver, StreamSet * output, SelectOperation operation)
+: MultiBlockKernel(driver, "IStreamSelect" + streamutils::genSignature(operation),
     {},
     {{"output", output}},
     {}, {}, {})
@@ -211,7 +210,6 @@ void IStreamSelect::generateMultiBlockLogic(KernelBuilder & b, Value * const num
 
     b.SetInsertPoint(block_Exit);
 }
-
 
 namespace streamutils {
 

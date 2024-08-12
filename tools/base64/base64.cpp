@@ -32,10 +32,9 @@ using namespace kernel;
 
 typedef void (*base64FunctionType)(const uint32_t fd);
 
-base64FunctionType base64PipelineGen(CPUDriver & pxDriver) {
-    auto & b = pxDriver.getBuilder();
-    Type * const int32Ty = b.getInt32Ty();
-    auto P = pxDriver.makePipeline({Binding{int32Ty, "fd"}});
+base64FunctionType base64PipelineGen(CPUDriver & driver) {
+    Type * const int32Ty = driver.getInt32Ty();
+    auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
     Scalar * const fileDescriptor = P->getInputScalar("fd");
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);

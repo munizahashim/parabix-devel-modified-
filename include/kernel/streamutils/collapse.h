@@ -17,7 +17,7 @@ namespace kernel {
  */
 class CollapseStreamSet : public BlockOrientedKernel {
 public:
-    CollapseStreamSet(KernelBuilder & b, StreamSet * input, StreamSet * output);
+    CollapseStreamSet(VirtualDriver & driver, StreamSet * input, StreamSet * output);
 protected:
     void generateDoBlockMethod(KernelBuilder & b) override;
 };

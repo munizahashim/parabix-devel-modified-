@@ -26,7 +26,7 @@ class RunIndex : public pablo::PabloKernel {
 public:
     enum class Kind {RunOf0, RunOf1};
     enum class Numbering {RunOnly, RunPlus1};
-    RunIndex(KernelBuilder & b,
+    RunIndex(VirtualDriver & driver,
                StreamSet * const runMarks, StreamSet * runIndex, StreamSet * overflow = nullptr, Kind k = Kind::RunOf1, Numbering n = Numbering::RunOnly);
     void generatePabloMethod() override;
 private:

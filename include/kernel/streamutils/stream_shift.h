@@ -13,7 +13,7 @@ namespace kernel {
 
 class ShiftForward final : public pablo::PabloKernel {
 public:
-    ShiftForward(KernelBuilder & b, StreamSet * inputs, StreamSet * outputs, unsigned shiftAmount = 1);
+    ShiftForward(VirtualDriver & driver, StreamSet * inputs, StreamSet * outputs, unsigned shiftAmount = 1);
 protected:
     void generatePabloMethod() override;
     unsigned mShiftAmount;
@@ -21,7 +21,7 @@ protected:
 
 class ShiftBack final : public pablo::PabloKernel {
 public:
-    ShiftBack(KernelBuilder & b, StreamSet * inputs, StreamSet * outputs, unsigned shiftAmount = 1);
+    ShiftBack(VirtualDriver & driver, StreamSet * inputs, StreamSet * outputs, unsigned shiftAmount = 1);
 protected:
     void generatePabloMethod() override;
     unsigned mShiftAmount;
@@ -29,7 +29,7 @@ protected:
 
 class IndexedAdvance final : public pablo::PabloKernel {
 public:
-    IndexedAdvance(KernelBuilder & b, StreamSet * inputs, StreamSet * index, StreamSet * outputs, unsigned shiftAmount = 1);
+    IndexedAdvance(VirtualDriver & driver, StreamSet * inputs, StreamSet * index, StreamSet * outputs, unsigned shiftAmount = 1);
 protected:
     void generatePabloMethod() override;
     unsigned mShiftAmount;

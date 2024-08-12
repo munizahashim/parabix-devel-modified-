@@ -23,12 +23,12 @@ namespace grep {
 class CopyBreaksToMatches final : public MultiBlockKernel {
 public:
 
-    CopyBreaksToMatches(KernelBuilder & b,
+    CopyBreaksToMatches(VirtualDriver & driver,
                StreamSet * const BasisBits,
                StreamSet * const u8index,
                StreamSet * const breaks,
                StreamSet * const matches)
-    : MultiBlockKernel(b
+    : MultiBlockKernel(driver
                        , "gitignoreC"
                        // inputs
                        , {{"BasisBits", BasisBits}, {"u8index", u8index}, {"breaks", breaks}}
@@ -117,7 +117,7 @@ public:
                  options->setCombiningStream(exclude ? GrepCombiningType::Exclude : GrepCombiningType::Include, resultSoFar);
              }
              options->addExternal("UTF8_index", u8index);
-             ICGrepKernel * const matcher = new ICGrepKernel(driver.getBuilder(), std::move(options));
+             ICGrepKernel * const matcher = new ICGrepKernel(driver, std::move(options));
              driver.addKernel(matcher);
              kernels.emplace_back(matcher, PipelineKernel::KernelBindingFlag::Family);
              resultSoFar = MatchResults;
@@ -137,7 +137,7 @@ private:
                              StreamSet * const breaks,
                              StreamSet * const matches,
                              Kernels && kernels)
-        : PipelineKernel(driver.getBuilder()
+        : PipelineKernel(driver
                          // signature
                          , [&]() -> std::string {
                             std::string tmp;
@@ -184,7 +184,7 @@ private:
 
 };
 
-NestedInternalSearchEngine::NestedInternalSearchEngine(BaseDriver & driver)
+NestedInternalSearchEngine::NestedInternalSearchEngine(BaseDriver &driver)
 : mGrepRecordBreak(GrepRecordBreakKind::LF)
 , mCaseInsensitive(false)
 , mGrepDriver(driver)
@@ -209,7 +209,7 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
             mNested.push_back(mNested.back());
             return;
         } else {
-            kernel = new CopyBreaksToMatches(mGrepDriver.getBuilder(),
+            kernel = new CopyBreaksToMatches(mGrepDriver,
                                              mBasisBits, mU8index, mBreaks,
                                              mMatches);
         }
@@ -251,7 +251,6 @@ void NestedInternalSearchEngine::init() {
 }
 
 void NestedInternalSearchEngine::grepCodeGen() {
-    auto & b = mGrepDriver.getBuilder();
 
     // TODO: we should be able to avoid constructing the main pipeline if there is a way to
     // pass the information for the nested kernel address in through the "main" function.
@@ -261,9 +260,9 @@ void NestedInternalSearchEngine::grepCodeGen() {
     const auto preserve = mGrepDriver.getPreservesKernels();
     mGrepDriver.setPreserveKernels(true);
 
-    Scalar * const buffer = mGrepDriver.CreateScalar(b.getInt8PtrTy());
-    Scalar * const length = mGrepDriver.CreateScalar(b.getSizeTy());
-    Scalar * const accumulator = mGrepDriver.CreateScalar(b.getIntAddrTy());
+    Scalar * const buffer = mGrepDriver.CreateScalar(mGrepDriver.getInt8PtrTy());
+    Scalar * const length = mGrepDriver.CreateScalar(mGrepDriver.getSizeTy());
+    Scalar * const accumulator = mGrepDriver.CreateScalar(mGrepDriver.getIntAddrTy());
 
     auto E = mGrepDriver.makePipeline({Binding{"buffer", buffer},
         Binding{"length", length},

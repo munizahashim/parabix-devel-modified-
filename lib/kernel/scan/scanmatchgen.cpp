@@ -291,8 +291,8 @@ void ScanMatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
     b.SetInsertPoint(scanReturn);
 }
 
-ScanMatchKernel::ScanMatchKernel(KernelBuilder & b, StreamSet * const Matches, StreamSet * const LineBreakStream, StreamSet * const ByteStream, Scalar * const callbackObject, unsigned strideBlocks)
-    : MultiBlockKernel(b, "scanMatch" + std::to_string(strideBlocks),
+ScanMatchKernel::ScanMatchKernel(VirtualDriver &driver, StreamSet * const Matches, StreamSet * const LineBreakStream, StreamSet * const ByteStream, Scalar * const callbackObject, unsigned strideBlocks)
+    : MultiBlockKernel(driver, "scanMatch" + std::to_string(strideBlocks),
 // inputs
 {Binding{"matchResult", Matches}
 ,Binding{"lineBreak", LineBreakStream}
@@ -304,9 +304,9 @@ ScanMatchKernel::ScanMatchKernel(KernelBuilder & b, StreamSet * const Matches, S
 // output scalars
 {},
 // kernel state
-{InternalScalar{b.getSizeTy(), "LineNum"}}) {
+{InternalScalar{driver.getSizeTy(), "LineNum"}}) {
     addAttribute(SideEffecting());
-    setStride(std::min(b.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
+    setStride(std::min(driver.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
 }
 
 void ScanBatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
@@ -653,8 +653,8 @@ void ScanBatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
     b.SetInsertPoint(scanReturn);
 }
 
-ScanBatchKernel::ScanBatchKernel(KernelBuilder & b, StreamSet * const Matches, StreamSet * const LineBreakStream, StreamSet * const ByteStream, Scalar * const callbackObject, unsigned strideBlocks)
-    : MultiBlockKernel(b, "scanBatch" + std::to_string(strideBlocks),
+ScanBatchKernel::ScanBatchKernel(VirtualDriver &driver, StreamSet * const Matches, StreamSet * const LineBreakStream, StreamSet * const ByteStream, Scalar * const callbackObject, unsigned strideBlocks)
+    : MultiBlockKernel(driver, "scanBatch" + std::to_string(strideBlocks),
 // inputs
 {Binding{"matchResult", Matches}
 ,Binding{"lineBreak", LineBreakStream, FixedRate(), ZeroExtended()}
@@ -666,19 +666,19 @@ ScanBatchKernel::ScanBatchKernel(KernelBuilder & b, StreamSet * const Matches, S
 // output scalars
 {},
 // kernel state
-{InternalScalar{b.getSizeTy(), "LineNum"}, InternalScalar{b.getInt32Ty(), "batchFileNum"}, InternalScalar{b.getSizeTy(), "pendingFileLimit"}}) {
+{InternalScalar{driver.getSizeTy(), "LineNum"}, InternalScalar{driver.getInt32Ty(), "batchFileNum"}, InternalScalar{driver.getSizeTy(), "pendingFileLimit"}}) {
     addAttribute(SideEffecting());
-    setStride(std::min(b.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
+    setStride(std::min(driver.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
 }
 
 
 
 enum MatchCoordinatesEnum {LINE_STARTS = 0, LINE_ENDS = 1, LINE_NUMBERS = 2};
 
-MatchCoordinatesKernel::MatchCoordinatesKernel(KernelBuilder & b,
+MatchCoordinatesKernel::MatchCoordinatesKernel(VirtualDriver &driver,
                                                StreamSet * const Matches, StreamSet * const LineBreakStream,
                                                StreamSet * const Coordinates, unsigned strideBlocks)
-: MultiBlockKernel(b, "matchCoordinates" + std::to_string(strideBlocks),
+: MultiBlockKernel(driver, "matchCoordinates" + std::to_string(strideBlocks),
 // inputs
 {Binding{"matchResult", Matches}, Binding{"lineBreak", LineBreakStream, FixedRate(1), ZeroExtended()}},
 // outputs
@@ -688,10 +688,10 @@ MatchCoordinatesKernel::MatchCoordinatesKernel(KernelBuilder & b,
 // output scalars
 {},
 // kernel state
-{InternalScalar{b.getSizeTy(), "LineNum"},
- InternalScalar{b.getSizeTy(), "LineStart"}}) {
+{InternalScalar{driver.getSizeTy(), "LineNum"},
+ InternalScalar{driver.getSizeTy(), "LineStart"}}) {
      // The stride size must be limited so that the scanword mask is a single size_t value.
-     setStride(std::min(b.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
+     setStride(std::min(driver.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
      assert (Matches->getNumElements() == 1);
      assert (LineBreakStream->getNumElements() == 1);
      assert (Coordinates->getNumElements() == 3);
@@ -1221,10 +1221,10 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     }
 }
 
-BatchCoordinatesKernel::BatchCoordinatesKernel(KernelBuilder & b,
+BatchCoordinatesKernel::BatchCoordinatesKernel(VirtualDriver &driver,
                                                StreamSet * const Matches, StreamSet * const LineBreakStream,
                                                StreamSet * const Coordinates, Scalar * const callbackObject, unsigned strideBlocks)
-: MultiBlockKernel(b, "batchCoordinates" + std::to_string(strideBlocks),
+: MultiBlockKernel(driver, "batchCoordinates" + std::to_string(strideBlocks),
 // inputs
 {Binding{"matchResult", Matches}, Binding{"lineBreak", LineBreakStream, FixedRate(1), ZeroExtended()}},
 // outputs
@@ -1234,12 +1234,12 @@ BatchCoordinatesKernel::BatchCoordinatesKernel(KernelBuilder & b,
 // output scalars
 {},
 // kernel state
-{InternalScalar{b.getInt32Ty(), "batchFileNum"},
-    InternalScalar{b.getSizeTy(), "pendingFileLimit"},
+{InternalScalar{driver.getInt32Ty(), "batchFileNum"},
+    InternalScalar{driver.getSizeTy(), "pendingFileLimit"},
     //InternalScalar{b.getSizeTy(), "pendingFileStartLine"},
-    InternalScalar{b.getSizeTy(), "pendingLineNum"}}) {
+    InternalScalar{driver.getSizeTy(), "pendingLineNum"}}) {
      // The stride size must be limited so that the scanword mask is a single size_t value.
-     setStride(std::min(b.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
+     setStride(std::min(driver.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
      assert (Matches->getNumElements() == 1);
      assert (LineBreakStream->getNumElements() == 1);
 #ifdef WRITE_FILE_NUMBERS
@@ -1249,8 +1249,8 @@ BatchCoordinatesKernel::BatchCoordinatesKernel(KernelBuilder & b,
 #endif
 }
 
-MatchReporter::MatchReporter(KernelBuilder & b, StreamSet * ByteStream, StreamSet * const Coordinates, Scalar * const callbackObject)
-: SegmentOrientedKernel(b, "matchReporter" + std::to_string(Coordinates->getNumElements()),
+MatchReporter::MatchReporter(VirtualDriver &driver, StreamSet * ByteStream, StreamSet * const Coordinates, Scalar * const callbackObject)
+: SegmentOrientedKernel(driver, "matchReporter" + std::to_string(Coordinates->getNumElements()),
 // inputs
 {Binding{"InputStream", ByteStream, GreedyRate(), Deferred()},
  Binding{"Coordinates", Coordinates, GreedyRate(1)}},
@@ -1332,17 +1332,17 @@ void MatchReporter::generateDoSegmentMethod(KernelBuilder & b) {
 
 }
 
-MatchFilterKernel::MatchFilterKernel(KernelBuilder & b,
+MatchFilterKernel::MatchFilterKernel(VirtualDriver &driver,
                                      StreamSet * const MatchStarts, StreamSet * const LineBreakStream,
                                      StreamSet * const InputStream, StreamSet * Output, unsigned strideBlocks)
-: MultiBlockKernel(b, "matchFilter" + std::to_string(strideBlocks),
+: MultiBlockKernel(driver, "matchFilter" + std::to_string(strideBlocks),
 {Binding{"matchStarts", MatchStarts}, Binding{"lineBreak", LineBreakStream}, Binding{"InputStream", InputStream}},
 {Binding{"Output", Output, BoundedRate(0,1)}},
 {},
 {},
-{InternalScalar{b.getInt1Ty(), "pendingMatch"}}) {
+{InternalScalar{driver.getInt1Ty(), "pendingMatch"}}) {
     // The stride size must be limited so that the scanword mask is a single size_t value.
-    setStride(std::min(b.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
+    setStride(std::min(driver.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
     assert (MatchStarts->getNumElements() == 1);
     assert (LineBreakStream->getNumElements() == 1);
 }
@@ -1554,8 +1554,8 @@ void MatchFilterKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const
     b.setProducedItemCount("Output", finalProducedPhi);
 }
 
-ColorizedReporter::ColorizedReporter(KernelBuilder & b, StreamSet * ByteStream, StreamSet * const SourceCoords, StreamSet * const ColorizedCoords, Scalar * const callbackObject)
-: SegmentOrientedKernel(b, "colorizedReporter" + std::to_string(SourceCoords->getNumElements()) + std::to_string(ColorizedCoords->getNumElements()),
+ColorizedReporter::ColorizedReporter(VirtualDriver &driver, StreamSet * ByteStream, StreamSet * const SourceCoords, StreamSet * const ColorizedCoords, Scalar * const callbackObject)
+: SegmentOrientedKernel(driver, "colorizedReporter" + std::to_string(SourceCoords->getNumElements()) + std::to_string(ColorizedCoords->getNumElements()),
 // inputs
 {Binding{"InputStream", ByteStream, GreedyRate(), Deferred()},
     Binding{"SourceCoords", SourceCoords, FixedRate(1)}, Binding{"ColorizedCoords", ColorizedCoords, FixedRate(1)}},

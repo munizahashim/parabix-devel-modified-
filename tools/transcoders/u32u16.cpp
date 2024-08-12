@@ -47,8 +47,8 @@ static cl::opt<std::string> OutputEncoding("encoding", cl::desc("Output encoding
 typedef void (*u32u16FunctionType)(uint32_t fd);
 
 u32u16FunctionType u32u16_gen (CPUDriver & driver, cc::ByteNumbering byteNumbering) {
-    auto & b = driver.getBuilder();
-    Type * const int32Ty = b.getInt32Ty();
+
+    Type * const int32Ty = driver.getInt32Ty();
     auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
 
     Scalar * const fileDescriptor = P->getInputScalar("fd");

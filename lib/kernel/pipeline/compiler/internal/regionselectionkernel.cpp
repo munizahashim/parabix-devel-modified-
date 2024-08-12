@@ -543,8 +543,8 @@ bool RegionSelectionKernel::hasIndependentStartEndStreams() const {
 
 #define NAME_PREFIX "RegionSelect"
 
-RegionSelectionKernel::RegionSelectionKernel(KernelBuilder & b, Starts starts, Ends ends, StreamSet * const regionSpans)
-: MultiBlockKernel(b, NAME_PREFIX "A" + std::to_string(starts.Index) + "." + std::to_string(ends.Index)
+RegionSelectionKernel::RegionSelectionKernel(VirtualDriver & driver, Starts starts, Ends ends, StreamSet * const regionSpans)
+: MultiBlockKernel(driver, NAME_PREFIX "A" + std::to_string(starts.Index) + "." + std::to_string(ends.Index)
 // input streams
 ,{Binding{"starts", starts.Stream}
 , Binding{"ends", ends.Stream}}
@@ -561,8 +561,8 @@ RegionSelectionKernel::RegionSelectionKernel(KernelBuilder & b, Starts starts, E
     report_fatal_error("Non-selector region kernel is not supported yet.");
 }
 
-RegionSelectionKernel::RegionSelectionKernel(KernelBuilder & b, Demarcators demarcators, Selectors selectors, StreamSet * const regionSpans)
-: MultiBlockKernel(b, NAME_PREFIX "S" + std::to_string(demarcators.Index) + "." + std::to_string(selectors.Index)
+RegionSelectionKernel::RegionSelectionKernel(VirtualDriver & driver, Demarcators demarcators, Selectors selectors, StreamSet * const regionSpans)
+: MultiBlockKernel(driver, NAME_PREFIX "S" + std::to_string(demarcators.Index) + "." + std::to_string(selectors.Index)
 // input streams
 ,{Binding{"demarcators", demarcators.Stream}
 , Binding{"selectors", selectors.Stream}}
@@ -580,8 +580,8 @@ RegionSelectionKernel::RegionSelectionKernel(KernelBuilder & b, Demarcators dema
 
 }
 
-RegionSelectionKernel::RegionSelectionKernel(KernelBuilder & b, Starts starts, Ends ends, Selectors selectors, StreamSet * const regionSpans)
-: MultiBlockKernel(b, NAME_PREFIX "S" + std::to_string(starts.Index) + "." + std::to_string(ends.Index) + "." + std::to_string(selectors.Index)
+RegionSelectionKernel::RegionSelectionKernel(VirtualDriver & driver, Starts starts, Ends ends, Selectors selectors, StreamSet * const regionSpans)
+: MultiBlockKernel(driver, NAME_PREFIX "S" + std::to_string(starts.Index) + "." + std::to_string(ends.Index) + "." + std::to_string(selectors.Index)
 // input streams
 ,{Binding{"starts", starts.Stream}
 , Binding{"ends", ends.Stream}

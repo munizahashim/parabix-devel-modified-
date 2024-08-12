@@ -13,18 +13,18 @@ using namespace llvm;
 
 namespace kernel {
 
-SwizzledMultiplePDEPkernel::SwizzledMultiplePDEPkernel(KernelBuilder & b, const unsigned swizzleFactor, const unsigned numberOfStreamSet, std::string name)
-: MultiBlockKernel(b, std::move(name),
+SwizzledMultiplePDEPkernel::SwizzledMultiplePDEPkernel(VirtualDriver &driver, const unsigned swizzleFactor, const unsigned numberOfStreamSet, std::string name)
+: MultiBlockKernel(driver, std::move(name),
 // input stream sets
-{Binding{b.getStreamSetTy(), "marker", FixedRate(), Principal()},
-Binding{b.getStreamSetTy(swizzleFactor), "source0", PopcountOf("marker"), BlockSize(b.getBitBlockWidth() / swizzleFactor) }},
+{Binding{driver.getStreamSetTy(), "marker", FixedRate(), Principal()},
+Binding{driver.getStreamSetTy(swizzleFactor), "source0", PopcountOf("marker"), BlockSize(driver.getBitBlockWidth() / swizzleFactor) }},
 // output stream set
-{Binding{b.getStreamSetTy(swizzleFactor), "output0", FixedRate(), BlockSize(b.getBitBlockWidth() / swizzleFactor)}},
+{Binding{driver.getStreamSetTy(swizzleFactor), "output0", FixedRate(), BlockSize(driver.getBitBlockWidth() / swizzleFactor)}},
 {}, {}, {})
 , mSwizzleFactor(swizzleFactor), mNumberOfStreamSet(numberOfStreamSet) {
     for (unsigned i = 1; i < numberOfStreamSet; i++) {
-        mInputStreamSets.push_back(Binding{b.getStreamSetTy(swizzleFactor), "source" + std::to_string(i), RateEqualTo("source0"), BlockSize(b.getBitBlockWidth() / swizzleFactor) });
-        mOutputStreamSets.push_back(Binding{b.getStreamSetTy(swizzleFactor), "output" + std::to_string(i), RateEqualTo("output0"), BlockSize(b.getBitBlockWidth() / swizzleFactor)});
+        mInputStreamSets.push_back(Binding{driver.getStreamSetTy(swizzleFactor), "source" + std::to_string(i), RateEqualTo("source0"), BlockSize(driver.getBitBlockWidth() / swizzleFactor) });
+        mOutputStreamSets.push_back(Binding{driver.getStreamSetTy(swizzleFactor), "output" + std::to_string(i), RateEqualTo("output0"), BlockSize(driver.getBitBlockWidth() / swizzleFactor)});
     }
 }
 

@@ -66,8 +66,8 @@ typedef void (*CSVFunctionType)(uint32_t fd);
 
 class Invert : public PabloKernel {
 public:
-    Invert(KernelBuilder & b, StreamSet * mask, StreamSet * inverted)
-        : PabloKernel(b, "Invert",
+    Invert(VirtualDriver & driver, StreamSet * mask, StreamSet * inverted)
+        : PabloKernel(driver, "Invert",
                       {Binding{"mask", mask}},
                       {Binding{"inverted", inverted}}) {}
 protected:
@@ -84,8 +84,8 @@ void Invert::generatePabloMethod() {
 
 class BasisCombine : public PabloKernel {
 public:
-    BasisCombine(KernelBuilder & b, StreamSet * basis1, StreamSet * basis2, StreamSet * combined)
-        : PabloKernel(b, "BasisCombine",
+    BasisCombine(VirtualDriver & driver, StreamSet * basis1, StreamSet * basis2, StreamSet * combined)
+        : PabloKernel(driver, "BasisCombine",
                       {Binding{"basis1", basis1}, Binding{"basis2", basis2}},
                       {Binding{"combined", combined}}) {}
 protected:
@@ -118,11 +118,10 @@ void MergeByMask01(const std::unique_ptr<ProgramBuilder> & P,
     P->CreateKernelCall<BasisCombine>(expandedA, expandedB, merged);
 }
 
-CSVFunctionType generatePipeline(CPUDriver & pxDriver, const std::vector<std::string> & templateStrs) {
+CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::string> & templateStrs) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
-    auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}}, {});
+    auto P = driver.makePipeline({Binding{driver.getInt32Ty(), "inputFileDecriptor"}}, {});
     //  The program will use a file descriptor as an input.
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
     // File data from mmap

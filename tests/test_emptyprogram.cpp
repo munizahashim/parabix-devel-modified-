@@ -50,9 +50,7 @@ bool testEmptyPrograms(CPUDriver & driver) {
 
     // TODO: need some sort of run and catch program that can handle timeouts? use functions as functors?
 
-    auto & b = driver.getBuilder();
-
-    IntegerType * const int64Ty = b.getInt64Ty();
+    IntegerType * const int64Ty = driver.getInt64Ty();
 
     std::random_device rd;
     std::default_random_engine rng(rd());
@@ -110,7 +108,7 @@ bool testEmptyPrograms(CPUDriver & driver) {
     }
 
     BEGIN_SCOPED_REGION
-    auto P = driver.makePipeline({Binding{b.getInt8PtrTy(), "buffer"}, Binding{b.getSizeTy(), "length"}}, {});
+    auto P = driver.makePipeline({Binding{driver.getInt8PtrTy(), "buffer"}, Binding{driver.getSizeTy(), "length"}}, {});
     Scalar * const buffer = P->getInputScalar("buffer");
     Scalar * const length = P->getInputScalar("length");
     StreamSet * const InternalBytes = P->CreateStreamSet(1, 8);
@@ -126,7 +124,7 @@ bool testEmptyPrograms(CPUDriver & driver) {
     BEGIN_SCOPED_REGION
     StreamSet * OutputBytes = driver.CreateStreamSet(1, 8);
     auto P = driver.makePipelineWithIO({}, {{"output", OutputBytes}},
-                                       {Binding{b.getInt8PtrTy(), "buffer"}, Binding{b.getSizeTy(), "length"}}, {});
+                                       {Binding{driver.getInt8PtrTy(), "buffer"}, Binding{driver.getSizeTy(), "length"}}, {});
     Scalar * const buffer = P->getInputScalar("buffer");
     Scalar * const length = P->getInputScalar("length");
     P->CreateKernelCall<MemorySourceKernel>(buffer, length, OutputBytes);
@@ -147,12 +145,12 @@ bool testEmptyPrograms(CPUDriver & driver) {
 }
 
 typedef void (*PipelineFunctionType)(StreamSetPtr & ss_buf, uint32_t fd);
-PipelineFunctionType generatePipeline(CPUDriver &pxDriver, const unsigned int& numChannels, const unsigned int& numSamples, const unsigned int& bitsPerSample, const unsigned int& sampleRate)
+PipelineFunctionType generatePipeline(CPUDriver & driver, const unsigned int& numChannels, const unsigned int& numSamples, const unsigned int& bitsPerSample, const unsigned int& sampleRate)
 {
-    StreamSet * OutputBytes = pxDriver.CreateStreamSet(1, 8);
-    auto &b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipelineWithIO({}, {Bind("OutputBytes", OutputBytes, ReturnedBuffer(1))},
-                                             {Binding{b.getInt32Ty(), "inputFileDecriptor"}});
+    StreamSet * OutputBytes = driver.CreateStreamSet(1, 8);
+
+    auto P = driver.makePipelineWithIO({}, {Bind("OutputBytes", OutputBytes, ReturnedBuffer(1))},
+                                             {Binding{driver.getInt32Ty(), "inputFileDecriptor"}});
     Scalar *fileDescriptor = P->getInputScalar("inputFileDecriptor");
     P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, OutputBytes);
     return reinterpret_cast<PipelineFunctionType>(P->compile());

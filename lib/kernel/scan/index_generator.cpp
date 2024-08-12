@@ -11,8 +11,8 @@ using namespace llvm;
 
 namespace kernel {
 
-ScanIndexGenerator::ScanIndexGenerator(KernelBuilder & b, StreamSet * scan, StreamSet * output)
-: SingleStreamScanKernelTemplate(b, "ScanIndexGenerator", scan)
+ScanIndexGenerator::ScanIndexGenerator(VirtualDriver &driver, StreamSet * scan, StreamSet * output)
+: SingleStreamScanKernelTemplate(driver, "ScanIndexGenerator", scan)
 {
     assert (scan->getNumElements() == 1 && scan->getFieldWidth() == 1);
     assert (output->getNumElements() == 1 && output->getFieldWidth() == 64);

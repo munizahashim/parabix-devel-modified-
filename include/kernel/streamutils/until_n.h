@@ -19,7 +19,7 @@ namespace kernel {
 class UntilNkernel final : public MultiBlockKernel {
 public:
     enum Mode {ZeroAfterN, TerminateAtN, ReportAcceptedLengthAtAndBeforeN};
-    UntilNkernel(KernelBuilder & b, Scalar * N, StreamSet * Markers, StreamSet * FirstN,
+    UntilNkernel(VirtualDriver & driver, Scalar * N, StreamSet * Markers, StreamSet * FirstN,
                  UntilNkernel::Mode m = UntilNkernel::Mode::TerminateAtN);
 private:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final;

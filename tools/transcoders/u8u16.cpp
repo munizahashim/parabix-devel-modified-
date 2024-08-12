@@ -56,13 +56,13 @@ inline bool useAVX2() {
 
 class U8U16Kernel final: public pablo::PabloKernel {
 public:
-    U8U16Kernel(KernelBuilder & b, StreamSet * BasisBits, StreamSet * u8bits, StreamSet * DelMask);
+    U8U16Kernel(VirtualDriver & driver, StreamSet * BasisBits, StreamSet * u8bits, StreamSet * DelMask);
 protected:
     void generatePabloMethod() override;
 };
 
-U8U16Kernel::U8U16Kernel(KernelBuilder & b, StreamSet *BasisBits, StreamSet *u8bits, StreamSet *selectors)
-: PabloKernel(b, "u8u16",
+U8U16Kernel::U8U16Kernel(VirtualDriver &driver, StreamSet *BasisBits, StreamSet *u8bits, StreamSet *selectors)
+: PabloKernel(driver, "u8u16",
 // input
 {Binding{"u8bit", BasisBits}},
 // outputs
@@ -267,10 +267,9 @@ typedef void (*u8u16FunctionType)(uint32_t fd, const char *);
 
 // ------------------------------------------------------
 
-u8u16FunctionType generatePipeline(CPUDriver & pxDriver, cc::ByteNumbering byteNumbering) {
+u8u16FunctionType generatePipeline(CPUDriver & driver, cc::ByteNumbering byteNumbering) {
 
-    auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}, Binding{b.getInt8PtrTy(), "outputFileName"}}, {});
+    auto P = driver.makePipeline({Binding{driver.getInt32Ty(), "inputFileDecriptor"}, Binding{driver.getInt8PtrTy(), "outputFileName"}}, {});
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
@@ -299,7 +298,7 @@ u8u16FunctionType generatePipeline(CPUDriver & pxDriver, cc::ByteNumbering byteN
         P->CreateKernelCall<SwizzleGenerator>(u16Swizzles, std::vector<StreamSet *>{u16bits});
         P->CreateKernelCall<P2S16Kernel>(u16bits, u16bytes);
     } else {
-        const auto fieldWidth = b.getBitBlockWidth() / 16;
+        const auto fieldWidth = driver.getBitBlockWidth() / 16;
         P->CreateKernelCall<FieldCompressKernel>(Select(selectors, {0}),
                                                  SelectOperationList{Select(u8bits, streamutils::Range(0, 16))},
                                                  u16bits,
@@ -315,7 +314,7 @@ u8u16FunctionType generatePipeline(CPUDriver & pxDriver, cc::ByteNumbering byteN
 
 // ------------------------------------------------------
 
-void makeNonAsciiBranch(kernel::KernelBuilder & b,
+void makeNonAsciiBranch(VirtualDriver & driver,
                         const std::unique_ptr<PipelineBuilder> & P,
                         StreamSet * const ByteStream, StreamSet * const u16bytes, cc::ByteNumbering byteNumbering) {
     // Transposed bits from s2p
@@ -342,7 +341,7 @@ void makeNonAsciiBranch(kernel::KernelBuilder & b,
         P->CreateKernelCall<SwizzleGenerator>(u16Swizzles, std::vector<StreamSet *>{u16bits});
         P->CreateKernelCall<P2S16Kernel>(u16bits, u16bytes);
     } else {
-        const auto fieldWidth = b.getBitBlockWidth() / 16;
+        const auto fieldWidth = driver.getBitBlockWidth() / 16;
         P->CreateKernelCall<FieldCompressKernel>(Select(selectors, {0}),
                                                  SelectOperationList{Select(u8bits, streamutils::Range(0, 16))},
                                                  u16bits,
@@ -359,10 +358,9 @@ void makeAllAsciiBranch(const std::unique_ptr<PipelineBuilder> & P, StreamSet * 
     }
 }
 
-u8u16FunctionType generatePipeline2(CPUDriver & pxDriver, cc::ByteNumbering byteNumbering) {
+u8u16FunctionType generatePipeline2(CPUDriver & driver, cc::ByteNumbering byteNumbering) {
 
-    auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}, Binding{b.getInt8PtrTy(), "outputFileName"}}, {});
+    auto P = driver.makePipeline({Binding{driver.getInt32Ty(), "inputFileDecriptor"}, Binding{driver.getInt8PtrTy(), "outputFileName"}}, {});
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
     StreamSet * const u16bytes = P->CreateStreamSet(1, 16);
@@ -380,7 +378,7 @@ u8u16FunctionType generatePipeline2(CPUDriver & pxDriver, cc::ByteNumbering byte
 
     makeAllAsciiBranch(B->getAllZeroBranch(), ByteStream, u16bytes, byteNumbering);
 
-    makeNonAsciiBranch(b, B->getNonZeroBranch(), ByteStream, u16bytes, byteNumbering);
+    makeNonAsciiBranch(driver, B->getNonZeroBranch(), ByteStream, u16bytes, byteNumbering);
 
     Scalar * outputFileName = P->getInputScalar("outputFileName");
     P->CreateKernelCall<FileSink>(outputFileName, u16bytes);

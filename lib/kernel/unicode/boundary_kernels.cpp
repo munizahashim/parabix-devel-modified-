@@ -21,8 +21,8 @@
 using namespace kernel;
 using namespace pablo;
 
-BoundaryKernel::BoundaryKernel(KernelBuilder & kb, StreamSet * PropertyBasis, StreamSet * IndexStream, StreamSet * BoundaryStream, bool invert)
-: PabloKernel(kb, "boundary_" + std::to_string(PropertyBasis->getNumElements()) + (invert ? "x1_negated" : "x1"),
+BoundaryKernel::BoundaryKernel(VirtualDriver & driver, StreamSet * PropertyBasis, StreamSet * IndexStream, StreamSet * BoundaryStream, bool invert)
+: PabloKernel(driver, "boundary_" + std::to_string(PropertyBasis->getNumElements()) + (invert ? "x1_negated" : "x1"),
               {Binding{"basis", PropertyBasis}, Binding{"index", IndexStream, FixedRate(), ZeroExtended()}},
               {Binding{"boundary", BoundaryStream, FixedRate(), Add1()}}),
   mHasIndex(IndexStream != nullptr), mInvert(invert) {

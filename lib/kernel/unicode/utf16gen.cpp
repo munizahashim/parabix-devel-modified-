@@ -18,8 +18,8 @@ using namespace pablo;
 using namespace kernel;
 using namespace llvm;
 
-UTF16_SupplementaryBasis::UTF16_SupplementaryBasis (KernelBuilder & b, StreamSet * u32basis, StreamSet * u16_SMP_basis)
-: PabloKernel(b, "UTF16_SupplementaryBasis",
+UTF16_SupplementaryBasis::UTF16_SupplementaryBasis (VirtualDriver &driver, StreamSet * u32basis, StreamSet * u16_SMP_basis)
+: PabloKernel(driver, "UTF16_SupplementaryBasis",
 {Binding{"basis", u32basis}},
 {Binding{"u16_SMP_basis", u16_SMP_basis}}) {}
 
@@ -37,13 +37,13 @@ void UTF16_SupplementaryBasis::generatePabloMethod() {
     }
 }
 
-UTF16fieldDepositMask::UTF16fieldDepositMask(KernelBuilder & b, StreamSet * u32basis, StreamSet * u16fieldMask, StreamSet * extractionMask, unsigned depositFieldWidth)
-: BlockOrientedKernel(b, "u16depositMask",
+UTF16fieldDepositMask::UTF16fieldDepositMask(VirtualDriver &driver, StreamSet * u32basis, StreamSet * u16fieldMask, StreamSet * extractionMask, unsigned depositFieldWidth)
+: BlockOrientedKernel(driver, "u16depositMask",
 {Binding{"basis", u32basis}},
 {Binding{"fieldDepositMask", u16fieldMask, FixedRate(2)},
     Binding{"extractionMask", extractionMask, FixedRate(2)}},
 {}, {},
-{InternalScalar{ScalarType::NonPersistent, b.getBitBlockType(), "EOFmask"}})
+{InternalScalar{ScalarType::NonPersistent, driver.getBitBlockType(), "EOFmask"}})
 , mDepositFieldWidth(depositFieldWidth) {}
 
 void UTF16fieldDepositMask::generateDoBlockMethod(KernelBuilder & b) {
@@ -83,8 +83,8 @@ void UTF16fieldDepositMask::generateFinalBlockMethod(KernelBuilder & b, Value * 
 // of each UTF-16 sequence, this kernel computes the stream marking initial
 // positions of each UTF-16 sequence.
 //
-UTF16_InitialMask::UTF16_InitialMask (KernelBuilder & b, StreamSet * u16final, StreamSet * u16initial)
-: PabloKernel(b, "UTF16_DepositMasks",
+UTF16_InitialMask::UTF16_InitialMask (VirtualDriver &driver, StreamSet * u16final, StreamSet * u16initial)
+: PabloKernel(driver, "UTF16_DepositMasks",
               {Binding{"u16final", u16final}},
               {Binding{"u16initial", u16initial}}) {}
 
@@ -100,10 +100,10 @@ void UTF16_InitialMask::generatePabloMethod() {
 // bits: SMPbits4_0, u16bits15_10, u16bits9_0, as well as the mask_lo stream
 // (having bits set at all but surrogate1 positions).
 //
-UTF16assembly::UTF16assembly (KernelBuilder & b,
+UTF16assembly::UTF16assembly (VirtualDriver &driver,
                             StreamSet * SMPbits4_0, StreamSet * u16bits15_10, StreamSet * u16bits9_0, StreamSet * u16final,
                             StreamSet * u16basis)
-: PabloKernel(b, "UTF16assembly",
+: PabloKernel(driver, "UTF16assembly",
 {Binding{"u16bits9_0", u16bits9_0, FixedRate(1)},
  Binding{"u16bits15_10", u16bits15_10, FixedRate(1), ZeroExtended()},
  Binding{"SMPbits4_0", SMPbits4_0, FixedRate(1), ZeroExtended()},

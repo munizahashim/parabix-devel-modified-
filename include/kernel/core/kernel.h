@@ -16,15 +16,13 @@
 #include <llvm/Support/Compiler.h>
 #include <kernel/illustrator/illustrator.h>
 #include <codegen/FunctionTypeBuilder.h>
+#include <codegen/virtual_driver.h>
 #include <memory>
 #include <string>
 #include <vector>
 
-
 namespace llvm { class IndirectBrInst; }
 namespace llvm { class PHINode; }
-
-class BaseDriver;
 
 namespace kernel {
 
@@ -547,14 +545,14 @@ protected:
 protected:
 
     // Constructor
-    Kernel(KernelBuilder & b,
+    Kernel(VirtualDriver & driver,
            const TypeId typeId, std::string && kernelName,
            Bindings &&stream_inputs, Bindings &&stream_outputs,
            Bindings &&scalar_inputs, Bindings &&scalar_outputs,
            InternalScalars && internal_scalars);
 
     // Constructor used by pipeline
-    Kernel(KernelBuilder & b,
+    Kernel(VirtualDriver & driver,
            const TypeId typeId,
            Bindings &&stream_inputs, Bindings &&stream_outputs,
            Bindings &&scalar_inputs, Bindings &&scalar_outputs);
@@ -598,7 +596,7 @@ public:
 
 protected:
 
-    SegmentOrientedKernel(KernelBuilder & b,
+    SegmentOrientedKernel(VirtualDriver & driver,
                           std::string && kernelName,
                           Bindings &&stream_inputs,
                           Bindings &&stream_outputs,
@@ -626,7 +624,7 @@ public:
 
 protected:
 
-    MultiBlockKernel(KernelBuilder & b,
+    MultiBlockKernel(VirtualDriver & driver,
                      std::string && kernelName,
                      Bindings && stream_inputs,
                      Bindings && stream_outputs,
@@ -634,7 +632,7 @@ protected:
                      Bindings && scalar_outputs,
                      InternalScalars && internal_scalars);
 
-    MultiBlockKernel(KernelBuilder & b,
+    MultiBlockKernel(VirtualDriver & driver,
                      const TypeId kernelTypId,
                      std::string && kernelName,
                      Bindings && stream_inputs,
@@ -681,7 +679,7 @@ protected:
 
     virtual void generateFinalBlockMethod(KernelBuilder & b, llvm::Value * remainingItems);
 
-    BlockOrientedKernel(KernelBuilder & b,
+    BlockOrientedKernel(VirtualDriver & driver,
                         std::string && kernelName,
                         Bindings && stream_inputs,
                         Bindings && stream_outputs,

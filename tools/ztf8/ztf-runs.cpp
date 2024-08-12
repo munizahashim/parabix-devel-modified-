@@ -51,9 +51,9 @@ static cl::alias DecompressionAlias("decompress", cl::desc("Alias for -d"), cl::
 
 class ZTF_CompressionMask final: public PabloKernel {
 public:
-    ZTF_CompressionMask(KernelBuilder & b,
+    ZTF_CompressionMask(VirtualDriver & driver,
                   StreamSet * runMask, StreamSet * runIndex, StreamSet * compressionMask)
-    : PabloKernel(b, "ZTF_CompressionMask",
+    : PabloKernel(driver, "ZTF_CompressionMask",
                          {Binding{"runMask", runMask, FixedRate(1), LookAhead(1)},
                           Binding{"runIndex", runIndex}},
                          {Binding{"compressionMask", compressionMask}}) {}
@@ -74,9 +74,9 @@ void ZTF_CompressionMask::generatePabloMethod() {
 
 class ZTF_Run_Replacement final: public PabloKernel {
 public:
-    ZTF_Run_Replacement(KernelBuilder & b,
+    ZTF_Run_Replacement(VirtualDriver & driver,
                         StreamSet * basis, StreamSet * runIndex, StreamSet * output)
-    : PabloKernel(b, "ZTF_Run_Replacement",
+    : PabloKernel(driver, "ZTF_Run_Replacement",
                          {Binding{"basis", basis}, Binding{"runIndex", runIndex}},
                          {Binding{"output", output}}) {}
 protected:
@@ -103,9 +103,9 @@ void ZTF_Run_Replacement::generatePabloMethod() {
 
 class ZTF_Run_Length_Decoder final: public PabloKernel {
 public:
-    ZTF_Run_Length_Decoder(KernelBuilder & b,
+    ZTF_Run_Length_Decoder(VirtualDriver & driver,
                         StreamSet * ztf_basis, StreamSet * runLengths)
-    : PabloKernel(b, "ZTF_Run_Length_Decoder",
+    : PabloKernel(driver, "ZTF_Run_Length_Decoder",
                          {Binding{"basis", ztf_basis}},
                          {Binding{"runLengths", runLengths}}),
                          mLengthBits(runLengths->getNumElements()) {}
@@ -129,9 +129,9 @@ void ZTF_Run_Length_Decoder::generatePabloMethod() {
 
 class ZTF_Run_Decompression final: public PabloKernel {
 public:
-    ZTF_Run_Decompression(KernelBuilder & b,
+    ZTF_Run_Decompression(VirtualDriver & driver,
                            StreamSet * ztfRunCodes, StreamSet * runMask, StreamSet * ztf_u8_indexed, StreamSet * u8output)
-    : PabloKernel(b, "ZTF_Run_Decompression",
+    : PabloKernel(driver, "ZTF_Run_Decompression",
                   {Binding{"ztfRunCodes", ztfRunCodes, FixedRate(1), LookAhead(1)},
                    Binding{"runSpreadMask", runMask},
                    Binding{"ztf_u8_indexed", ztf_u8_indexed}},
@@ -160,8 +160,7 @@ typedef void (*ztfRunsFunctionType)(uint32_t fd);
 
 ztfRunsFunctionType ztfRuns_compression_gen (CPUDriver & driver) {
 
-    auto & b = driver.getBuilder();
-    Type * const int32Ty = b.getInt32Ty();
+    Type * const int32Ty = driver.getInt32Ty();
     auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
 
     Scalar * const fileDescriptor = P->getInputScalar("fd");
@@ -197,8 +196,7 @@ ztfRunsFunctionType ztfRuns_compression_gen (CPUDriver & driver) {
 }
 
 ztfRunsFunctionType ztfRuns_decompression_gen (CPUDriver & driver) {
-    auto & b = driver.getBuilder();
-    Type * const int32Ty = b.getInt32Ty();
+    Type * const int32Ty = driver.getInt32Ty();
     auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
     Scalar * const fileDescriptor = P->getInputScalar("fd");
 

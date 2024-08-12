@@ -14,7 +14,7 @@ namespace kernel {
 
 class HexToBinary final : public kernel::BlockOrientedKernel {
 public:
-    HexToBinary(KernelBuilder & b, StreamSet * hexStream, StreamSet * binStream);
+    HexToBinary(VirtualDriver & driver, StreamSet * hexStream, StreamSet * binStream);
 protected:
     void generateDoBlockMethod(KernelBuilder & b) override;
 };
@@ -26,7 +26,7 @@ protected:
 
 class BinaryToHex final : public kernel::BlockOrientedKernel {
 public:
-    BinaryToHex(KernelBuilder & b, StreamSet * binStream, StreamSet * hexStream);
+    BinaryToHex(VirtualDriver & driver, StreamSet * binStream, StreamSet * hexStream);
 protected:
     void generateDoBlockMethod(KernelBuilder & b) override;
     void generateFinalBlockMethod(KernelBuilder & b, llvm::Value * const remainingBits) override;

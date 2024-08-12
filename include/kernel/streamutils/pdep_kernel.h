@@ -148,7 +148,7 @@ inline StreamSet * InsertionSpreadMask(const std::unique_ptr<ProgramBuilder> &P,
 
 class StreamExpandKernel final : public MultiBlockKernel {
 public:
-    StreamExpandKernel(KernelBuilder & b,
+    StreamExpandKernel(VirtualDriver & driver,
                        StreamSet * mask,
                        StreamSet * source,
                        StreamSet * expanded,
@@ -168,7 +168,7 @@ private:
 /**********************************/
 class StreamMergeKernel final : public MultiBlockKernel {
 public:
-    StreamMergeKernel(KernelBuilder & b,
+    StreamMergeKernel(VirtualDriver & driver,
                        StreamSet * mask,
                        StreamSet * source1,
                        StreamSet * source2,
@@ -185,7 +185,7 @@ private:
 /*******************************************************/
 class FieldDepositKernel final : public MultiBlockKernel {
 public:
-    FieldDepositKernel(KernelBuilder &, StreamSet * mask, StreamSet * input, StreamSet * output, const unsigned fieldWidth = sizeof(size_t) * 8);
+    FieldDepositKernel(VirtualDriver & driver, StreamSet * mask, StreamSet * input, StreamSet * output, const unsigned fieldWidth = sizeof(size_t) * 8);
 protected:
     void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfStrides) override;
 private:
@@ -196,7 +196,7 @@ private:
 
 class PDEPFieldDepositKernel final : public MultiBlockKernel {
 public:
-    PDEPFieldDepositKernel(KernelBuilder &, StreamSet * mask, StreamSet * expandedA, StreamSet * outputs, const unsigned fieldWidth = sizeof(size_t) * 8);
+    PDEPFieldDepositKernel(VirtualDriver & driver, StreamSet * mask, StreamSet * expandedA, StreamSet * outputs, const unsigned fieldWidth = sizeof(size_t) * 8);
 protected:
     void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfStrides) override;
 private:
@@ -233,7 +233,7 @@ private:
  */
 class PDEPkernel final : public MultiBlockKernel {
 public:
-    PDEPkernel(KernelBuilder & b, const unsigned swizzleFactor = 4, std::string name = "PDEP");
+    PDEPkernel(VirtualDriver & driver, const unsigned swizzleFactor = 4, std::string name = "PDEP");
 private:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final;
 private:

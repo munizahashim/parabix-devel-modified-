@@ -50,13 +50,11 @@ std::vector<fs::path> allFiles;
 
 typedef uint64_t (*GCountFunctionType)(uint32_t fd);
 
-GCountFunctionType pipelineGen(CPUDriver & pxDriver) {
+GCountFunctionType pipelineGen(CPUDriver & driver) {
 
-    auto & b = pxDriver.getBuilder();
-
-    auto P = pxDriver.makePipeline(
-                {Binding{b.getInt32Ty(), "fileDescriptor"}},
-                {Binding{b.getInt64Ty(), "countResult"}});
+    auto P = driver.makePipeline(
+                {Binding{driver.getInt32Ty(), "fileDescriptor"}},
+                {Binding{driver.getInt64Ty(), "countResult"}});
 
     Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
 

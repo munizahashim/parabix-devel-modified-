@@ -45,13 +45,13 @@ using namespace kernel;
 
 class MatchPriorKernel final: public pablo::PabloKernel {
 public:
-    MatchPriorKernel(KernelBuilder & b, StreamSet * const countable, Scalar * countResult);
+    MatchPriorKernel(VirtualDriver & driver, StreamSet * const countable, Scalar * countResult);
 protected:
     void generatePabloMethod() override;
 };
 
-MatchPriorKernel::MatchPriorKernel (KernelBuilder & b, StreamSet * const countable, Scalar * countResult)
-    : pablo::PabloKernel(b, "matchprior_" + std::to_string(priorDistance),
+MatchPriorKernel::MatchPriorKernel (VirtualDriver &driver, StreamSet * const countable, Scalar * countResult)
+    : pablo::PabloKernel(driver, "matchprior_" + std::to_string(priorDistance),
     {Binding{"countable", countable}},
     {},
     {},
@@ -75,11 +75,10 @@ void MatchPriorKernel::generatePabloMethod() {
 
 typedef uint64_t (*MatchPriorFunctionType)(uint32_t fd);
 
-MatchPriorFunctionType mpPipelineGen(CPUDriver & pxDriver) {
-    auto & b = pxDriver.getBuilder();
-    Type * const int32Ty = b.getInt32Ty();
-    auto P = pxDriver.makePipeline({Binding{int32Ty, "fd"}},
-                                   {Binding{b.getInt64Ty(), "countResult"}});
+MatchPriorFunctionType mpPipelineGen(CPUDriver & driver) {
+    Type * const int32Ty = driver.getInt32Ty();
+    auto P = driver.makePipeline({Binding{int32Ty, "fd"}},
+                                   {Binding{driver.getInt64Ty(), "countResult"}});
     Scalar * const fileDescriptor = P->getInputScalar("fd");
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);

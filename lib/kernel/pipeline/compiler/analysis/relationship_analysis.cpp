@@ -401,13 +401,13 @@ void addPopCountKernels(KernelBuilder & b, Kernels & kernels, KernelVertexVec & 
         PopCountKernel * popCountKernel = nullptr;
         switch (type) {
             case CountingType::Positive:
-                popCountKernel = new PopCountKernel(b, PopCountKernel::POSITIVE, strideLength, input, positive);
+                popCountKernel = new PopCountKernel(b.getDriver(), PopCountKernel::POSITIVE, strideLength, input, positive);
                 break;
             case CountingType::Negative:
-                popCountKernel = new PopCountKernel(b, PopCountKernel::NEGATIVE, strideLength, input, negative);
+                popCountKernel = new PopCountKernel(b.getDriver(), PopCountKernel::NEGATIVE, strideLength, input, negative);
                 break;
             case CountingType::Both:
-                popCountKernel = new PopCountKernel(b, PopCountKernel::BOTH, strideLength, input, positive, negative);
+                popCountKernel = new PopCountKernel(b.getDriver(), PopCountKernel::BOTH, strideLength, input, positive, negative);
                 break;
             default: llvm_unreachable("unknown counting type?");
         }

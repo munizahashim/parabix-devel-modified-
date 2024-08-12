@@ -117,15 +117,15 @@ void P2SKernelWithCompressedOutput::generateDoBlockMethod(KernelBuilder & b) {
 }
 
 
-P2S16Kernel::P2S16Kernel(KernelBuilder & b, StreamSet *u16bits, StreamSet * u16stream, cc::ByteNumbering numbering)
-: BlockOrientedKernel(b, "p2s_16" + cc::numberingSuffix(numbering),
+P2S16Kernel::P2S16Kernel(VirtualDriver &driver, StreamSet *u16bits, StreamSet * u16stream, cc::ByteNumbering numbering)
+: BlockOrientedKernel(driver, "p2s_16" + cc::numberingSuffix(numbering),
 {Binding{"basisBits", u16bits}},
 {Binding{"i16Stream", u16stream}},
 {}, {}, {}), mByteNumbering(numbering) {
 }
 
-P2S16Kernel::P2S16Kernel(KernelBuilder & b, StreamSets & inputSets, StreamSet * u16stream, cc::ByteNumbering numbering)
-: BlockOrientedKernel(b, "p2s_16" + streamSetShape(inputSets) + cc::numberingSuffix(numbering),
+P2S16Kernel::P2S16Kernel(VirtualDriver &driver, StreamSets & inputSets, StreamSet * u16stream, cc::ByteNumbering numbering)
+: BlockOrientedKernel(driver, "p2s_16" + streamSetShape(inputSets) + cc::numberingSuffix(numbering),
 {},
 {Binding{"i16Stream", u16stream}},
 {}, {}, {}), mByteNumbering(numbering) {
@@ -235,18 +235,18 @@ void P2S16KernelWithCompressedOutput::generateDoBlockMethod(KernelBuilder & b) {
     b.setProducedItemCount("i16Stream", i16UnitsFinal);
 }
 
-P2SKernel::P2SKernel(KernelBuilder & b, StreamSet * basisBits, StreamSet * byteStream)
-: BlockOrientedKernel(b, "p2s_" + std::to_string(basisBits->getNumElements()),
+P2SKernel::P2SKernel(VirtualDriver &driver, StreamSet * basisBits, StreamSet * byteStream)
+: BlockOrientedKernel(driver, "p2s_" + std::to_string(basisBits->getNumElements()),
 {Binding{"basisBits", basisBits}},
 {Binding{"byteStream", byteStream}},
 {}, {}, {}) {
 
 }
 
-P2SMultipleStreamsKernel::P2SMultipleStreamsKernel(KernelBuilder & b,
+P2SMultipleStreamsKernel::P2SMultipleStreamsKernel(VirtualDriver &driver,
                                                    const StreamSets & inputStreams,
                                                    StreamSet * const outputStream)
-: BlockOrientedKernel(b, "p2sMultipleStreams" + streamSetShape(inputStreams),
+: BlockOrientedKernel(driver, "p2sMultipleStreams" + streamSetShape(inputStreams),
 {},
 {Binding{"byteStream", outputStream}},
 {}, {}, {}) {
@@ -255,9 +255,9 @@ P2SMultipleStreamsKernel::P2SMultipleStreamsKernel(KernelBuilder & b,
     }
 }
 
-P2S16KernelWithCompressedOutput::P2S16KernelWithCompressedOutput(KernelBuilder & b,
+P2S16KernelWithCompressedOutput::P2S16KernelWithCompressedOutput(VirtualDriver &driver,
                                                                  StreamSet * basisBits, StreamSet * extractionMask, StreamSet * i16Stream, cc::ByteNumbering numbering)
-: BlockOrientedKernel(b, "p2s_16_compress" + cc::numberingSuffix(numbering),
+: BlockOrientedKernel(driver, "p2s_16_compress" + cc::numberingSuffix(numbering),
 {Binding{"basisBits", basisBits},
 Binding{"extractionMask", extractionMask}},
 {Binding{"i16Stream", i16Stream, BoundedRate(0, 1)}},
@@ -323,8 +323,8 @@ void P2S21Kernel::generateDoBlockMethod(KernelBuilder & b) {
     }
 }
 
-P2S21Kernel::P2S21Kernel(KernelBuilder & b, StreamSet *u21bits, StreamSet *u32stream, cc::ByteNumbering numbering)
-: BlockOrientedKernel(b, "p2s_21" + cc::numberingSuffix(numbering),
+P2S21Kernel::P2S21Kernel(VirtualDriver & driver, StreamSet *u21bits, StreamSet *u32stream, cc::ByteNumbering numbering)
+: BlockOrientedKernel(driver, "p2s_21" + cc::numberingSuffix(numbering),
 {Binding{"basisBits", u21bits}},
 {Binding{"u32stream", u32stream}},
 {}, {}, {}), mByteNumbering(numbering) {
@@ -379,8 +379,8 @@ void P2S16KernelWithCompressedOutputOld::generateDoBlockMethod(KernelBuilder & b
 
 }
 
-P2S16KernelWithCompressedOutputOld::P2S16KernelWithCompressedOutputOld(KernelBuilder & b, StreamSet * basisBits, StreamSet * delCounts, StreamSet * byteStream)
-: BlockOrientedKernel(b, "p2s_16_compress2017",
+P2S16KernelWithCompressedOutputOld::P2S16KernelWithCompressedOutputOld(VirtualDriver &driver, StreamSet * basisBits, StreamSet * delCounts, StreamSet * byteStream)
+: BlockOrientedKernel(driver, "p2s_16_compress2017",
               {Binding{"basisBits", basisBits},
                Binding{"deletionCounts", delCounts}},
               {Binding{"i16Stream", byteStream, BoundedRate(0, 1)}},

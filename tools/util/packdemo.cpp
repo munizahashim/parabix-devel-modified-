@@ -35,7 +35,7 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 enum class PackOption {packh, packl};
 class PackKernel final : public MultiBlockKernel {
 public:
-    PackKernel(KernelBuilder & b,
+    PackKernel(VirtualDriver & driver,
               StreamSet * const i16Stream,
               StreamSet * const i8Stream,
               PackOption opt);
@@ -50,8 +50,8 @@ std::string packOptionString(PackOption opt) {
     return "packl";
 }
 
-PackKernel::PackKernel(KernelBuilder & b, StreamSet * const i16Stream, StreamSet * const i8Stream, PackOption opt)
-: MultiBlockKernel(b, packOptionString(opt) ,
+PackKernel::PackKernel(VirtualDriver &driver, StreamSet * const i16Stream, StreamSet * const i8Stream, PackOption opt)
+: MultiBlockKernel(driver, packOptionString(opt) ,
 {Binding{"i16Stream", i16Stream}},
     {Binding{"i8Stream", i8Stream}}, {}, {}, {}), mOption(opt)  {}
 
@@ -99,8 +99,7 @@ typedef void (*PackDemoFunctionType)(uint32_t fd);
 
 PackDemoFunctionType packdemo_gen (CPUDriver & driver) {
 
-    auto & b = driver.getBuilder();
-    auto P = driver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}}, {});
+    auto P = driver.makePipeline({Binding{driver.getInt32Ty(), "inputFileDecriptor"}}, {});
 
     Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
 

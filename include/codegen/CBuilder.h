@@ -439,11 +439,11 @@ public:
     llvm::CallInst * CreateSRandCall(llvm::Value * randomSeed);
     llvm::CallInst * CreateRandCall();
 
-    void setDriver(codegen::VirtualDriver & driver) {
+    void setDriver(VirtualDriver & driver) {
         mDriver = &driver;
     }
 
-    codegen::VirtualDriver & getDriver() const {
+    VirtualDriver & getDriver() const {
         return *mDriver;
     }
 
@@ -493,7 +493,7 @@ protected:
     unsigned                        mCacheLineAlignment;
     llvm::IntegerType * const       mSizeType;
     llvm::StructType *              mFILEtype;
-    codegen::VirtualDriver *        mDriver;
+    VirtualDriver *        mDriver;
     llvm::LLVMContext               mContext;
     const std::string               mTriple;
     #ifdef ENABLE_LIBBACKTRACE

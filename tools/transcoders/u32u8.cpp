@@ -50,8 +50,7 @@ typedef void (*u32u8FunctionType)(uint32_t fd);
 
 u32u8FunctionType u32u8_gen (CPUDriver & driver) {
 
-    auto & b = driver.getBuilder();
-    Type * const int32Ty = b.getInt32Ty();
+    Type * const int32Ty = driver.getInt32Ty();
     auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
 
     Scalar * const fileDescriptor = P->getInputScalar("fd");

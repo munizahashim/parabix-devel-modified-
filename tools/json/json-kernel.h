@@ -50,10 +50,10 @@ enum Combined {
 */
 class JSONStringMarker : public pablo::PabloKernel {
 public:
-    JSONStringMarker(KernelBuilder & b,
+    JSONStringMarker(VirtualDriver & driver,
                      StreamSet * const basis,
                      StreamSet * strMarker, StreamSet * strSpan)
-    : pablo::PabloKernel(b,
+    : pablo::PabloKernel(driver,
                          "jsonStrMarker",
                          {Binding{"basis", basis}},
                          {Binding{"marker", strMarker}, Binding{"span", strSpan}}) {}
@@ -65,10 +65,10 @@ protected:
 
 class JSONClassifyBytes : public pablo::PabloKernel {
 public:
-    JSONClassifyBytes(KernelBuilder & b,
+    JSONClassifyBytes(VirtualDriver & driver,
                       StreamSet * const basis, StreamSet * const strSpan,
                       StreamSet * lexStream)
-    : pablo::PabloKernel(b,
+    : pablo::PabloKernel(driver,
                          "jsonClassifyBytes",
                          {Binding{"basis", basis}, Binding{"strSpan", strSpan}},
                          {Binding{"lexStream", lexStream}}) {}
@@ -91,11 +91,11 @@ protected:
 */
 class JSONKeywordEndMarker : public pablo::PabloKernel {
 public:
-    JSONKeywordEndMarker(KernelBuilder & b,
+    JSONKeywordEndMarker(VirtualDriver & driver,
                       StreamSet * const basis,
                       StreamSet * const lexIn,
                       StreamSet * kwMarker)
-    : pablo::PabloKernel(b,
+    : pablo::PabloKernel(driver,
                          "jsonKeywordMarker",
                          {
                             Binding{"basis", basis},
@@ -117,12 +117,12 @@ protected:
 */
 class JSONNumberSpan : public pablo::PabloKernel {
 public:
-    JSONNumberSpan(KernelBuilder & b,
+    JSONNumberSpan(VirtualDriver & driver,
                    StreamSet * const basis,
                    StreamSet * const lexIn,
                    StreamSet * const strSpan,
                    StreamSet * nbrLex, StreamSet * nbrSpan, StreamSet * nbrErr)
-    : pablo::PabloKernel(b,
+    : pablo::PabloKernel(driver,
                          "jsonNumberMarker",
                          {
                             Binding{"basis", basis, FixedRate(1), LookAhead(1)},
@@ -157,7 +157,7 @@ protected:
 class JSONFindKwAndExtraneousChars : public pablo::PabloKernel {
 public:
     JSONFindKwAndExtraneousChars(
-                        KernelBuilder & b,
+                        VirtualDriver & driver,
                         StreamSet * const lexIn,
                         StreamSet * const stringSpan,
                         StreamSet * const numberSpan,
@@ -165,7 +165,7 @@ public:
                         StreamSet * const combinedLexs,
                         StreamSet * const extraErr
     )
-    : pablo::PabloKernel(b,
+    : pablo::PabloKernel(driver,
                          "jsonFindKwAndExtraneousChars",
                          {
                             Binding{"lexIn", lexIn},
@@ -186,7 +186,7 @@ protected:
 class JSONParserArr : public pablo::PabloKernel {
 public:
     JSONParserArr(
-        KernelBuilder & b,
+       VirtualDriver & driver,
         StreamSet * const lexIn,
         StreamSet * const strMarker,
         StreamSet * const combinedLexs,
@@ -195,7 +195,7 @@ public:
         unsigned maxDepth = 15,
         int onlyDepth = -1
     )
-    : pablo::PabloKernel(b,
+    : pablo::PabloKernel(driver,
                          "JSONParserArr-max=" +
                             std::to_string(maxDepth) + "-only=" + std::to_string(onlyDepth),
                          {
@@ -219,7 +219,7 @@ protected:
 class JSONParserObj: public pablo::PabloKernel {
 public:
     JSONParserObj(
-        KernelBuilder & b,
+        VirtualDriver & driver,
         StreamSet * const lexIn,
         StreamSet * const strMarker,
         StreamSet * const combinedLexs,
@@ -228,7 +228,7 @@ public:
         unsigned maxDepth = 15,
         int onlyDepth = -1
     )
-    : pablo::PabloKernel(b,
+    : pablo::PabloKernel(driver,
                          "JSONParserObj-max=" +
                             std::to_string(maxDepth) + "-only=" + std::to_string(onlyDepth),
                          {

@@ -9,8 +9,8 @@ using namespace pablo;
 
 namespace kernel {
 
-AddSentinel::AddSentinel(KernelBuilder & kb, StreamSet * input, StreamSet * output)
-: PabloKernel(kb, "AddSentinel" + std::to_string(input->getNumElements()) + "x" + std::to_string(input->getFieldWidth()),
+AddSentinel::AddSentinel(VirtualDriver & driver, StreamSet * input, StreamSet * output)
+: PabloKernel(driver, "AddSentinel" + std::to_string(input->getNumElements()) + "x" + std::to_string(input->getFieldWidth()),
 {Binding{"input", input}},
 {Binding{"output", output, FixedRate(), Add1()}}) {
     assert (input->getNumElements() == output->getNumElements());

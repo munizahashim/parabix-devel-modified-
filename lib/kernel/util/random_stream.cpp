@@ -96,12 +96,12 @@ void RandomStreamKernel::generateDoSegmentMethod(KernelBuilder & b) {
     b.setProducedItemCount("randomValues", finalProducedPHI);
 }
 
-RandomStreamKernel::RandomStreamKernel(KernelBuilder & b, unsigned seed, unsigned valueWidth, size_t streamLength)
-: SegmentOrientedKernel(b, "rand" + std::to_string(valueWidth) + "_" + std::to_string(seed) + "_" + std::to_string(streamLength),
+RandomStreamKernel::RandomStreamKernel(VirtualDriver &driver, unsigned seed, unsigned valueWidth, size_t streamLength)
+: SegmentOrientedKernel(driver, "rand" + std::to_string(valueWidth) + "_" + std::to_string(seed) + "_" + std::to_string(streamLength),
 // input
 {},
 // output
-{Binding{b.getStreamSetTy(1, valueWidth), "randomValues"}},
+{Binding{driver.getStreamSetTy(1, valueWidth), "randomValues"}},
 // scalars
 {}, {}, {})
 , mSeed(seed)

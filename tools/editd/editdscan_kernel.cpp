@@ -91,12 +91,12 @@ Function * editdScanKernel::generateScanWordRoutine(KernelBuilder & b) const {
 
 }
 
-editdScanKernel::editdScanKernel(KernelBuilder & b, StreamSet * matchResults) :
-BlockOrientedKernel(b, "editdScanMatch" + std::to_string(matchResults->getNumElements()),
+editdScanKernel::editdScanKernel(VirtualDriver &driver, StreamSet * matchResults) :
+BlockOrientedKernel(driver, "editdScanMatch" + std::to_string(matchResults->getNumElements()),
               {Binding{"matchResults", matchResults}},
-              {}, {}, {}, {InternalScalar{b.getSizeTy(), "BlockNo"}}),
+              {}, {}, {}, {InternalScalar{driver.getSizeTy(), "BlockNo"}}),
 mNumElements(matchResults->getNumElements()),
-mScanwordBitWidth(b.getSizeTy()->getBitWidth()) {
+mScanwordBitWidth(driver.getSizeTy()->getBitWidth()) {
     addAttribute(SideEffecting());
 }
 

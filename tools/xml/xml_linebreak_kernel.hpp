@@ -27,8 +27,8 @@ namespace kernel {
 class XmlLineBreakKernel : public PabloKernel {
 public:
 
-    XmlLineBreakKernel(KernelBuilder & b, StreamSet * basis, StreamSet * out)
-    : PabloKernel(b, "XmlLineBreakKernel", {{"basis", basis}}, {{"out", out, FixedRate(), Add1()}})
+    XmlLineBreakKernel(VirtualDriver & driver, StreamSet * basis, StreamSet * out)
+    : PabloKernel(driver, "XmlLineBreakKernel", {{"basis", basis}}, {{"out", out, FixedRate(), Add1()}})
     {
         assert(basis->getFieldWidth() == 8 && basis->getNumElements() == 1);
         assert(out->getFieldWidth() == 1 && out->getNumElements() == 1);

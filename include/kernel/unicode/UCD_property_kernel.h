@@ -14,7 +14,7 @@ namespace kernel {
 
 class UnicodePropertyKernelBuilder : public pablo::PabloKernel {
 public:
-    UnicodePropertyKernelBuilder(KernelBuilder & b,
+    UnicodePropertyKernelBuilder(VirtualDriver & driver,
                                  re::Name * property_value_name,
                                  StreamSet * BasisBits,
                                  StreamSet * property,
@@ -24,7 +24,8 @@ protected:
     bool hasSignature() const override { return true; }
     void generatePabloMethod() override;
 private:
-    UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * BasisBits, StreamSet * property, pablo::BitMovementMode mode, std::string && propValueName);
+    UnicodePropertyKernelBuilder(VirtualDriver & driver, re::Name * property_value_name,
+                                 StreamSet * BasisBits, StreamSet * property, pablo::BitMovementMode mode, std::string && propValueName);
 private:
     std::string mPropNameValue;
     re::Name * mName;
@@ -33,7 +34,7 @@ private:
 
 class UnicodePropertyBasis : public pablo::PabloKernel {
 public:
-    UnicodePropertyBasis(KernelBuilder & b, UCD::EnumeratedPropertyObject * enumObj, StreamSet * BasisBits, StreamSet * PropertyBasis);
+    UnicodePropertyBasis(VirtualDriver & driver, UCD::EnumeratedPropertyObject * enumObj, StreamSet * BasisBits, StreamSet * PropertyBasis);
 protected:
     void generatePabloMethod() override;
 private:

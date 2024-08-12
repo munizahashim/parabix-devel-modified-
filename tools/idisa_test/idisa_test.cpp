@@ -43,7 +43,7 @@ static cl::opt<int> Immediate("i", cl::desc("Immediate value for mvmd_dslli"), c
 
 class ShiftMaskKernel : public BlockOrientedKernel {
 public:
-    ShiftMaskKernel(KernelBuilder & b, unsigned fw, unsigned limit, StreamSet * input, StreamSet * output);
+    ShiftMaskKernel(VirtualDriver & driver, unsigned fw, unsigned limit, StreamSet * input, StreamSet * output);
 protected:
     void generateDoBlockMethod(KernelBuilder & kb) override;
 private:
@@ -51,8 +51,8 @@ private:
     const unsigned mShiftMask;
 };
 
-ShiftMaskKernel::ShiftMaskKernel(KernelBuilder & b, unsigned fw, unsigned mask, StreamSet *input, StreamSet *output)
-: BlockOrientedKernel(b, "shiftMask" + std::to_string(fw) + "_" + std::to_string(mask),
+ShiftMaskKernel::ShiftMaskKernel(VirtualDriver &driver, unsigned fw, unsigned mask, StreamSet *input, StreamSet *output)
+: BlockOrientedKernel(driver, "shiftMask" + std::to_string(fw) + "_" + std::to_string(mask),
                               {Binding{"shiftOperand", input}},
                               {Binding{"limitedShift", output}},
                               {}, {}, {}),
@@ -69,7 +69,7 @@ void ShiftMaskKernel::generateDoBlockMethod(KernelBuilder & b) {
 
 class IdisaBinaryOpTestKernel : public MultiBlockKernel {
 public:
-    IdisaBinaryOpTestKernel(KernelBuilder & b, std::string idisa_op, unsigned fw, unsigned imm,
+    IdisaBinaryOpTestKernel(VirtualDriver & driver, std::string idisa_op, unsigned fw, unsigned imm,
                             StreamSet * Operand1, StreamSet * Operand2, StreamSet * result);
 protected:
     void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfStrides) override;
@@ -79,9 +79,9 @@ private:
     const unsigned mImmediateShift;
 };
 
-IdisaBinaryOpTestKernel::IdisaBinaryOpTestKernel(KernelBuilder & b, std::string idisa_op, unsigned fw, unsigned imm,
+IdisaBinaryOpTestKernel::IdisaBinaryOpTestKernel(VirtualDriver &driver, std::string idisa_op, unsigned fw, unsigned imm,
                                                  StreamSet *Operand1, StreamSet *Operand2, StreamSet *result)
-: MultiBlockKernel(b, idisa_op + std::to_string(fw) + "_test",
+: MultiBlockKernel(driver, idisa_op + std::to_string(fw) + "_test",
      {Binding{"operand1", Operand1}, Binding{"operand2", Operand2}},
      {Binding{"result", result}},
      {}, {}, {}),
@@ -176,7 +176,7 @@ void IdisaBinaryOpTestKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::V
 
 class IdisaBinaryOpCheckKernel : public BlockOrientedKernel {
 public:
-    IdisaBinaryOpCheckKernel(KernelBuilder & b, std::string idisa_op, unsigned fw, unsigned imm,
+    IdisaBinaryOpCheckKernel(VirtualDriver & driver, std::string idisa_op, unsigned fw, unsigned imm,
                              StreamSet * Operand1, StreamSet * Operand2, StreamSet * result,
                              StreamSet * expected, Scalar * failures);
 protected:
@@ -187,10 +187,10 @@ private:
     const unsigned mImmediateShift;
 };
 
-IdisaBinaryOpCheckKernel::IdisaBinaryOpCheckKernel(KernelBuilder & b, std::string idisa_op, unsigned fw, unsigned imm,
+IdisaBinaryOpCheckKernel::IdisaBinaryOpCheckKernel(VirtualDriver &driver, std::string idisa_op, unsigned fw, unsigned imm,
                                                    StreamSet *Operand1, StreamSet *Operand2, StreamSet *result,
                                                    StreamSet *expected, Scalar *failures)
-: BlockOrientedKernel(b, idisa_op + std::to_string(fw) + "_check" + std::to_string(QuietMode),
+: BlockOrientedKernel(driver, idisa_op + std::to_string(fw) + "_check" + std::to_string(QuietMode),
                            {Binding{"operand1", Operand1},
                             Binding{"operand2", Operand2},
                             Binding{"test_result", result}},
@@ -413,21 +413,19 @@ inline StreamSet * applyShiftMask(std::unique_ptr<ProgramBuilder> & P, StreamSet
     return input;
 }
 
-IDISAtestFunctionType pipelineGen(CPUDriver & pxDriver) {
+IDISAtestFunctionType pipelineGen(CPUDriver & driver) {
 
-    auto & b = pxDriver.getBuilder();
-
-    Type * const sizeTy = b.getSizeTy();
-    Type * const int32Ty = b.getInt32Ty();
+    Type * const sizeTy = driver.getSizeTy();
+    Type * const int32Ty = driver.getInt32Ty();
 
     Bindings inputs;
     inputs.emplace_back(int32Ty, "operand1FileDecriptor");
     inputs.emplace_back(int32Ty, "operand2FileDecriptor");
     if (!TestOutputFile.empty()) {
-        inputs.emplace_back(b.getInt8PtrTy(), "outputFileName");
+        inputs.emplace_back(driver.getInt8PtrTy(), "outputFileName");
     }
 
-    auto P = pxDriver.makePipeline(std::move(inputs), {Binding{sizeTy, "totalFailures"}});
+    auto P = driver.makePipeline(std::move(inputs), {Binding{sizeTy, "totalFailures"}});
 
 
     StreamSet * Operand1BitStream = readHexToBinary(P, "operand1FileDecriptor");

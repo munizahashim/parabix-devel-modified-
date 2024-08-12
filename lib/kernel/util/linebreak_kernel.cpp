@@ -56,13 +56,13 @@ Bindings makeOutputBreakBindings(UnterminatedLineAtEOF eofMode, StreamSet * lb) 
     return {Binding{"LB", lb}};
 }
 
-UnixLinesKernelBuilder::UnixLinesKernelBuilder(KernelBuilder & b,
+UnixLinesKernelBuilder::UnixLinesKernelBuilder(VirtualDriver &driver,
                                                StreamSet * Basis,
                                                StreamSet * LineEnds,
                                                UnterminatedLineAtEOF eofMode,
                                                NullCharMode nullMode,
                                                Scalar * signalNullObject)
-: PabloKernel(b, "UnixLines" + sourceShape(Basis) + EOF_annotation(eofMode) + NullModeAnnotation(nullMode),
+: PabloKernel(driver, "UnixLines" + sourceShape(Basis) + EOF_annotation(eofMode) + NullModeAnnotation(nullMode),
               {Binding{"basis", Basis}},
               makeOutputBreakBindings(eofMode, LineEnds),
               makeInputScalarBindings(signalNullObject), {}),
@@ -103,15 +103,15 @@ void UnixLinesKernelBuilder::generatePabloMethod() {
 
 class LineFeedKernelBuilder final : public pablo::PabloKernel {
 public:
-    LineFeedKernelBuilder(KernelBuilder & b, StreamSet * Basis, StreamSet * LineFeedStream);
+    LineFeedKernelBuilder(VirtualDriver & driver, StreamSet * Basis, StreamSet * LineFeedStream);
 protected:
     void generatePabloMethod() override;
     const unsigned mNumOfStreams;
     const unsigned mStreamFieldWidth;
 };
 
-LineFeedKernelBuilder::LineFeedKernelBuilder(KernelBuilder & b, StreamSet * Basis, StreamSet * LineFeedStream)
-: PabloKernel(b, "lf" + sourceShape(Basis),
+LineFeedKernelBuilder::LineFeedKernelBuilder(VirtualDriver &driver, StreamSet * Basis, StreamSet * LineFeedStream)
+: PabloKernel(driver, "lf" + sourceShape(Basis),
               // input
 {Binding{"basis", Basis}},
               // output
@@ -137,7 +137,7 @@ void LineFeedKernelBuilder::generatePabloMethod() {
 
 class UnicodeLinesKernelBuilder final : public pablo::PabloKernel {
 public:
-    UnicodeLinesKernelBuilder(KernelBuilder & b,
+    UnicodeLinesKernelBuilder(VirtualDriver & driver,
                               StreamSet * Basis,
                               StreamSet * LF,
                               StreamSet * UnicodeLB,
@@ -151,7 +151,7 @@ protected:
     const NullCharMode mNullMode;
 };
 
-UnicodeLinesKernelBuilder::UnicodeLinesKernelBuilder(KernelBuilder & b,
+UnicodeLinesKernelBuilder::UnicodeLinesKernelBuilder(VirtualDriver &driver,
                                                      StreamSet * Basis,
                                                      StreamSet * LF,
                                                      StreamSet * LineEnds,
@@ -159,7 +159,7 @@ UnicodeLinesKernelBuilder::UnicodeLinesKernelBuilder(KernelBuilder & b,
                                                      UnterminatedLineAtEOF eofMode,
                                                      NullCharMode nullMode,
                                                      Scalar * signalNullObject)
-: PabloKernel(b, "UnicodeLB" + sourceShape(Basis) + EOF_annotation(eofMode) + NullModeAnnotation(nullMode),
+: PabloKernel(driver, "UnicodeLB" + sourceShape(Basis) + EOF_annotation(eofMode) + NullModeAnnotation(nullMode),
               {Binding{"basis", Basis},
                   Binding{"lf", LF, FixedRate(), LookAhead(1)}},
               makeOutputBreakBindings(eofMode, LineEnds),
@@ -303,11 +303,11 @@ void UnicodeLinesLogic(const std::unique_ptr<kernel::ProgramBuilder> & P,
     }
 }
 
-NullDelimiterKernel::NullDelimiterKernel(KernelBuilder & b,
+NullDelimiterKernel::NullDelimiterKernel(VirtualDriver &driver,
                                          StreamSet * Source,
                                          StreamSet * Terminators,
                                          UnterminatedLineAtEOF eofMode)
-: PabloKernel(b, "nullDelim" + sourceShape(Source) + EOF_annotation(eofMode),
+: PabloKernel(driver, "nullDelim" + sourceShape(Source) + EOF_annotation(eofMode),
               {Binding{"Source", Source}},
               makeOutputBreakBindings(eofMode, Terminators),
               {}, {}),
@@ -329,8 +329,8 @@ void NullDelimiterKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutput(0), 0), NUL);
 }
 
-LineStartsKernel::LineStartsKernel(KernelBuilder & b, StreamSet * LineEnds, StreamSet * LineStarts, StreamSet * index)
-    : PabloKernel(b, [&]() -> std::string {
+LineStartsKernel::LineStartsKernel(VirtualDriver &driver, StreamSet * LineEnds, StreamSet * LineStarts, StreamSet * index)
+    : PabloKernel(driver, [&]() -> std::string {
                     std::string nm = "LineStarts";
                     if (index) nm += "@index";
                     return nm;
@@ -354,8 +354,8 @@ void LineStartsKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("LineStarts"), 0), lineStarts);
 }
 
-LineSpansKernel::LineSpansKernel(KernelBuilder & b, StreamSet * LineStarts, StreamSet * LineEnds, StreamSet * LineSpans)
-: PabloKernel(b, "LineSpans",
+LineSpansKernel::LineSpansKernel(VirtualDriver &driver, StreamSet * LineStarts, StreamSet * LineEnds, StreamSet * LineSpans)
+: PabloKernel(driver, "LineSpans",
               {Binding{"LineStarts", LineStarts}, Binding{"LineEnds", LineEnds, FixedRate(), Principal()}},
               {Binding{"LineSpans", LineSpans}}) {}
 

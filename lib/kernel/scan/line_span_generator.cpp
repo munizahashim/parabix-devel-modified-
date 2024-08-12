@@ -12,11 +12,11 @@ using namespace llvm;
 
 namespace kernel {
 
-LineSpanGenerator::LineSpanGenerator(KernelBuilder & b, StreamSet * linebreakStream, StreamSet * output)
-: SingleStreamScanKernelTemplate(b, "LineSpanGenerator", linebreakStream)
+LineSpanGenerator::LineSpanGenerator(VirtualDriver & driver, StreamSet * linebreakStream, StreamSet * output)
+: SingleStreamScanKernelTemplate(driver, "LineSpanGenerator", linebreakStream)
 {
     assert (linebreakStream->getNumElements() == 1 && linebreakStream->getFieldWidth() == 1);
-    addInternalScalar(b.getInt64Ty(), "lineBegin");
+    addInternalScalar(driver.getInt64Ty(), "lineBegin");
     mOutputStreamSets.push_back({"output", output, PopcountOf("scan")});
 }
 
@@ -32,8 +32,8 @@ void LineSpanGenerator::generateProcessingLogic(KernelBuilder & b, Value * const
     b.setProducedItemCount("output", b.CreateAdd(producedCount, b.getSize(1)));
 }
 
-LineSpanFilterKernel::LineSpanFilterKernel(KernelBuilder & b, StreamSet * lineNumbers, StreamSet * spans, StreamSet * output)
-: MultiBlockKernel(b, "LineSpanFilter",
+LineSpanFilterKernel::LineSpanFilterKernel(VirtualDriver &driver, StreamSet * lineNumbers, StreamSet * spans, StreamSet * output)
+: MultiBlockKernel(driver, "LineSpanFilter",
     // Rate of consumption of `lineNumbers` and, in turn, production of `output`
     // cannot be determined statically as it relates to the actual values of the
     // items in the `lineNumber` stream.
