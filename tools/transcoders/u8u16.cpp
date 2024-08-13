@@ -406,12 +406,12 @@ int main(int argc, char *argv[]) {
     } else {
         llvm::report_fatal_error("Unrecognized encoding.");
     }
-    CPUDriver pxDriver("u8u16");
+    CPUDriver driver("u8u16");
     u8u16FunctionType u8u16Function = nullptr;
     if (BranchingMode) {
-        u8u16Function = generatePipeline2(pxDriver, byteNumbering);
+        u8u16Function = generatePipeline2(driver, byteNumbering);
     } else {
-        u8u16Function = generatePipeline(pxDriver, byteNumbering);
+        u8u16Function = generatePipeline(driver, byteNumbering);
     }
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {

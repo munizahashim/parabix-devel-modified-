@@ -129,7 +129,7 @@ ztf1FunctionType ztf1_decompression_gen (CPUDriver & driver, std::shared_ptr<Pab
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&ztf1Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
     
-    CPUDriver pxDriver("ztf1");
+    CPUDriver driver("ztf1");
     auto em = ErrorManager::Create();
     auto parser = RecursiveParser::Create(SimpleLexer::Create(em), em);
     auto ztf1Source = SourceFile::Relative("ztf1.pablo");
@@ -141,10 +141,10 @@ int main(int argc, char *argv[]) {
         errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
         if (Decompression) {
-            auto ztf1DecompressionFunction = ztf1_decompression_gen(pxDriver, parser, ztf1Source);
+            auto ztf1DecompressionFunction = ztf1_decompression_gen(driver, parser, ztf1Source);
             ztf1DecompressionFunction(fd);
         } else {
-            auto ztf1CompressionFunction = ztf1_compression_gen(pxDriver, parser, ztf1Source);
+            auto ztf1CompressionFunction = ztf1_compression_gen(driver, parser, ztf1Source);
             ztf1CompressionFunction(fd);
         }
         close(fd);

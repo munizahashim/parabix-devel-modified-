@@ -199,8 +199,8 @@ size_t file_size(const int fd) {
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&x8u16Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
-    CPUDriver pxDriver("x8u16");
-    x8u16FunctionType x8u16Function = generatePipeline(pxDriver);
+    CPUDriver driver("x8u16");
+    x8u16FunctionType x8u16Function = generatePipeline(driver);
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         std::cerr << "Error: cannot open " << inputFile << " for processing. Skipped.\n";

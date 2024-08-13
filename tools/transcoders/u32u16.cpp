@@ -114,8 +114,8 @@ int main(int argc, char *argv[]) {
     } else if ((OutputEncoding != "UTF16") &&  (OutputEncoding != "UTF-16")) {
         llvm::report_fatal_error("Unsupported encoding.");
     }
-    CPUDriver pxDriver("u32u16");
-    auto u32u16Function = u32u16_gen(pxDriver, byteNumbering);
+    CPUDriver driver("u32u16");
+    auto u32u16Function = u32u16_gen(driver, byteNumbering);
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";

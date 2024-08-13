@@ -113,13 +113,13 @@ int main(int argc, char *argv[]) {
     if (argv::RecursiveFlag || argv::DereferenceRecursiveFlag) {
         argv::DirectoriesFlag = argv::Recurse;
     }
-    CPUDriver pxDriver("gc");
+    CPUDriver driver("gc");
 
-    allFiles = argv::getFullFileList(pxDriver, inputFiles);
+    allFiles = argv::getFullFileList(driver, inputFiles);
     const auto fileCount = allFiles.size();
 
     GCountFunctionType gCountFunctionPtr = nullptr;
-    gCountFunctionPtr = pipelineGen(pxDriver);
+    gCountFunctionPtr = pipelineGen(driver);
     
     std::vector<uint64_t> theCounts;
     

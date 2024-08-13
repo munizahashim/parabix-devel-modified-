@@ -729,8 +729,8 @@ int main(int argc, char *argv[]) {
         llvm::report_fatal_error("Unrecognized encoding.");
     }
 
-    CPUDriver pxDriver("gb18030");
-    gb18030FunctionType gb18030Function = generatePipeline(pxDriver, encodingBits, byteNumbering);
+    CPUDriver driver("gb18030");
+    gb18030FunctionType gb18030Function = generatePipeline(driver, encodingBits, byteNumbering);
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";

@@ -455,11 +455,11 @@ IDISAtestFunctionType pipelineGen(CPUDriver & driver) {
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&testFlags, codegen::codegen_flags()});
-    CPUDriver pxDriver("idisa_test");
+    CPUDriver driver("idisa_test");
     if (ShiftMask == 0) {
         ShiftMask = TestFieldWidth - 1;
     }
-    auto idisaTestFunction = pipelineGen(pxDriver);
+    auto idisaTestFunction = pipelineGen(driver);
 
     const int32_t fd1 = openFile(Operand1TestFile, llvm::outs());
     const int32_t fd2 = openFile(Operand2TestFile, llvm::outs());

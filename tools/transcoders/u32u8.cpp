@@ -78,8 +78,8 @@ u32u8FunctionType u32u8_gen (CPUDriver & driver) {
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&u32u8Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
-    CPUDriver pxDriver("u32u8");
-    auto u32u8Function = u32u8_gen(pxDriver);
+    CPUDriver driver("u32u8");
+    auto u32u8Function = u32u8_gen(driver);
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";

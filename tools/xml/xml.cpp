@@ -329,14 +329,14 @@ int main(int argc, char ** argv) {
         return -1;
     }
 
-    CPUDriver pxDriver("xml-pablo");
+    CPUDriver driver("xml-pablo");
     auto em = ErrorManager::Create();
     auto parser = RecursiveParser::Create(SimpleLexer::Create(em), em);
     auto xmlSource = SourceFile::Relative("xml.pablo");
     if (xmlSource == nullptr) {
         std::cerr << "pablo-parser: error loading pablo source file: xml.pablo\n";
     }
-    auto xmlProcessFuncPtr = xmlPipelineGen(pxDriver, parser, xmlSource);
+    auto xmlProcessFuncPtr = xmlPipelineGen(driver, parser, xmlSource);
 
     xmlProcessFuncPtr(fd);
     ShowError();

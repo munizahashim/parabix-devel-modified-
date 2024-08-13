@@ -79,10 +79,10 @@ namespace ustats
         
         typedef void (*UStatsPropertyType)( uint32_t fd );
 
-        UStatsPropertyType generatePipeline(CPUDriver & pxDriver, std::string property)
+        UStatsPropertyType generatePipeline(CPUDriver & driver, std::string property)
         {
-            auto & b = pxDriver.getBuilder();
-            std::unique_ptr<kernel::ProgramBuilder> program = pxDriver.makePipeline(
+            auto & b = driver.getBuilder();
+            std::unique_ptr<kernel::ProgramBuilder> program = driver.makePipeline(
                 {
                     kernel::Binding{ b.getInt32Ty(), "inputFileDescriptor" },
                 },

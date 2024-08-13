@@ -11,11 +11,10 @@ namespace kernel {
  * @brief executeKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::executeKernel(KernelBuilder & b) {
-
+    #ifndef NDEBUG
+    Value * const initialSegNum = mSegNo;
+    #endif
     assert (FirstKernel <= mKernelId && mKernelId <= LastKernel);
-
-    Value * initSegNo = mSegNo;
-
     clearInternalStateForCurrentKernel();
     checkForPartitionEntry(b);
     assert ("every kernel ought to be marked a partition root if jumping is disabled" && (!mIsIOProcessThread || mIsPartitionRoot));
@@ -200,9 +199,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     /// -------------------------------------------------------------------------------------
 
     b.SetInsertPoint(mKernelCompletionCheck);
-    assert (initSegNo == mSegNo);
     normalCompletionCheck(b);
-    assert (initSegNo == mSegNo);
 
     /// -------------------------------------------------------------------------------------
     /// KERNEL TERMINATED
@@ -330,7 +327,7 @@ void PipelineCompiler::executeKernel(KernelBuilder & b) {
     if (LLVM_UNLIKELY(CheckAssertions)) {
         verifyPostInvocationTerminationSignal(b);
     }
-    assert (initSegNo == mSegNo);
+    assert ("segment number should not have been modified prior to kernel exit" && initialSegNum == mSegNo);
     checkForPartitionExit(b);
 }
 

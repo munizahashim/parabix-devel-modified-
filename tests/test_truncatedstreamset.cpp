@@ -382,7 +382,7 @@ bool runRepeatingStreamSetTest(CPUDriver & driver,
     return (result != 0);
 }
 
-bool runRandomRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine & rng) {
+bool runRandomRepeatingStreamSetTest(CPUDriver & driver, std::default_random_engine & rng) {
 
     size_t numElements = optNumElements;
     if (numElements == 0) {
@@ -414,19 +414,19 @@ bool runRandomRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_e
         passCountVal = countDist(rng);
     }
 
-    return runRepeatingStreamSetTest(pxDriver, numElements, fieldWidth, patternLength, copyCountVal, passCountVal, rng);
+    return runRepeatingStreamSetTest(driver, numElements, fieldWidth, patternLength, copyCountVal, passCountVal, rng);
 }
 
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {});
-    CPUDriver pxDriver("test");
+    CPUDriver driver("test");
     std::random_device rd;
     std::default_random_engine rng(rd());
 
     bool testResult = false;
     for (unsigned rounds = 0; rounds < 10; ++rounds) {
-        testResult |= runRandomRepeatingStreamSetTest(pxDriver, rng);
+        testResult |= runRandomRepeatingStreamSetTest(driver, rng);
     }
     return testResult ? -1 : 0;
 }

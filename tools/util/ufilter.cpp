@@ -118,16 +118,16 @@ UFiltertFunctionType pipelineGen(CPUDriver & driver, re::Name * CC_name) {
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&ufFlags, codegen::codegen_flags()});
-    CPUDriver pxDriver("ufilter");
+    CPUDriver driver("ufilter");
 
     UFiltertFunctionType fnPtr = nullptr;
     re::RE * CC_re = re::simplifyRE(re::RE_Parser::parse(CC_expr));
     CC_re = UCD::linkAndResolve(CC_re);
     CC_re = UCD::externalizeProperties(CC_re);
     if (re::Name * UCD_property_name = dyn_cast<re::Name>(CC_re)) {
-        fnPtr = pipelineGen(pxDriver, UCD_property_name);
+        fnPtr = pipelineGen(driver, UCD_property_name);
     } else if (re::CC * CC_ast = dyn_cast<re::CC>(CC_re)) {
-        fnPtr = pipelineGen(pxDriver, makeName(CC_ast));
+        fnPtr = pipelineGen(driver, makeName(CC_ast));
     } else {
         std::cerr << "Input expression must be a Unicode property or CC but found: " << CC_expr << " instead.\n";
         exit(1);

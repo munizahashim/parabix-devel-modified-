@@ -224,16 +224,16 @@ ztfRunsFunctionType ztfRuns_decompression_gen (CPUDriver & driver) {
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&ztfRunsOptions, pablo_toolchain_flags(), codegen::codegen_flags()});
     
-    CPUDriver pxDriver("ztfRuns");
+    CPUDriver driver("ztfRuns");
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
         if (Decompression) {
-            auto ztfRunsDecompressionFunction = ztfRuns_decompression_gen(pxDriver);
+            auto ztfRunsDecompressionFunction = ztfRuns_decompression_gen(driver);
             ztfRunsDecompressionFunction(fd);
         } else {
-            auto ztfRunsCompressionFunction = ztfRuns_compression_gen(pxDriver);
+            auto ztfRunsCompressionFunction = ztfRuns_compression_gen(driver);
             ztfRunsCompressionFunction(fd);
         }
         close(fd);

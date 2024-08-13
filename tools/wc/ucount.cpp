@@ -138,9 +138,9 @@ int main(int argc, char *argv[]) {
     if (argv::RecursiveFlag || argv::DereferenceRecursiveFlag) {
         argv::DirectoriesFlag = argv::Recurse;
     }
-    CPUDriver pxDriver("wc");
+    CPUDriver driver("wc");
 
-    allFiles = argv::getFullFileList(pxDriver, inputFiles);
+    allFiles = argv::getFullFileList(driver, inputFiles);
     const auto fileCount = allFiles.size();
 
     UCountFunctionType uCountFunctionPtr = nullptr;
@@ -148,9 +148,9 @@ int main(int argc, char *argv[]) {
     CC_re = UCD::linkAndResolve(CC_re);
     CC_re = UCD::externalizeProperties(CC_re);
     if (re::Name * UCD_property_name = dyn_cast<re::Name>(CC_re)) {
-        uCountFunctionPtr = pipelineGen(pxDriver, UCD_property_name);
+        uCountFunctionPtr = pipelineGen(driver, UCD_property_name);
     } else if (re::CC * CC_ast = dyn_cast<re::CC>(CC_re)) {
-        uCountFunctionPtr = pipelineGen(pxDriver, makeName(CC_ast));
+        uCountFunctionPtr = pipelineGen(driver, makeName(CC_ast));
     } else {
         std::cerr << "Input expression must be a Unicode property or CC but found: " << CC_expr << " instead.\n";
         exit(1);

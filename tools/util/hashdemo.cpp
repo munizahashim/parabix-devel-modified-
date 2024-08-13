@@ -280,13 +280,13 @@ HashDemoFunctionType hashdemo_gen (CPUDriver & driver) {
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&HashDemoOptions, pablo_toolchain_flags(), codegen::codegen_flags()});
-    CPUDriver pxDriver("hashdemo");
+    CPUDriver driver("hashdemo");
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
         HashDemoFunctionType func = nullptr;
-        func = hashdemo_gen(pxDriver);
+        func = hashdemo_gen(driver);
         func(fd);
         close(fd);
     }

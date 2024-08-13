@@ -130,11 +130,11 @@ int main(int argc, char *argv[]) {
     if (argv::RecursiveFlag || argv::DereferenceRecursiveFlag) {
         argv::DirectoriesFlag = argv::Recurse;
     }
-    CPUDriver pxDriver("mp");
-    allFiles = argv::getFullFileList(pxDriver, inputFiles);
+    CPUDriver driver("mp");
+    allFiles = argv::getFullFileList(driver, inputFiles);
     const auto fileCount = allFiles.size();
 
-    auto matchPriorFunctionPtr = mpPipelineGen(pxDriver);
+    auto matchPriorFunctionPtr = mpPipelineGen(driver);
     for (unsigned i = 0; i < fileCount; ++i) {
         mp(matchPriorFunctionPtr, i);
     }

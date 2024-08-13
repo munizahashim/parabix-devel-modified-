@@ -195,16 +195,16 @@ ztfHashFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&ztfHashOptions, pablo_toolchain_flags(), codegen::codegen_flags()});
 
-    CPUDriver pxDriver("ztfHash");
+    CPUDriver driver("ztfHash");
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
         ztfHashFunctionType func = nullptr;
         if (Decompression) {
-            func = ztfHash_decompression_gen(pxDriver);
+            func = ztfHash_decompression_gen(driver);
         } else {
-            func = ztfHash_compression_gen(pxDriver);
+            func = ztfHash_compression_gen(driver);
         }
         #ifdef REPORT_PAPI_TESTS
         papi::PapiCounter<4> jitExecution{{PAPI_L3_TCM, PAPI_L3_TCA, PAPI_TOT_INS, PAPI_TOT_CYC}};

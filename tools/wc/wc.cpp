@@ -232,11 +232,11 @@ void WordCountKernel::generatePabloMethod() {
 
 typedef void (*WordCountFunctionType)(uint32_t fd, uint32_t fileIdx);
 
-WordCountFunctionType wcPipelineGen(CPUDriver & pxDriver) {
+WordCountFunctionType wcPipelineGen(CPUDriver & driver) {
 
-    Type * const int32Ty = pxDriver.getInt32Ty();
+    Type * const int32Ty = driver.getInt32Ty();
 
-    auto P = pxDriver.makePipeline({Binding{int32Ty, "fd"}, Binding{int32Ty, "fileIdx"}});
+    auto P = driver.makePipeline({Binding{int32Ty, "fd"}, Binding{int32Ty, "fileIdx"}});
 
     Scalar * const fileDescriptor = P->getInputScalar("fd");
     Scalar * const fileIdx = P->getInputScalar("fileIdx");
@@ -294,9 +294,9 @@ int main(int argc, char *argv[]) {
     if (argv::RecursiveFlag || argv::DereferenceRecursiveFlag) {
         argv::DirectoriesFlag = argv::Recurse;
     }
-    CPUDriver pxDriver("wc");
+    CPUDriver driver("wc");
 
-    allFiles = argv::getFullFileList(pxDriver, inputFiles);
+    allFiles = argv::getFullFileList(driver, inputFiles);
 
     const auto fileCount = allFiles.size();
     if (wcOptions.size() == 0) {
@@ -322,7 +322,7 @@ int main(int argc, char *argv[]) {
     if (CountChars) wc_modes += "m";
     if (CountBytes) wc_modes += "c";
 
-    auto wordCountFunctionPtr = wcPipelineGen(pxDriver);
+    auto wordCountFunctionPtr = wcPipelineGen(driver);
 
     lineCount.resize(fileCount);
     wordCount.resize(fileCount);

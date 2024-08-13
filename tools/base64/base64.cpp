@@ -69,8 +69,8 @@ void base64(base64FunctionType fn_ptr, const std::string & fileName) {
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&base64Options, codegen::codegen_flags()});
 
-    CPUDriver pxDriver("base64");
-    auto fn_ptr = base64PipelineGen(pxDriver);
+    CPUDriver driver("base64");
+    auto fn_ptr = base64PipelineGen(driver);
     #ifdef REPORT_PAPI_TESTS
     papi::PapiCounter<4> jitExecution{{PAPI_L3_TCM, PAPI_L3_TCA, PAPI_TOT_INS, PAPI_TOT_CYC}};
     // papi::PapiCounter<3> jitExecution{{PAPI_FUL_ICY, PAPI_STL_CCY, PAPI_RES_STL}};

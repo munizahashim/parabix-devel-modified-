@@ -275,7 +275,7 @@ jsonFunctionType json_parsing_gen(
 int main(int argc, char ** argv) {
     codegen::ParseCommandLineOptions(argc, argv, {&jsonOptions, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
 
-    CPUDriver pxDriver("json");
+    CPUDriver driver("json");
     auto em = ErrorManager::Create();
     auto parser = RecursiveParser::Create(SimpleLexer::Create(em), em);
     auto jsonSource = SourceFile::Relative("json.pablo");
@@ -286,7 +286,7 @@ int main(int argc, char ** argv) {
     if (LLVM_UNLIKELY(fd == -1)) {
         errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
-        auto jsonParsingFunction = json_parsing_gen(pxDriver, parser, jsonSource);
+        auto jsonParsingFunction = json_parsing_gen(driver, parser, jsonSource);
         jsonParsingFunction(fd);
         close(fd);
     }

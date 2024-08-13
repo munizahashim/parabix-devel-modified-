@@ -379,9 +379,9 @@ int main(int argc, char *argv[]) {
     get_editd_pattern(pattern_segs, total_len);
 
 
-    CPUDriver pxDriver("editd");
+    CPUDriver driver("editd");
     if (MultiEditdKernels) {
-        auto editd = multiEditdPipeline(pxDriver);
+        auto editd = multiEditdPipeline(driver);
         const auto & fileName = inputFiles[0];
         const int fd = open(inputFiles[0].c_str(), O_RDONLY);
         if (LLVM_UNLIKELY(fd == -1)) {
@@ -405,15 +405,15 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    auto preprocess_ptr = preprocessPipeline(pxDriver);
+    auto preprocess_ptr = preprocessPipeline(driver);
     auto chStream = preprocess(preprocess_ptr);
 
     if (pattVector.size() == 1) {
-        auto editd = editdPipeline(pxDriver, pattVector);
+        auto editd = editdPipeline(driver, pattVector);
         editd(chStream);
         std::cout << "total matches is " << matchList.size() << std::endl;
     } else if (EditdIndexPatternKernels) {
-        auto editd_ptr = editdIndexPatternPipeline(pxDriver, pattVector[0].length());
+        auto editd_ptr = editdIndexPatternPipeline(driver, pattVector[0].length());
         const unsigned gs = groupSize;
         for(unsigned i=0; i< pattVector.size(); i += gs){
             SmallVector<char, 1024> pattern;
@@ -426,7 +426,7 @@ int main(int argc, char *argv[]) {
     }
     else {
         for(unsigned i=0; i< pattGroups.size(); i++){
-            auto editd = editdPipeline(pxDriver, pattGroups[i]);
+            auto editd = editdPipeline(driver, pattGroups[i]);
             editd(chStream);
         }
     }

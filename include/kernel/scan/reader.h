@@ -53,7 +53,7 @@ namespace kernel {
  *      StreamSet * const linenums = P->CreateStreamSet(1, 64);
  *      P->CreateKernelCall<LineNumberGenerator>(scanbits, linebreaks, linenums);
  *      Kernel * const reader = P->CreateKernelCall<ScanReader>(source, scanIndices, "callback", AdditionalStreams{linenums});
- *      pxDriver.LinkFunction(reader, "callback", callback);
+ *      driver.LinkFunction(reader, "callback", callback);
  *
  *  Note that in this example, the line numbers are zero-indexed when passed to
  *  the callout. This differs from the LineBasedKernel which internally converts
@@ -75,7 +75,7 @@ namespace kernel {
  *      StreamSet * const endIndices = P->CreateStreamSet(1, 64); // <i64>[1]
  *      P->CreateKernelCall<ScanIndexGenerator>(ends, endIndices)
  *      Kernel * const reader = P->CreateKernelCall<ScanReader>(source, streamops::Select(P, {{startIndices, {0}}, {endIndices, {0}}}), "callback");
- *      pxDriver.LinkFunction(reader, "callback", callback);
+ *      driver.LinkFunction(reader, "callback", callback);
  */
 class ScanReader : public MultiBlockKernel {
 public:
