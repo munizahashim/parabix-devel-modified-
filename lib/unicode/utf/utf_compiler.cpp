@@ -129,15 +129,6 @@ struct Range {
     bool is_empty() {return lo > hi;}
 };
 
-struct LengthInfo {
-    unsigned lgth;
-    Range range;
-    CC_List ccs;
-    Range actualRange;
-    PabloAST * test;
-    PabloAST * combined_test;
-};
-
 const UTF_Legacy_Compiler::RangeList UTF_Legacy_Compiler::defaultIfHierachy = {
     // Non-ASCII
     {0x80, 0x10FFFF},
@@ -749,6 +740,18 @@ void extract_CCs_by_range(Range r, CC_List & ccs, CC_List & in_range) {
     }
 }
 
+enum U8_Seq_Kind : unsigned {ASCII, TwoByte, ThreeByte, FourByte};
+std::vector<Range> UTF8_Range =
+    {Range{0, 0x7F}, Range{0x80, 0x7FF}, Range{0x800, 0xFFFF}, Range{0x10000, 0x10FFFF}};
+
+struct SeqData {
+    CC_List                 seqCCs;
+    Range                   actualRange;
+    re::CC *                byte1CC;
+    PabloAST *              test;
+    PabloAST *              combinedTest;
+};
+
 class New_UTF_Compiler {
 public:
     New_UTF_Compiler(pablo::Var * Var, PabloBuilder & pb);
@@ -761,15 +764,18 @@ protected:
     //  Depending on the actual CC_List being compiled, up to
     //  4 scope positions will be defined, with corresponding basis
     //  sets and code unit compilers.
+    unsigned                mMaxLength;
+    SeqData                 mSeqData[4];
     unsigned                mScopeLength;
     Basis_Set               mScopeBasis[4];
     std::unique_ptr<cc::CC_Compiler> mCodeUnitCompilers[4];
+    void lengthAnalysis(CC_List & ccs);
     void createLengthHierarchy(CC_List & ccs);
-    void extendLengthHierarchy(std::vector<LengthInfo> & lengthInfo, unsigned i, PabloBuilder & pb);
+    void extendLengthHierarchy(unsigned i, PabloBuilder & pb);
     void subrangePartitioning(CC_List & ccs, Range & range, PabloAST * rangeTest, PabloBuilder & pb);
     void compileSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb);
     void compileUnguardedSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb);
-    re::CC * prefixCC(CC_List & ccs);
+    re::CC * initialCC(CC_List & ccs);
     re::CC * codeUnitCC(re::CC * cc, unsigned codeunit);
     unsigned costModel(CC_List & ccs);
     virtual void prepareScope(unsigned scope, PabloBuilder & pb) = 0;
@@ -801,74 +807,64 @@ void New_UTF_Compiler::compile(Target_List targets, CC_List ccs) {
     createLengthHierarchy(ccs);
 }
 
-
-void New_UTF_Compiler::createLengthHierarchy(CC_List & ccs) {
-    // Maximum number of code units (UTF-8) is 4.
-    std::vector<LengthInfo> lengthInfo;
-    //
-    // For each possible multibyte sequence length, determine
-    // (1) the subsets of the ccs that are of that length
-    // (2) a narrow codepoint range of the ccs of this length
-    // (3) a narrow test for the prefixes of multibyte sequences of that lgth.
-    codepoint_t lgth_base = 0;
-    for (unsigned lgth = 1; lgth <= mEncoder.encoded_length(0x10FFFF); lgth++) {
-        Range lgth_range{lgth_base, mEncoder.max_codepoint_of_length(lgth)};
-        CC_List length_ccs(ccs.size());
-        extract_CCs_by_range(lgth_range, ccs, length_ccs);
-        Range actual_range = CC_Set_Range(length_ccs);
-        if (!actual_range.is_empty()) {
-            PabloAST * lgth_test = nullptr;
-            if (lgth > 1) {
-                re::CC * lgth_test_CC = prefixCC(length_ccs);
-                lgth_test = compile_code_unit(lgth, 1, lgth_test_CC, mPB);
-            } else {
-                lgth_test = mPB.createOnes(); // mPB.createNot(mScopeBasis[0][7]);
-            }
-            lengthInfo.push_back(LengthInfo{lgth, lgth_range, length_ccs, actual_range, lgth_test, lgth_test});
-            llvm::errs() << "lengthInfo.size() = " << lengthInfo.size() << "\n";
+void New_UTF_Compiler::lengthAnalysis(CC_List & ccs) {
+    mMaxLength = 0;
+    for (unsigned k = ASCII; k <= FourByte; k++) {
+        unsigned lgth = k + 1;
+        mSeqData[k].seqCCs.resize(ccs.size());
+        extract_CCs_by_range(UTF8_Range[k], ccs, mSeqData[k].seqCCs);
+        mSeqData[k].actualRange = CC_Set_Range(mSeqData[k].seqCCs);
+        if (!mSeqData[k].actualRange.is_empty()) {
+            mMaxLength = lgth;
         }
-        lgth_base = lgth_range.hi + 1;
-    }
-    if (lengthInfo.size() >= 2) {
-        PabloAST * combined = lengthInfo[lengthInfo.size() - 1].test;
-        for (int i = lengthInfo.size() - 2; i >= 0; i--) {
-            llvm::errs() << "i  = " << i << "\n";
-            if (lengthInfo[i].lgth > 1) {
-                lengthInfo[i].combined_test = mPB.createOr(lengthInfo[i].test, combined);
-                combined = lengthInfo[i].combined_test;
-            }
-        }
-    }
-    unsigned first_pfx = 0;
-    if (lengthInfo[0].lgth == 1) {
-        compileSubrange(lengthInfo[0].ccs, lengthInfo[0].range, lengthInfo[0].test, lengthInfo[0].actualRange, mPB);
-        first_pfx = 1;
-    }
-    if (InitialBit7Test) {
-        auto nested = mPB.createScope();
-        mPB.createIf(mScopeBasis[0][7], nested);
-        extendLengthHierarchy(lengthInfo, first_pfx, nested);
-    } else {
-        extendLengthHierarchy(lengthInfo, first_pfx, mPB);
+        mSeqData[k].byte1CC = initialCC(mSeqData[k].seqCCs);
     }
 }
 
-void New_UTF_Compiler::extendLengthHierarchy(std::vector<LengthInfo> & lengthInfo, unsigned i, PabloBuilder & pb) {
-    llvm::errs() << "extendLengthHierarchy(" << i << ")\n";
-    if (lengthInfo.size() <= i) return;
-    PabloAST * outer_test = lengthInfo[i].combined_test;
+PabloAST * combine(PabloAST * e1, PabloAST * e2, PabloBuilder & pb) {
+    if (e1 == nullptr) return e2;
+    if (e2 == nullptr) return e1;
+    return pb.createOr(e1, e2);
+}
+
+void New_UTF_Compiler::createLengthHierarchy(CC_List & ccs) {
+    lengthAnalysis(ccs);
+    if (!mSeqData[ASCII].actualRange.is_empty()) {
+        compileSubrange(mSeqData[ASCII].seqCCs, UTF8_Range[ASCII], mPB.createOnes(), UTF8_Range[ASCII], mPB);
+    }
+    for (unsigned k = TwoByte; k <= FourByte; k++) {
+        if (mSeqData[k].actualRange.is_empty()) {
+            mSeqData[k].test = nullptr;
+        } else {
+            mSeqData[k].test = compile_code_unit(1, 1, mSeqData[k].byte1CC, mPB);
+        }
+    }
+    mSeqData[FourByte].combinedTest = mSeqData[FourByte].test;
+    mSeqData[ThreeByte].combinedTest = combine(mSeqData[ThreeByte].test, mSeqData[FourByte].combinedTest, mPB);
+    mSeqData[TwoByte].combinedTest = combine(mSeqData[TwoByte].test, mSeqData[ThreeByte].combinedTest, mPB);
+    if (InitialBit7Test) {
+        auto nested = mPB.createScope();
+        mPB.createIf(mScopeBasis[0][7], nested);
+        extendLengthHierarchy(TwoByte, nested);
+    } else {
+        extendLengthHierarchy(TwoByte, mPB);
+    }
+}
+
+void New_UTF_Compiler::extendLengthHierarchy(unsigned k, PabloBuilder & pb) {
+    if (mSeqData[k].combinedTest == nullptr) return;
+    PabloAST * outer_test = mSeqData[k].combinedTest;
     auto nested = pb.createScope();
     pb.createIf(outer_test, nested);
-    //PabloAST * inner_test = outer_test;
-    while (mScopeLength < lengthInfo[i].lgth) {
-        prepareScope(mScopeLength, nested);
-        mScopeLength++;
+    prepareScope(mScopeLength, nested);
+    mScopeLength++;
+    if (!mSeqData[k].actualRange.is_empty()) {
+        codepoint_t test_lo = mEncoder.minCodePointWithCommonCodeUnits(mSeqData[k].actualRange.lo, 1);
+        codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(mSeqData[k].actualRange.hi, 1);
+        Range testRange{test_lo, test_hi};
+        subrangePartitioning(mSeqData[k].seqCCs, testRange, mSeqData[k].test, nested);
     }
-    codepoint_t test_lo = mEncoder.minCodePointWithCommonCodeUnits(lengthInfo[i].actualRange.lo, 1);
-    codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(lengthInfo[i].actualRange.hi, 1);
-    Range testRange{test_lo, test_hi};
-    subrangePartitioning(lengthInfo[i].ccs, testRange, lengthInfo[i].test, nested);
-    extendLengthHierarchy(lengthInfo, i+1, nested);
+    if (k != FourByte) extendLengthHierarchy(k+1, nested);
 }
 
 void New_UTF_Compiler::subrangePartitioning(CC_List & ccs, Range & range, PabloAST * rangeTest, PabloBuilder & pb) {
@@ -1013,7 +1009,7 @@ re::CC * New_UTF_Compiler::codeUnitCC(re::CC * cc, unsigned codeunit) {
     return unitCC;
 }
 
-re::CC * New_UTF_Compiler::prefixCC(CC_List & ccs) {
+re::CC * New_UTF_Compiler::initialCC(CC_List & ccs) {
     re::CC * unitCC = re::makeCC(&Byte);
     for (auto cc : ccs) {
         for (auto i : *cc) {
@@ -1064,7 +1060,7 @@ void UTF_Lookahead_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
     if (SuffixOptimization) {
         // Combine the suffix bits into the current test and discard them.
         inner_test = nested.createAnd(mScopeBasis[scope][7], inner_test);
-        lengthInfo[i].test = nested.createAnd(nested.createNot(mScopeBasis[scope][6]), inner_test);
+        SeqData[i].test = nested.createAnd(nested.createNot(mScopeBasis[scope][6]), inner_test);
         mScopeBasis[scope].resize(6);
     }
 #endif
@@ -1089,7 +1085,7 @@ void UTF_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
     if (SuffixOptimization) {
         // Combine the suffix bits into the current test and discard them.
         inner_test = nested.createAnd(mScopeBasis[scope][7], inner_test);
-        lengthInfo[i].test = nested.createAnd(nested.createNot(mScopeBasis[scope][6]), inner_test);
+        SeqData[i].test = nested.createAnd(nested.createNot(mScopeBasis[scope][6]), inner_test);
         mScopeBasis[scope].resize(6);
     }
 #endif
@@ -1116,6 +1112,12 @@ void UTF_Compiler::compile(Target_List targets, CC_List ccs) {
             llvm::report_fatal_error("mask parameter for the UTF lookahead compiler is a future option.");
         }
         UTF_Lookahead_Compiler utf_compiler(mVar, mPB);
+        utf_compiler.compile(targets, ccs);
+    } else if (UseComputedUTFHierarchy) {
+        if (mMask != nullptr) {
+            llvm::report_fatal_error("mask parameter for the UTF advance compiler is a future option.");
+        }
+        UTF_Advance_Compiler utf_compiler(mVar, mPB);
         utf_compiler.compile(targets, ccs);
     } else {
         UTF_Legacy_Compiler utf_compiler(mVar, mPB, mMask);
