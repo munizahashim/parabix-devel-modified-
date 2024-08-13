@@ -53,13 +53,13 @@ void U21_to_UTF8(ProgBuilderRef P, StreamSet * U21, StreamSet * U8) {
 }
 
 
-UTF8fieldDepositMask::UTF8fieldDepositMask(VirtualDriver &driver, StreamSet * u32basis, StreamSet * u8fieldMask, StreamSet * u8unitCounts, unsigned depositFieldWidth)
-: BlockOrientedKernel(driver, "u8depositMask",
+UTF8fieldDepositMask::UTF8fieldDepositMask(LLVMTypeSystemInterface & ts, StreamSet * u32basis, StreamSet * u8fieldMask, StreamSet * u8unitCounts, unsigned depositFieldWidth)
+: BlockOrientedKernel(ts, "u8depositMask",
 {Binding{"basis", u32basis}},
 {Binding{"fieldDepositMask", u8fieldMask, FixedRate(4)},
 Binding{"extractionMask", u8unitCounts, FixedRate(4)}},
 {}, {},
-{InternalScalar{ScalarType::NonPersistent, driver.getBitBlockType(), "EOFmask"}})
+{InternalScalar{ScalarType::NonPersistent, ts.getBitBlockType(), "EOFmask"}})
 , mDepositFieldWidth(depositFieldWidth) {}
 
 void UTF8fieldDepositMask::generateDoBlockMethod(KernelBuilder & b) {
@@ -126,8 +126,8 @@ void UTF8fieldDepositMask::generateFinalBlockMethod(KernelBuilder & b, Value * c
 // of each UTF-8 sequence, this kernel computes the deposit masks
 // u8initial, u8mask12_17, and u8mask6_11.
 //
-UTF8_DepositMasks::UTF8_DepositMasks (VirtualDriver &driver, StreamSet * u8final, StreamSet * u8initial, StreamSet * u8mask12_17, StreamSet * u8mask6_11)
-: PabloKernel(driver, "UTF8_DepositMasks",
+UTF8_DepositMasks::UTF8_DepositMasks (LLVMTypeSystemInterface & ts, StreamSet * u8final, StreamSet * u8initial, StreamSet * u8mask12_17, StreamSet * u8mask6_11)
+: PabloKernel(ts, "UTF8_DepositMasks",
               {Binding{"u8final", u8final, FixedRate(1), LookAhead(2)}},
               {Binding{"u8initial", u8initial},
                Binding{"u8mask12_17", u8mask12_17},
@@ -156,11 +156,11 @@ void UTF8_DepositMasks::generatePabloMethod() {
 // bits bits 18-20, 11-17, 6-11 and 0-5, as weil as the marker streams u8initial,
 // u8final, u8prefix3 and u8prefix4.
 //
-UTF8assembly::UTF8assembly (VirtualDriver &driver,
+UTF8assembly::UTF8assembly (LLVMTypeSystemInterface & ts,
                             StreamSet * deposit18_20, StreamSet * deposit12_17, StreamSet * deposit6_11, StreamSet * deposit0_5,
                             StreamSet * u8initial, StreamSet * u8final, StreamSet * u8mask6_11, StreamSet * u8mask12_17,
                             StreamSet * u8basis)
-: PabloKernel(driver, "UTF8assembly",
+: PabloKernel(ts, "UTF8assembly",
 {Binding{"dep0_5", deposit0_5, FixedRate(1)},
  Binding{"dep6_11", deposit6_11, FixedRate(1), ZeroExtended()},
  Binding{"dep12_17", deposit12_17, FixedRate(1), ZeroExtended()},

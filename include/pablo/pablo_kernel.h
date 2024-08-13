@@ -143,7 +143,7 @@ public:
 
 protected:
 
-    PabloKernel(VirtualDriver & driver,
+    PabloKernel(LLVMTypeSystemInterface & ts,
                 std::string && kernelName,
                 std::vector<kernel::Binding> stream_inputs = {},
                 std::vector<kernel::Binding> stream_outputs = {},

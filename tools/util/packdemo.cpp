@@ -35,7 +35,7 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 enum class PackOption {packh, packl};
 class PackKernel final : public MultiBlockKernel {
 public:
-    PackKernel(VirtualDriver & driver,
+    PackKernel(LLVMTypeSystemInterface & ts,
               StreamSet * const i16Stream,
               StreamSet * const i8Stream,
               PackOption opt);
@@ -50,8 +50,8 @@ std::string packOptionString(PackOption opt) {
     return "packl";
 }
 
-PackKernel::PackKernel(VirtualDriver &driver, StreamSet * const i16Stream, StreamSet * const i8Stream, PackOption opt)
-: MultiBlockKernel(driver, packOptionString(opt) ,
+PackKernel::PackKernel(LLVMTypeSystemInterface & ts, StreamSet * const i16Stream, StreamSet * const i8Stream, PackOption opt)
+: MultiBlockKernel(ts, packOptionString(opt) ,
 {Binding{"i16Stream", i16Stream}},
     {Binding{"i8Stream", i8Stream}}, {}, {}, {}), mOption(opt)  {}
 

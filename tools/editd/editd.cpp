@@ -175,13 +175,13 @@ typedef void (*preprocessFunctionType)(StreamSetPtr & chStream, const int32_t fd
 
 class PreprocessKernel final: public pablo::PabloKernel {
 public:
-    PreprocessKernel(VirtualDriver & driver, StreamSet * BasisBits, StreamSet * CCResults);
+    PreprocessKernel(LLVMTypeSystemInterface & ts, StreamSet * BasisBits, StreamSet * CCResults);
 protected:
     void generatePabloMethod() override;
 };
 
-PreprocessKernel::PreprocessKernel(VirtualDriver &driver, StreamSet * BasisBits, StreamSet * CCResults)
-: PabloKernel(driver, "editd_preprocess", {{"basis", BasisBits}}, {{"pat", CCResults}}) {
+PreprocessKernel::PreprocessKernel(LLVMTypeSystemInterface & ts, StreamSet * BasisBits, StreamSet * CCResults)
+: PabloKernel(ts, "editd_preprocess", {{"basis", BasisBits}}, {{"pat", CCResults}}) {
 
 }
 
@@ -199,10 +199,10 @@ void PreprocessKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(pat, 3), G);
 }
 
-preprocessFunctionType preprocessPipeline(CPUDriver & driver) {
-    StreamSet * const CCResults = driver.CreateStreamSet(4);
-    Type * const int32Ty = driver.getInt32Ty();
-    auto P = driver.makePipelineWithIO({}, {Bind("CCResults", CCResults, ReturnedBuffer(1))}, {{int32Ty, "fileDescriptor"}});
+preprocessFunctionType preprocessPipeline(CPUDriver & ts) {
+    StreamSet * const CCResults = ts.CreateStreamSet(4);
+    Type * const int32Ty = ts.getInt32Ty();
+    auto P = ts.makePipelineWithIO({}, {Bind("CCResults", CCResults, ReturnedBuffer(1))}, {{int32Ty, "fileDescriptor"}});
     Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
     StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
@@ -238,7 +238,7 @@ LLVM_READNONE std::string createName(const std::vector<std::string> & patterns) 
 
 class PatternKernel final : public pablo::PabloKernel {
 public:
-    PatternKernel(VirtualDriver & driver, const std::vector<std::string> & patterns, StreamSet * pat, StreamSet * E);
+    PatternKernel(LLVMTypeSystemInterface & ts, const std::vector<std::string> & patterns, StreamSet * pat, StreamSet * E);
     StringRef getSignature() const override {
         return mSignature;
     }
@@ -250,8 +250,8 @@ private:
     const std::string mSignature;
 };
 
-PatternKernel::PatternKernel(VirtualDriver & driver, const std::vector<std::string> & patterns, StreamSet * pat, StreamSet * E)
-: PabloKernel(driver, "Editd_pattern_" + getStringHash(createName(patterns)),
+PatternKernel::PatternKernel(LLVMTypeSystemInterface & ts, const std::vector<std::string> & patterns, StreamSet * pat, StreamSet * E)
+: PabloKernel(ts, "Editd_pattern_" + getStringHash(createName(patterns)),
 {{"pat", pat}},
 {{"E", E}})
 , mPatterns(patterns)

@@ -57,7 +57,7 @@ void MergeByMask(PipelineBuilder & P,
 
 const unsigned StreamExpandStrideSize = 4;
 
-StreamExpandKernel::StreamExpandKernel(VirtualDriver &driver,
+StreamExpandKernel::StreamExpandKernel(LLVMTypeSystemInterface & ts,
                                        StreamSet * mask,
                                        StreamSet * source,
                                        StreamSet * expanded,
@@ -65,7 +65,7 @@ StreamExpandKernel::StreamExpandKernel(VirtualDriver &driver,
                                        bool zeroExtend,
                                        const StreamExpandOptimization opt,
                                        const unsigned FieldWidth, ProcessingRateProbabilityDistribution itemsPerOutputUnitProbability)
-: MultiBlockKernel(driver, [&]() -> std::string {
+: MultiBlockKernel(ts, [&]() -> std::string {
                         std::string tmp;
                         raw_string_ostream nm(tmp);
                         nm << "streamExpand"  << StreamExpandStrideSize << ':' << FieldWidth;
@@ -85,11 +85,11 @@ StreamExpandKernel::StreamExpandKernel(VirtualDriver &driver,
 , mFieldWidth(FieldWidth)
 , mSelectedStreamCount(expanded->getNumElements())
 , mOptimization(opt) {
-    setStride(StreamExpandStrideSize * driver.getBitBlockWidth());
+    setStride(StreamExpandStrideSize * ts.getBitBlockWidth());
     if (zeroExtend) {
-        mInputStreamSets.push_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, ZeroExtended(), BlockSize(driver.getBitBlockWidth())));
+        mInputStreamSets.push_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, ZeroExtended(), BlockSize(ts.getBitBlockWidth())));
     } else {
-        mInputStreamSets.push_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, BlockSize(driver.getBitBlockWidth())));
+        mInputStreamSets.push_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, BlockSize(ts.getBitBlockWidth())));
     }
 }
 
@@ -234,14 +234,14 @@ void StreamExpandKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value 
 
 /*************************StreamMergeKernel*********************************/
 const unsigned StreamMergeStrideSize = 4;
-StreamMergeKernel::StreamMergeKernel(VirtualDriver &driver,
+StreamMergeKernel::StreamMergeKernel(LLVMTypeSystemInterface & ts,
                                        StreamSet * mask,
                                        StreamSet * source1,
                                        StreamSet * source2,
                                        StreamSet * merged,
                                        Scalar * base,
                                        const unsigned FieldWidth)
-: MultiBlockKernel(driver, [&]() -> std::string {
+: MultiBlockKernel(ts, [&]() -> std::string {
                         std::string tmp;
                         raw_string_ostream nm(tmp);
                         nm << "streamMerge"  << StreamMergeStrideSize << ':' << FieldWidth;
@@ -256,7 +256,7 @@ StreamMergeKernel::StreamMergeKernel(VirtualDriver &driver,
 {}, {})
 , mFieldWidth(FieldWidth)
 , mSelectedStreamCount(merged->getNumElements()){
-    setStride(StreamMergeStrideSize * driver.getBitBlockWidth());
+    setStride(StreamMergeStrideSize * ts.getBitBlockWidth());
 }
 
 void StreamMergeKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) {
@@ -407,10 +407,10 @@ void StreamMergeKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value *
 }
 /*******************************************************************************************/
 
-FieldDepositKernel::FieldDepositKernel(VirtualDriver &driver
+FieldDepositKernel::FieldDepositKernel(LLVMTypeSystemInterface & ts
                                        , StreamSet * mask, StreamSet * input, StreamSet * output
                                        , const unsigned fieldWidth)
-: MultiBlockKernel(driver, "FieldDeposit" + std::to_string(fieldWidth) + "_" + std::to_string(input->getNumElements()),
+: MultiBlockKernel(ts, "FieldDeposit" + std::to_string(fieldWidth) + "_" + std::to_string(input->getNumElements()),
 {Bind("depositMask", mask)
 , Bind("inputStreamSet", input)},
 {Bind("outputStreamSet", output)},
@@ -537,10 +537,10 @@ void PDEPFieldDepositLogic(KernelBuilder & b, llvm::Value * const numOfStrides, 
     b.SetInsertPoint(done);
 }
 
-PDEPFieldDepositKernel::PDEPFieldDepositKernel(VirtualDriver &driver
+PDEPFieldDepositKernel::PDEPFieldDepositKernel(LLVMTypeSystemInterface & ts
                                                , StreamSet * mask, StreamSet * input, StreamSet * output
                                                , const unsigned fieldWidth)
-: MultiBlockKernel(driver, "PDEPFieldDeposit" + std::to_string(fieldWidth) + "_" + std::to_string(input->getNumElements()) ,
+: MultiBlockKernel(ts, "PDEPFieldDeposit" + std::to_string(fieldWidth) + "_" + std::to_string(input->getNumElements()) ,
                    {Binding{"depositMask", mask},
                     Binding{"inputStreamSet", input}},
                    {Binding{"outputStreamSet", output}},
@@ -556,13 +556,13 @@ void PDEPFieldDepositKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Va
 }
 
 
-PDEPkernel::PDEPkernel(VirtualDriver &driver, const unsigned swizzleFactor, std::string name)
-: MultiBlockKernel(driver, std::move(name),
+PDEPkernel::PDEPkernel(LLVMTypeSystemInterface & ts, const unsigned swizzleFactor, std::string name)
+: MultiBlockKernel(ts, std::move(name),
                    // input stream sets
-{Binding{driver.getStreamSetTy(), "marker", FixedRate(), Principal()},
-    Binding{driver.getStreamSetTy(swizzleFactor), "source", PopcountOf("marker"), BlockSize(driver.getBitBlockWidth() / swizzleFactor) }},
+{Binding{ts.getStreamSetTy(), "marker", FixedRate(), Principal()},
+    Binding{ts.getStreamSetTy(swizzleFactor), "source", PopcountOf("marker"), BlockSize(ts.getBitBlockWidth() / swizzleFactor) }},
                    // output stream set
-{Binding{driver.getStreamSetTy(swizzleFactor), "output", FixedRate(), BlockSize(driver.getBitBlockWidth() / swizzleFactor)}},
+{Binding{ts.getStreamSetTy(swizzleFactor), "output", FixedRate(), BlockSize(ts.getBitBlockWidth() / swizzleFactor)}},
 {}, {}, {})
 , mSwizzleFactor(swizzleFactor) {
 }
@@ -687,13 +687,13 @@ std::string InsertString(StreamSet * mask, InsertPosition p) {
 
 class UnitInsertionExtractionMasks final : public BlockOrientedKernel {
 public:
-    UnitInsertionExtractionMasks(VirtualDriver & driver,
+    UnitInsertionExtractionMasks(LLVMTypeSystemInterface & ts,
                                  StreamSet * insertion_mask, StreamSet * stream01, StreamSet * valid01, InsertPosition p = InsertPosition::Before)
-    : BlockOrientedKernel(driver, "unitInsertionExtractionMasks" + InsertString(insertion_mask, p),
+    : BlockOrientedKernel(ts, "unitInsertionExtractionMasks" + InsertString(insertion_mask, p),
         {Binding{"insertion_mask", insertion_mask}},
         {Binding{"stream01", stream01, FixedRate(2)}, Binding{"valid01", valid01, FixedRate(2)}},
         {}, {},
-        {InternalScalar{ScalarType::NonPersistent, driver.getBitBlockType(), "EOFmask"}}),
+        {InternalScalar{ScalarType::NonPersistent, ts.getBitBlockType(), "EOFmask"}}),
     mInsertPos(p) {}
 protected:
     void generateDoBlockMethod(KernelBuilder & b) override;
@@ -753,8 +753,8 @@ StreamSet * UnitInsertionSpreadMask(PipelineBuilder & P, StreamSet * insertion_m
 
 class UGT_Kernel final : public pablo::PabloKernel {
 public:
-    UGT_Kernel(VirtualDriver & driver, StreamSet * bixnum, unsigned immediate, StreamSet * result) :
-    pablo::PabloKernel(driver, "ugt_" + std::to_string(immediate) + "_" + std::to_string(bixnum->getNumElements()),
+    UGT_Kernel(LLVMTypeSystemInterface & ts, StreamSet * bixnum, unsigned immediate, StreamSet * result) :
+    pablo::PabloKernel(ts, "ugt_" + std::to_string(immediate) + "_" + std::to_string(bixnum->getNumElements()),
                 {Binding{"bixnum", bixnum}}, {Binding{"result", result}}), mTestVal(immediate) {}
 protected:
     void generatePabloMethod() override;
@@ -772,9 +772,9 @@ void UGT_Kernel::generatePabloMethod() {
 
 class SpreadMaskStep final : public pablo::PabloKernel {
 public:
-    SpreadMaskStep(VirtualDriver & driver,
+    SpreadMaskStep(LLVMTypeSystemInterface & ts,
                    StreamSet * bixnum, StreamSet * result, InsertPosition p = InsertPosition::Before) :
-    pablo::PabloKernel(driver, "spreadMaskStep_" + InsertString(bixnum, p),
+    pablo::PabloKernel(ts, "spreadMaskStep_" + InsertString(bixnum, p),
                 {Bind("bixnum", bixnum, LookAhead(1))},
                 {Bind("result", result)}), mInsertPos(p) {}
 protected:

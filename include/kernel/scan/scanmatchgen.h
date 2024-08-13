@@ -14,7 +14,7 @@ namespace kernel {
 
 class ScanMatchKernel : public MultiBlockKernel {
 public:
-    ScanMatchKernel(VirtualDriver & driver,
+    ScanMatchKernel(LLVMTypeSystemInterface & ts,
                     StreamSet * const Matches, StreamSet * const LineBreakStream, StreamSet * const ByteStream,
                     Scalar * const callbackObject, unsigned strideBlocks = 1);
 private:
@@ -23,7 +23,7 @@ private:
 
 class ScanBatchKernel : public MultiBlockKernel {
 public:
-    ScanBatchKernel(VirtualDriver & driver,
+    ScanBatchKernel(LLVMTypeSystemInterface & ts,
                     StreamSet * const Matches, StreamSet * const LineBreakStream, StreamSet * const ByteStream,
                     Scalar * const callbackObject, unsigned strideBlocks = 1);
 private:
@@ -32,7 +32,7 @@ private:
 
 class MatchCoordinatesKernel : public MultiBlockKernel {
 public:
-    MatchCoordinatesKernel(VirtualDriver & driver,
+    MatchCoordinatesKernel(LLVMTypeSystemInterface & ts,
                            StreamSet * const Matches, StreamSet * const LineBreakStream,
                            StreamSet * const Coordinates, unsigned strideBlocks = 1);
 private:
@@ -41,7 +41,7 @@ private:
 
 class BatchCoordinatesKernel : public MultiBlockKernel {
 public:
-    BatchCoordinatesKernel(VirtualDriver & driver,
+    BatchCoordinatesKernel(LLVMTypeSystemInterface & ts,
                            StreamSet * const Matches, StreamSet * const LineBreakStream, StreamSet * const Coordinates,
                            Scalar * const callbackObject, unsigned strideBlocks = 1);
 private:
@@ -50,7 +50,7 @@ private:
 
 class MatchReporter : public SegmentOrientedKernel {
 public:
-    MatchReporter(VirtualDriver & driver,
+    MatchReporter(LLVMTypeSystemInterface & ts,
                   StreamSet * ByteStream, StreamSet * const Coordinates, Scalar * const callbackObject);
 private:
     void generateDoSegmentMethod(KernelBuilder & b) override;
@@ -58,7 +58,7 @@ private:
 
 class MatchFilterKernel : public MultiBlockKernel {
 public:
-    MatchFilterKernel(VirtualDriver & driver, StreamSet * const MatchStarts, StreamSet * const LineBreaks,
+    MatchFilterKernel(LLVMTypeSystemInterface & ts, StreamSet * const MatchStarts, StreamSet * const LineBreaks,
                       StreamSet * const ByteStream, StreamSet * Output, unsigned strideBlocks = 1);
 private:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
@@ -66,7 +66,7 @@ private:
 
 class ColorizedReporter : public SegmentOrientedKernel {
 public:
-    ColorizedReporter(VirtualDriver & driver,
+    ColorizedReporter(LLVMTypeSystemInterface & ts,
                        StreamSet * ByteStream, StreamSet * const SourceCoords, StreamSet * const ColorizedCoords,
                        Scalar * const callbackObject);
 private:

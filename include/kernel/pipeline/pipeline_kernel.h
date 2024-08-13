@@ -128,7 +128,7 @@ public:
 
 protected:
 
-    PipelineKernel(VirtualDriver & driver,
+    PipelineKernel(LLVMTypeSystemInterface & ts,
                    std::string && signature,
                    const unsigned numOfKernelFamilyCalls,
                    Kernels && kernels, CallBindings && callBindings,
@@ -137,7 +137,7 @@ protected:
                    Relationships && internallyGenerated,
                    LengthAssertions && lengthAssertions);
 
-    PipelineKernel(VirtualDriver & driver,
+    PipelineKernel(LLVMTypeSystemInterface & ts,
                    Bindings && stream_inputs, Bindings && stream_outputs,
                    Bindings && scalar_inputs, Bindings && scalar_outputs);
 
@@ -153,7 +153,7 @@ private:
 
     struct Internal {};
 
-    PipelineKernel(Internal, VirtualDriver & driver,
+    PipelineKernel(Internal, LLVMTypeSystemInterface & ts,
                    std::string && signature,
                    const unsigned numOfKernelFamilyCalls,
                    Kernels && kernels, CallBindings && callBindings,

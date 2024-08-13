@@ -102,13 +102,13 @@ void editdCPUKernel::generateFinalBlockMethod(KernelBuilder & b, Value * remaini
 
 
 
-editdCPUKernel::editdCPUKernel(VirtualDriver &driver,
+editdCPUKernel::editdCPUKernel(LLVMTypeSystemInterface & ts,
                                const unsigned editDistance,
                                const unsigned patternLen,
                                const unsigned groupSize,
                                Scalar * const pattStream,
                                StreamSet * const CCStream, StreamSet * const ResultStream)
-: BlockOrientedKernel(driver, "EditDistanceCPU" + std::to_string(patternLen) + ":" + std::to_string(groupSize),
+: BlockOrientedKernel(ts, "EditDistanceCPU" + std::to_string(patternLen) + ":" + std::to_string(groupSize),
 // input stream
 {Binding{"CCStream", CCStream}},
 // output stream
@@ -118,8 +118,8 @@ editdCPUKernel::editdCPUKernel(VirtualDriver &driver,
 // output scalar
 {},
 // internal scalars
-{InternalScalar{ScalarType::NonPersistent, driver.getBitBlockType(), "EOFmask"},
- InternalScalar{ScalarType::Internal, ArrayType::get(driver.getBitBlockType(), (patternLen * groupSize * 4 * ResultStream->getNumElements())), "strideCarry"}})
+{InternalScalar{ScalarType::NonPersistent, ts.getBitBlockType(), "EOFmask"},
+ InternalScalar{ScalarType::Internal, ArrayType::get(ts.getBitBlockType(), (patternLen * groupSize * 4 * ResultStream->getNumElements())), "strideCarry"}})
 , mEditDistance(editDistance)
 , mPatternLen(patternLen)
 , mGroupSize(groupSize) {

@@ -40,7 +40,7 @@ public:
 
 protected:
 
-    OptimizationBranch(VirtualDriver & driver,
+    OptimizationBranch(LLVMTypeSystemInterface & ts,
                        std::string && signature,
                        not_null<Relationship *> condition,
                        Kernel * const nonZeroKernel,

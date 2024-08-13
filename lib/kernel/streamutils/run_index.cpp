@@ -22,9 +22,9 @@ Bindings RunIndexOutputBindings(StreamSet * runIndex, StreamSet * overflow) {
 
 
 
-RunIndex::RunIndex(VirtualDriver &driver,
+RunIndex::RunIndex(LLVMTypeSystemInterface & ts,
                    StreamSet * const runMarks, StreamSet * runIndex, StreamSet * overflow, Kind kind, Numbering n)
-    : PabloKernel(driver, [&]() -> std::string {
+    : PabloKernel(ts, [&]() -> std::string {
                         std::string tmp;
                         llvm::raw_string_ostream out(tmp);
                         out << "RunIndex-" << runIndex->getNumElements();

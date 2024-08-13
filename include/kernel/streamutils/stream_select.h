@@ -71,8 +71,8 @@ using SelectedInputList = std::vector<SelectedInput>;
  */
 class StreamSelect : public BlockOrientedKernel {
 public:
-    StreamSelect(VirtualDriver & driver, StreamSet * output, SelectOperation operation);
-    StreamSelect(VirtualDriver & driver, StreamSet * output, SelectOperationList operations);
+    StreamSelect(LLVMTypeSystemInterface & ts, StreamSet * output, SelectOperation operation);
+    StreamSelect(LLVMTypeSystemInterface & ts, StreamSet * output, SelectOperationList operations);
 
 protected:
     void generateDoBlockMethod(KernelBuilder & b) override;
@@ -103,7 +103,7 @@ private:
  */
 class IStreamSelect : public MultiBlockKernel {
 public:
-    IStreamSelect(VirtualDriver & driver, StreamSet * output, SelectOperation operation);
+    IStreamSelect(LLVMTypeSystemInterface & ts, StreamSet * output, SelectOperation operation);
 
 protected:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;

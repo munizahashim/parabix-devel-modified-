@@ -20,7 +20,7 @@ namespace kernel {
 
 class SwizzledMultiplePDEPkernel final : public MultiBlockKernel {
 public:
-    SwizzledMultiplePDEPkernel(VirtualDriver & driver, const unsigned swizzleFactor = 4, const unsigned numberOfStreamSet = 1, std::string name = "SwizzledMultiplePDEP");
+    SwizzledMultiplePDEPkernel(LLVMTypeSystemInterface & ts, const unsigned swizzleFactor = 4, const unsigned numberOfStreamSet = 1, std::string name = "SwizzledMultiplePDEP");
 private:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final;
 private:

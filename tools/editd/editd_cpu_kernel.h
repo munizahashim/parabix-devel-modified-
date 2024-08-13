@@ -15,7 +15,7 @@ namespace kernel {
 class editdCPUKernel : public BlockOrientedKernel {
 public:
 
-    editdCPUKernel(VirtualDriver & driver,
+    editdCPUKernel(LLVMTypeSystemInterface & ts,
                    const unsigned editDistance, const unsigned patternLen, const unsigned groupSize,
                    Scalar * const pattStream,
                    StreamSet * const CCStream, StreamSet * const ResultStream);

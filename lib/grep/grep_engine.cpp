@@ -829,7 +829,7 @@ void EmitMatch::finalize_match(char * buffer_end) {
 
 class GrepColourizationPipeline : public PipelineKernel {
 public:
-    GrepColourizationPipeline(VirtualDriver & driver,
+    GrepColourizationPipeline(LLVMTypeSystemInterface & driver,
                               StreamSet * SourceCoords,
                               StreamSet * MatchSpans,
                               StreamSet * Basis,

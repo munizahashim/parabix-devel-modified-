@@ -34,14 +34,14 @@ void MultiBlockKernel::generateKernelMethod(KernelBuilder & b) {
 }
 
 // MULTI-BLOCK KERNEL CONSTRUCTOR
-MultiBlockKernel::MultiBlockKernel(VirtualDriver &driver,
+MultiBlockKernel::MultiBlockKernel(LLVMTypeSystemInterface & ts,
     std::string && kernelName,
     Bindings && stream_inputs,
     Bindings && stream_outputs,
     Bindings && scalar_parameters,
     Bindings && scalar_outputs,
     InternalScalars && internal_scalars)
-: MultiBlockKernel(driver,
+: MultiBlockKernel(ts,
     TypeId::MultiBlock,
     std::move(kernelName),
     std::move(stream_inputs),
@@ -52,7 +52,7 @@ MultiBlockKernel::MultiBlockKernel(VirtualDriver &driver,
 
 }
 
-MultiBlockKernel::MultiBlockKernel(VirtualDriver &driver,
+MultiBlockKernel::MultiBlockKernel(LLVMTypeSystemInterface & ts,
     const TypeId typeId,
     std::string && kernelName,
     Bindings && stream_inputs,
@@ -60,7 +60,7 @@ MultiBlockKernel::MultiBlockKernel(VirtualDriver &driver,
     Bindings && scalar_parameters,
     Bindings && scalar_outputs,
     InternalScalars && internal_scalars)
-: Kernel(driver, typeId,
+: Kernel(ts, typeId,
      std::move(kernelName),
      std::move(stream_inputs),
      std::move(stream_outputs),

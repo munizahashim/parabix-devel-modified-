@@ -212,8 +212,8 @@ void UntilNkernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * cons
     b.SetInsertPoint(segmentDone);
 }
 
-UntilNkernel::UntilNkernel(VirtualDriver &driver, Scalar * N, StreamSet * Markers, StreamSet * FirstN, UntilNkernel::Mode m)
-: MultiBlockKernel(driver, [&]() -> std::string {
+UntilNkernel::UntilNkernel(LLVMTypeSystemInterface & ts, Scalar * N, StreamSet * Markers, StreamSet * FirstN, UntilNkernel::Mode m)
+: MultiBlockKernel(ts, [&]() -> std::string {
     std::string tmp;
     raw_string_ostream nm(tmp);
     nm << "UntilN_";

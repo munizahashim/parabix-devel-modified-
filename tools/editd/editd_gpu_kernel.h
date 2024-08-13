@@ -15,7 +15,7 @@ namespace kernel {
 class editdGPUKernel : public BlockOrientedKernel {
 public:
 
-    editdGPUKernel(VirtualDriver & driver, unsigned dist, unsigned pattLen, unsigned groupSize);
+    editdGPUKernel(LLVMTypeSystemInterface & ts, unsigned dist, unsigned pattLen, unsigned groupSize);
 
 
 private:

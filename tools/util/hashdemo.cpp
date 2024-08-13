@@ -68,13 +68,13 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 
 class WordMarkKernel : public pablo::PabloKernel {
 public:
-    WordMarkKernel(VirtualDriver & driver, StreamSet * BasisBits, StreamSet * WordMarks);
+    WordMarkKernel(LLVMTypeSystemInterface & ts, StreamSet * BasisBits, StreamSet * WordMarks);
 protected:
     void generatePabloMethod() override;
 };
 
-WordMarkKernel::WordMarkKernel(VirtualDriver & driver, StreamSet * BasisBits, StreamSet * WordMarks)
-: PabloKernel(driver, "WordMarks" + UTF::kernelAnnotation(), {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
+WordMarkKernel::WordMarkKernel(LLVMTypeSystemInterface & ts, StreamSet * BasisBits, StreamSet * WordMarks)
+: PabloKernel(ts, "WordMarks" + UTF::kernelAnnotation(), {Binding{"source", BasisBits}}, {Binding{"WordMarks", WordMarks}}) { }
 
 void WordMarkKernel::generatePabloMethod() {
     pablo::PabloBuilder pb(getEntryScope());
@@ -89,9 +89,9 @@ void WordMarkKernel::generatePabloMethod() {
 
 class ParseSymbols : public pablo::PabloKernel {
 public:
-    ParseSymbols(VirtualDriver & driver,
+    ParseSymbols(LLVMTypeSystemInterface & ts,
                 StreamSet * basisBits, StreamSet * wordChar, StreamSet * symbolRuns)
-    : pablo::PabloKernel(driver, "ParseSymbols",
+    : pablo::PabloKernel(ts, "ParseSymbols",
                          {Binding{"basisBits", basisBits, FixedRate(1), LookAhead(1)},
                              Binding{"wordChar", wordChar, FixedRate(1), LookAhead(3)}},
                          {Binding{"symbolRuns", symbolRuns}}) { }
@@ -129,7 +129,7 @@ void ParseSymbols::generatePabloMethod() {
 
 class RunLengthSelector final: public pablo::PabloKernel {
 public:
-    RunLengthSelector(VirtualDriver & driver,
+    RunLengthSelector(LLVMTypeSystemInterface & ts,
                       unsigned lo,
                       unsigned hi,
                       StreamSet * symbolRun, StreamSet * const lengthBixNum,
@@ -141,14 +141,14 @@ protected:
     unsigned mHi;
 };
 
-RunLengthSelector::RunLengthSelector(VirtualDriver &driver,
+RunLengthSelector::RunLengthSelector(LLVMTypeSystemInterface & ts,
                            unsigned lo,
                            unsigned hi,
                            StreamSet * symbolRun,
                            StreamSet * const lengthBixNum,
                            StreamSet * overflow,
                            StreamSet * selected)
-: PabloKernel(driver, "RunLengthSelector" + std::to_string(lengthBixNum->getNumElements()) + "x1:" + std::to_string(lo) + "-" + std::to_string(lo),
+: PabloKernel(ts, "RunLengthSelector" + std::to_string(lengthBixNum->getNumElements()) + "x1:" + std::to_string(lo) + "-" + std::to_string(lo),
               {Binding{"symbolRun", symbolRun, FixedRate(), LookAhead(1)},
                   Binding{"lengthBixNum", lengthBixNum},
                   Binding{"overflow", overflow}},

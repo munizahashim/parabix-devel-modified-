@@ -7,7 +7,7 @@ namespace kernel {
 
 class RandomStreamKernel final : public SegmentOrientedKernel {
 public:
-    RandomStreamKernel(VirtualDriver & driver, unsigned seed, unsigned valueWidth, size_t streamLength);
+    RandomStreamKernel(LLVMTypeSystemInterface & ts, unsigned seed, unsigned valueWidth, size_t streamLength);
     void generateInitializeMethod(KernelBuilder & b) override;
     void generateDoSegmentMethod(KernelBuilder & b) override;
 protected:

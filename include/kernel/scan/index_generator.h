@@ -25,7 +25,7 @@ namespace kernel {
  */
 class ScanIndexGenerator : public SingleStreamScanKernelTemplate {
 public:
-    ScanIndexGenerator(VirtualDriver & driver, StreamSet * scan, StreamSet * output);
+    ScanIndexGenerator(LLVMTypeSystemInterface & ts, StreamSet * scan, StreamSet * output);
 protected:
     void generateProcessingLogic(
         KernelBuilder & b, 

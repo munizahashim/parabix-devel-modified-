@@ -19,7 +19,7 @@ class StreamEquivalenceKernel : public MultiBlockKernel {
 public:
     enum class Mode { EQ, NE };
 
-    StreamEquivalenceKernel(VirtualDriver & driver, Mode mode, StreamSet * x, StreamSet * y, Scalar * outPtr);
+    StreamEquivalenceKernel(LLVMTypeSystemInterface & ts, Mode mode, StreamSet * x, StreamSet * y, Scalar * outPtr);
     void generateInitializeMethod(KernelBuilder & b) override;
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
     void generateFinalizeMethod(KernelBuilder & b) override;

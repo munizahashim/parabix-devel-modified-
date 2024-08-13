@@ -21,7 +21,7 @@ namespace kernel {
 
 class ZeroInsertBixNum final : public pablo::PabloKernel {
 public:
-    ZeroInsertBixNum(VirtualDriver & driver, const std::vector<unsigned> &insertAmts,
+    ZeroInsertBixNum(LLVMTypeSystemInterface & ts, const std::vector<unsigned> &insertAmts,
                        StreamSet * insertMarks, StreamSet * insertBixNum);
     void generatePabloMethod() override;
     bool hasSignature() const override { return true; }
@@ -37,7 +37,7 @@ private:
 
 class StringReplaceKernel final : public pablo::PabloKernel {
 public:
-    StringReplaceKernel(VirtualDriver & driver, const std::vector<std::string> & insertStrs,
+    StringReplaceKernel(LLVMTypeSystemInterface & ts, const std::vector<std::string> & insertStrs,
                         StreamSet * basis, StreamSet * spreadMask,
                         StreamSet * insertMarks, StreamSet * runIndex,
                         StreamSet * output,

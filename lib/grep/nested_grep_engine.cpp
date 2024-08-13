@@ -23,12 +23,12 @@ namespace grep {
 class CopyBreaksToMatches final : public MultiBlockKernel {
 public:
 
-    CopyBreaksToMatches(VirtualDriver & driver,
+    CopyBreaksToMatches(LLVMTypeSystemInterface & ts,
                StreamSet * const BasisBits,
                StreamSet * const u8index,
                StreamSet * const breaks,
                StreamSet * const matches)
-    : MultiBlockKernel(driver
+    : MultiBlockKernel(ts
                        , "gitignoreC"
                        // inputs
                        , {{"BasisBits", BasisBits}, {"u8index", u8index}, {"breaks", breaks}}
@@ -56,7 +56,7 @@ class NestedGrepPipelineKernel : public PipelineKernel {
 public:
 
 
-    NestedGrepPipelineKernel(BaseDriver & driver,
+    NestedGrepPipelineKernel(BaseDriver & ts,
 
                              StreamSet * const BasisBits,
                              StreamSet * const u8index,
@@ -67,7 +67,7 @@ public:
                              const re::PatternVector & patterns,
                              const bool caseInsensitive,
                              re::CC * const breakCC)
-: NestedGrepPipelineKernel(driver,
+: NestedGrepPipelineKernel(ts,
      BasisBits, u8index, breaks, matches
      // make kernel list
      , [&]() -> Kernels {
@@ -83,11 +83,11 @@ public:
 
          if (LLVM_LIKELY(outerKernel != nullptr)) {
              // assert (outerKernel->hasFamilyName());
-             resultSoFar = driver.CreateStreamSet();
+             resultSoFar = ts.CreateStreamSet();
              outerKernel->setOutputStreamSetAt(0, resultSoFar);
              // if we already constructed the outer kernel through nesting,
              // it may not be necessary to add it back to the execution engine.
-             driver.addKernel(outerKernel);
+             ts.addKernel(outerKernel);
              kernels.emplace_back(outerKernel, PipelineKernel::Family);
          }
 
@@ -96,7 +96,7 @@ public:
              if (LLVM_UNLIKELY(i == (n - 1UL))) {
                  MatchResults = matches;
              } else {
-                 MatchResults = driver.CreateStreamSet();
+                 MatchResults = ts.CreateStreamSet();
              }
 
              auto options = std::make_unique<GrepKernelOptions>();
@@ -117,13 +117,13 @@ public:
                  options->setCombiningStream(exclude ? GrepCombiningType::Exclude : GrepCombiningType::Include, resultSoFar);
              }
              options->addExternal("UTF8_index", u8index);
-             ICGrepKernel * const matcher = new ICGrepKernel(driver, std::move(options));
-             driver.addKernel(matcher);
+             ICGrepKernel * const matcher = new ICGrepKernel(ts, std::move(options));
+             ts.addKernel(matcher);
              kernels.emplace_back(matcher, PipelineKernel::KernelBindingFlag::Family);
              resultSoFar = MatchResults;
          }
          assert (resultSoFar == matches);
-         driver.generateUncachedKernels();
+         ts.generateUncachedKernels();
          return kernels;
      }()) {
 
@@ -131,13 +131,13 @@ public:
 
 private:
 
-    NestedGrepPipelineKernel(BaseDriver & driver,
+    NestedGrepPipelineKernel(BaseDriver & ts,
                              StreamSet * const BasisBits,
                              StreamSet * const u8index,
                              StreamSet * const breaks,
                              StreamSet * const matches,
                              Kernels && kernels)
-        : PipelineKernel(driver
+        : PipelineKernel(ts
                          // signature
                          , [&]() -> std::string {
                             std::string tmp;
@@ -184,10 +184,10 @@ private:
 
 };
 
-NestedInternalSearchEngine::NestedInternalSearchEngine(BaseDriver &driver)
+NestedInternalSearchEngine::NestedInternalSearchEngine(BaseDriver & ts)
 : mGrepRecordBreak(GrepRecordBreakKind::LF)
 , mCaseInsensitive(false)
-, mGrepDriver(driver)
+, mGrepDriver(ts)
 , mBreakCC(nullptr)
 , mNested(1, nullptr) {
 

@@ -42,7 +42,7 @@ static cl::opt<bool> optVerbose("v", cl::desc("Print verbose output"), cl::init(
 
 class RepeatingSourceKernel final : public SegmentOrientedKernel {
 public:
-    RepeatingSourceKernel(VirtualDriver & driver, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, Scalar * repLength, const unsigned fillSize = 1024);
+    RepeatingSourceKernel(LLVMTypeSystemInterface & driver, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, Scalar * repLength, const unsigned fillSize = 1024);
 protected:
     bool allocatesInternalStreamSets() const override { return true; }
     void generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * expectedNumOfStrides) override;
@@ -77,14 +77,14 @@ std::string RepeatingSourceKernel::makeSignature(const std::vector<std::vector<u
     return tmp;
 }
 
-RepeatingSourceKernel::RepeatingSourceKernel(VirtualDriver &driver, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, Scalar * repLength, const unsigned fillSize)
-: SegmentOrientedKernel(driver, getStringHash(makeSignature(pattern, output, fillSize)),
+RepeatingSourceKernel::RepeatingSourceKernel(LLVMTypeSystemInterface & ts, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, Scalar * repLength, const unsigned fillSize)
+: SegmentOrientedKernel(ts, getStringHash(makeSignature(pattern, output, fillSize)),
 // input streams
 {},
 // output stream
 {Binding{"output", output, BoundedRate(0, fillSize), { ManagedBuffer(), Linear() }}},
 // input scalar
-{Binding{driver.getSizeTy(), "repLength", repLength}},
+{Binding{ts.getSizeTy(), "repLength", repLength}},
 {},
 // internal scalar
 {})
@@ -92,10 +92,10 @@ RepeatingSourceKernel::RepeatingSourceKernel(VirtualDriver &driver, std::vector<
 , Pattern(std::move(pattern)) {
     addAttribute(MustExplicitlyTerminate());
     setStride(1);
-    PointerType * const voidPtrTy = driver.getVoidPtrTy();
+    PointerType * const voidPtrTy = ts.getVoidPtrTy();
     addInternalScalar(voidPtrTy, "buffer");
     addInternalScalar(voidPtrTy, "ancillaryBuffer");
-    IntegerType * const sizeTy = driver.getSizeTy();
+    IntegerType * const sizeTy = ts.getSizeTy();
     addInternalScalar(sizeTy, "effectiveCapacity");
 }
 
@@ -446,7 +446,7 @@ class StreamEq : public MultiBlockKernel {
 public:
     enum class Mode { EQ, NE };
 
-    StreamEq(VirtualDriver & driver, StreamSet * x, const bool unalignedLHS, StreamSet * y, const bool unalignedRHS, Scalar * outPtr);
+    StreamEq(LLVMTypeSystemInterface & ts, StreamSet * x, const bool unalignedLHS, StreamSet * y, const bool unalignedRHS, Scalar * outPtr);
     void generateInitializeMethod(KernelBuilder & b) override;
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
     void generateFinalizeMethod(KernelBuilder & b) override;
@@ -472,13 +472,13 @@ inline Bindings StreamEq::makeInputBindings(StreamSet * lhs, const bool unaligne
     return bindings;
 }
 
-StreamEq::StreamEq(VirtualDriver &driver,
+StreamEq::StreamEq(LLVMTypeSystemInterface & ts,
     StreamSet * lhs,
     const bool unalignedLHS,
     StreamSet * rhs,
     const bool unalignedRHS,
     Scalar * outPtr)
-    : MultiBlockKernel(driver, [&]() -> std::string {
+    : MultiBlockKernel(ts, [&]() -> std::string {
        std::string backing;
        raw_string_ostream str(backing);
        str << "StreamEq::["
@@ -499,7 +499,7 @@ StreamEq::StreamEq(VirtualDriver &driver,
     {},
     {{"result_ptr", outPtr}},
     {},
-    {InternalScalar(driver.getInt1Ty(), "accum")})
+    {InternalScalar(ts.getInt1Ty(), "accum")})
 , UnalignedLHS(unalignedLHS)
 , UnalignedRHS(unalignedRHS)
 {
@@ -611,12 +611,12 @@ using PatternVec = std::vector<std::vector<uint64_t>>;
 
 class NestedRepeatingStreamSetTest : public PipelineKernel {
 public:
-    NestedRepeatingStreamSetTest(VirtualDriver & driver,
+    NestedRepeatingStreamSetTest(LLVMTypeSystemInterface & ts,
                                 const PatternVec & pattern,
                                 const bool unaligned,
                                 StreamSet * const Output,
                                 Scalar * const invalid)
-        : PipelineKernel(driver
+        : PipelineKernel(ts
                          // signature
                          , "NestedRepeatingStreamSetTest"
                            + std::to_string(Output->getNumElements())
@@ -633,7 +633,7 @@ public:
                          // stream outputs
                          , {}
                          // input scalars
-                         , {Binding{driver.getInt32Ty()->getPointerTo(), "invalid", invalid}}
+                         , {Binding{ts.getInt32Ty()->getPointerTo(), "invalid", invalid}}
                          // output scalars
                          , {}
                          // internally generated streamsets
@@ -678,13 +678,13 @@ const bool mAllowUnaligned;
 
 class MultiLevelNestingTest : public PipelineKernel {
 public:
-    MultiLevelNestingTest(VirtualDriver & driver,
+    MultiLevelNestingTest(LLVMTypeSystemInterface & ts,
                           const PatternVec & pattern,
                           const bool unaligned,
                           const bool familyCall,
                           StreamSet * const Output,
                           Scalar * const invalid)
-        : PipelineKernel(driver
+        : PipelineKernel(ts
                          // signature
                          , [&]() -> std::string {
                             std::string tmp;
@@ -710,7 +710,7 @@ public:
                          // stream outputs
                          , {}
                          // input scalars
-                         , {Binding{driver.getInt32Ty()->getPointerTo(), "invalid", invalid}}
+                         , {Binding{ts.getInt32Ty()->getPointerTo(), "invalid", invalid}}
                          // output scalars
                          , {}
                          // internally generated streamsets

@@ -128,8 +128,8 @@ static cl::opt<bool> LowerHex("l", cl::desc("Use lower case hex output (default 
 //
 class Hexify : public PabloKernel {
 public:
-    Hexify(VirtualDriver & driver, StreamSet * insertMask, StreamSet * spreadBasis, StreamSet * hexBasis)
-        : PabloKernel(driver, LowerHex ? "Hexify_lc" : "Hexify",
+    Hexify(LLVMTypeSystemInterface & ts, StreamSet * insertMask, StreamSet * spreadBasis, StreamSet * hexBasis)
+        : PabloKernel(ts, LowerHex ? "Hexify_lc" : "Hexify",
                       {Binding{"insertMask", insertMask}, Binding{"spreadBasis", spreadBasis}},
                       {Binding{"hexBasis", hexBasis}}) {}
 protected:

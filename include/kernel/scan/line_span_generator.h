@@ -29,7 +29,7 @@ namespace kernel {
  */
 class LineSpanGenerator : public SingleStreamScanKernelTemplate {
 public:
-    LineSpanGenerator(VirtualDriver & driver, StreamSet * linebreaks, StreamSet * output);
+    LineSpanGenerator(LLVMTypeSystemInterface & ts, StreamSet * linebreaks, StreamSet * output);
 protected:
     void generateProcessingLogic(KernelBuilder & b, llvm::Value * absoluteIndex) override;
 private:
@@ -56,7 +56,7 @@ private:
  */
 class LineSpanFilterKernel : public MultiBlockKernel {
 public:
-    LineSpanFilterKernel(VirtualDriver & driver, StreamSet * lineNumbers, StreamSet * spans, StreamSet * output);
+    LineSpanFilterKernel(LLVMTypeSystemInterface & ts, StreamSet * lineNumbers, StreamSet * spans, StreamSet * output);
 protected:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };

@@ -569,8 +569,8 @@ std::string makeSourceName(StringRef prefix, const unsigned fieldWidth, const un
     return tmp;
 }
 
-MMapSourceKernel::MMapSourceKernel(VirtualDriver & driver, Scalar * const fd, StreamSet * const outputStream)
-: SegmentOrientedKernel(driver, makeSourceName("mmap_source", outputStream->getFieldWidth())
+MMapSourceKernel::MMapSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const fd, StreamSet * const outputStream)
+: SegmentOrientedKernel(ts, makeSourceName("mmap_source", outputStream->getFieldWidth())
 // input streams
 ,{}
 // output streams
@@ -578,11 +578,11 @@ MMapSourceKernel::MMapSourceKernel(VirtualDriver & driver, Scalar * const fd, St
 // input scalars
 ,{Binding{"fileDescriptor", fd}}
 // output scalars
-,{Binding{driver.getSizeTy(), "fileItems"}}
+,{Binding{ts.getSizeTy(), "fileItems"}}
 // internal scalars
 ,{})
 , mCodeUnitWidth(outputStream->getFieldWidth()) {
-    PointerType * const codeUnitPtrTy = driver.getIntNTy(mCodeUnitWidth)->getPointerTo();
+    PointerType * const codeUnitPtrTy = ts.getIntNTy(mCodeUnitWidth)->getPointerTo();
     addInternalScalar(codeUnitPtrTy, "buffer");
     addInternalScalar(codeUnitPtrTy, "ancillaryBuffer");
     addAttribute(MustExplicitlyTerminate());
@@ -590,8 +590,8 @@ MMapSourceKernel::MMapSourceKernel(VirtualDriver & driver, Scalar * const fd, St
     setStride(codegen::SegmentSize);
 }
 
-ReadSourceKernel::ReadSourceKernel(VirtualDriver & driver, Scalar * const fd, StreamSet * const outputStream)
-: SegmentOrientedKernel(driver, makeSourceName("read_source", outputStream->getFieldWidth())
+ReadSourceKernel::ReadSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const fd, StreamSet * const outputStream)
+: SegmentOrientedKernel(ts, makeSourceName("read_source", outputStream->getFieldWidth())
 // input streams
 ,{}
 // output streams
@@ -599,14 +599,14 @@ ReadSourceKernel::ReadSourceKernel(VirtualDriver & driver, Scalar * const fd, St
 // input scalars
 ,{Binding{"fileDescriptor", fd}}
 // output scalars
-,{Binding{driver.getSizeTy(), "fileItems"}}
+,{Binding{ts.getSizeTy(), "fileItems"}}
 // internal scalars
 ,{})
 , mCodeUnitWidth(outputStream->getFieldWidth()) {
-    PointerType * const codeUnitPtrTy = driver.getIntNTy(mCodeUnitWidth)->getPointerTo();
+    PointerType * const codeUnitPtrTy = ts.getIntNTy(mCodeUnitWidth)->getPointerTo();
     addInternalScalar(codeUnitPtrTy, "buffer");
     addInternalScalar(codeUnitPtrTy, "ancillaryBuffer");
-    IntegerType * const sizeTy = driver.getSizeTy();
+    IntegerType * const sizeTy = ts.getSizeTy();
     addInternalScalar(sizeTy, "effectiveCapacity");
     addInternalScalar(sizeTy, "ancillaryCapacity");
     addAttribute(MustExplicitlyTerminate());
@@ -616,8 +616,8 @@ ReadSourceKernel::ReadSourceKernel(VirtualDriver & driver, Scalar * const fd, St
 
 
 
-FDSourceKernel::FDSourceKernel(VirtualDriver & driver, Scalar * const useMMap, Scalar * const fd, StreamSet * const outputStream)
-: SegmentOrientedKernel(driver, makeSourceName("FD_source", outputStream->getFieldWidth())
+FDSourceKernel::FDSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const useMMap, Scalar * const fd, StreamSet * const outputStream)
+: SegmentOrientedKernel(ts, makeSourceName("FD_source", outputStream->getFieldWidth())
 // input streams
 ,{}
 // output stream
@@ -626,14 +626,14 @@ FDSourceKernel::FDSourceKernel(VirtualDriver & driver, Scalar * const useMMap, S
 ,{Binding{"useMMap", useMMap}
 , Binding{"fileDescriptor", fd}}
 // output scalar
-,{Binding{driver.getSizeTy(), "fileItems"}}
+,{Binding{ts.getSizeTy(), "fileItems"}}
 // internal scalars
 ,{})
 , mCodeUnitWidth(outputStream->getFieldWidth()) {
-    PointerType * const codeUnitPtrTy = driver.getIntNTy(mCodeUnitWidth)->getPointerTo();
+    PointerType * const codeUnitPtrTy = ts.getIntNTy(mCodeUnitWidth)->getPointerTo();
     addInternalScalar(codeUnitPtrTy, "buffer");
     addInternalScalar(codeUnitPtrTy, "ancillaryBuffer");
-    IntegerType * const sizeTy = driver.getSizeTy();
+    IntegerType * const sizeTy = ts.getSizeTy();
     addInternalScalar(sizeTy, "effectiveCapacity");
     addInternalScalar(sizeTy, "ancillaryCapacity");
     addAttribute(MustExplicitlyTerminate());
@@ -641,8 +641,8 @@ FDSourceKernel::FDSourceKernel(VirtualDriver & driver, Scalar * const useMMap, S
     setStride(codegen::SegmentSize);
 }
 
-MemorySourceKernel::MemorySourceKernel(VirtualDriver & driver, Scalar * fileSource, Scalar * fileItems, StreamSet * const outputStream)
-: SegmentOrientedKernel(driver, makeSourceName("memory_source", outputStream->getFieldWidth(), outputStream->getNumElements()),
+MemorySourceKernel::MemorySourceKernel(LLVMTypeSystemInterface & ts, Scalar * fileSource, Scalar * fileItems, StreamSet * const outputStream)
+: SegmentOrientedKernel(ts, makeSourceName("memory_source", outputStream->getFieldWidth(), outputStream->getNumElements()),
 // input streams
 {},
 // output stream

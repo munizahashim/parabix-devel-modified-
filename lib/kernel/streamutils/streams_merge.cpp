@@ -53,8 +53,8 @@ null_streamset:
     return tmp;
 }
 
-StreamsMerge::StreamsMerge(VirtualDriver &driver, const std::vector<StreamSet *> & inputs, StreamSet * output)
-: BlockOrientedKernel(driver, makeKernelName("streamsMerge", inputs, output), {}, {}, {}, {}, {}) {
+StreamsMerge::StreamsMerge(LLVMTypeSystemInterface & ts, const std::vector<StreamSet *> & inputs, StreamSet * output)
+: BlockOrientedKernel(ts, makeKernelName("streamsMerge", inputs, output), {}, {}, {}, {}, {}) {
     for (unsigned i = 0; i < inputs.size(); i++) {
         mInputStreamSets.push_back(Binding{"input" + std::to_string(i), inputs[i]});
     }
@@ -86,8 +86,8 @@ void StreamsMerge::generateDoBlockMethod(KernelBuilder & b) {
     }
 }
 
-StreamsIntersect::StreamsIntersect(VirtualDriver &driver, const std::vector<StreamSet *> & inputs, StreamSet * output)
-: BlockOrientedKernel(driver, makeKernelName("streamsIntersect", inputs, output), {}, {}, {}, {}, {}) {
+StreamsIntersect::StreamsIntersect(LLVMTypeSystemInterface & ts, const std::vector<StreamSet *> & inputs, StreamSet * output)
+: BlockOrientedKernel(ts, makeKernelName("streamsIntersect", inputs, output), {}, {}, {}, {}, {}) {
     for (unsigned i = 0; i < inputs.size(); i++) {
         mInputStreamSets.push_back(Binding{"input" + std::to_string(i), inputs[i]});
     }
@@ -118,16 +118,16 @@ void StreamsIntersect::generateDoBlockMethod(KernelBuilder & b) {
     }
 }
 
-StreamsCombineKernel::StreamsCombineKernel(VirtualDriver &driver,
+StreamsCombineKernel::StreamsCombineKernel(LLVMTypeSystemInterface & ts,
                                                      std::vector<unsigned> streamsNumOfSets)
-: BlockOrientedKernel(driver, "StreamsCombineKernel" , {}, {}, {}, {}, {})
+: BlockOrientedKernel(ts, "StreamsCombineKernel" , {}, {}, {}, {}, {})
 , mStreamsNumOfSets(streamsNumOfSets) {
     int total = 0;
     for (unsigned i = 0; i < streamsNumOfSets.size(); i++) {
         total += streamsNumOfSets[i];
-        mInputStreamSets.push_back(Binding{driver.getStreamSetTy(streamsNumOfSets[i], 1), "inputGroup" + std::to_string(i)});
+        mInputStreamSets.push_back(Binding{ts.getStreamSetTy(streamsNumOfSets[i], 1), "inputGroup" + std::to_string(i)});
     }
-    mOutputStreamSets.push_back(Binding{driver.getStreamSetTy(total, 1), "output"});
+    mOutputStreamSets.push_back(Binding{ts.getStreamSetTy(total, 1), "output"});
 }
 
 void StreamsCombineKernel::generateDoBlockMethod(KernelBuilder & b) {
@@ -149,16 +149,16 @@ void StreamsCombineKernel::generateDoBlockMethod(KernelBuilder & b) {
 }
 
 
-StreamsSplitKernel::StreamsSplitKernel(VirtualDriver &driver,
+StreamsSplitKernel::StreamsSplitKernel(LLVMTypeSystemInterface & ts,
                                        std::vector<unsigned> streamsNumOfSets)
-: BlockOrientedKernel(driver, "StreamsSplitKernel" , {}, {}, {}, {}, {})
+: BlockOrientedKernel(ts, "StreamsSplitKernel" , {}, {}, {}, {}, {})
 , mStreamsNumOfSets(streamsNumOfSets){
     int total = 0;
     for (unsigned i = 0; i < streamsNumOfSets.size(); i++) {
         total += streamsNumOfSets[i];
-        mOutputStreamSets.push_back(Binding{driver.getStreamSetTy(streamsNumOfSets[i], 1), "outputGroup" + std::to_string(i)});
+        mOutputStreamSets.push_back(Binding{ts.getStreamSetTy(streamsNumOfSets[i], 1), "outputGroup" + std::to_string(i)});
     }
-    mInputStreamSets.push_back(Binding{driver.getStreamSetTy(total, 1), "input"});
+    mInputStreamSets.push_back(Binding{ts.getStreamSetTy(total, 1), "input"});
 }
 
 void StreamsSplitKernel::generateDoBlockMethod(KernelBuilder & b) {

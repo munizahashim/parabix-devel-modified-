@@ -93,8 +93,8 @@ static std::string ScanReader_GenerateName(StreamSet * scan, std::string const &
     return name;
 }
 
-ScanReader::ScanReader(VirtualDriver &driver, StreamSet * source, StreamSet * scanIndices, std::string const & callbackName)
-: MultiBlockKernel(driver, ScanReader_GenerateName(scanIndices, callbackName), {
+ScanReader::ScanReader(LLVMTypeSystemInterface & ts, StreamSet * source, StreamSet * scanIndices, std::string const & callbackName)
+: MultiBlockKernel(ts, ScanReader_GenerateName(scanIndices, callbackName), {
     {"scan", scanIndices, BoundedRate(0, 1)},
     {"source", source, BoundedRate(0, 1)}
   }, {}, {}, {}, {})
@@ -107,14 +107,14 @@ ScanReader::ScanReader(VirtualDriver &driver, StreamSet * source, StreamSet * sc
     setStride(1);
 }
 
-ScanReader::ScanReader(VirtualDriver &driver, StreamSet * source, StreamSet * scanIndices, std::string const & callbackName, std::string const & doneCallbackName)
-: ScanReader(driver, source, scanIndices, callbackName)
+ScanReader::ScanReader(LLVMTypeSystemInterface & ts, StreamSet * source, StreamSet * scanIndices, std::string const & callbackName, std::string const & doneCallbackName)
+: ScanReader(ts, source, scanIndices, callbackName)
 {
     mDoneCallbackName = doneCallbackName;
 }
 
-ScanReader::ScanReader(VirtualDriver &driver, StreamSet * source, StreamSet * scanIndices, std::string const & callbackName, std::initializer_list<StreamSet *> additionalStreams)
-: MultiBlockKernel(driver, ScanReader_GenerateName(scanIndices, callbackName, additionalStreams), {
+ScanReader::ScanReader(LLVMTypeSystemInterface & ts, StreamSet * source, StreamSet * scanIndices, std::string const & callbackName, std::initializer_list<StreamSet *> additionalStreams)
+: MultiBlockKernel(ts, ScanReader_GenerateName(scanIndices, callbackName, additionalStreams), {
     {"scan", scanIndices, BoundedRate(0, 1)},
     {"source", source, BoundedRate(0, 1)}
   }, {}, {}, {}, {})
@@ -134,8 +134,8 @@ ScanReader::ScanReader(VirtualDriver &driver, StreamSet * source, StreamSet * sc
     }
 }
 
-ScanReader::ScanReader(VirtualDriver &driver, StreamSet * source, StreamSet * scanIndices, std::string const & callbackName, std::string const & doneCallbackName, std::initializer_list<StreamSet *> additionalStreams)
-: ScanReader(driver, source, scanIndices, callbackName, additionalStreams)
+ScanReader::ScanReader(LLVMTypeSystemInterface & ts, StreamSet * source, StreamSet * scanIndices, std::string const & callbackName, std::string const & doneCallbackName, std::initializer_list<StreamSet *> additionalStreams)
+: ScanReader(ts, source, scanIndices, callbackName, additionalStreams)
 {
     mDoneCallbackName = doneCallbackName;
 }

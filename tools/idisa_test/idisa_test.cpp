@@ -43,7 +43,7 @@ static cl::opt<int> Immediate("i", cl::desc("Immediate value for mvmd_dslli"), c
 
 class ShiftMaskKernel : public BlockOrientedKernel {
 public:
-    ShiftMaskKernel(VirtualDriver & driver, unsigned fw, unsigned limit, StreamSet * input, StreamSet * output);
+    ShiftMaskKernel(LLVMTypeSystemInterface & ts, unsigned fw, unsigned limit, StreamSet * input, StreamSet * output);
 protected:
     void generateDoBlockMethod(KernelBuilder & kb) override;
 private:
@@ -51,8 +51,8 @@ private:
     const unsigned mShiftMask;
 };
 
-ShiftMaskKernel::ShiftMaskKernel(VirtualDriver &driver, unsigned fw, unsigned mask, StreamSet *input, StreamSet *output)
-: BlockOrientedKernel(driver, "shiftMask" + std::to_string(fw) + "_" + std::to_string(mask),
+ShiftMaskKernel::ShiftMaskKernel(LLVMTypeSystemInterface & ts, unsigned fw, unsigned mask, StreamSet *input, StreamSet *output)
+: BlockOrientedKernel(ts, "shiftMask" + std::to_string(fw) + "_" + std::to_string(mask),
                               {Binding{"shiftOperand", input}},
                               {Binding{"limitedShift", output}},
                               {}, {}, {}),
@@ -69,7 +69,7 @@ void ShiftMaskKernel::generateDoBlockMethod(KernelBuilder & b) {
 
 class IdisaBinaryOpTestKernel : public MultiBlockKernel {
 public:
-    IdisaBinaryOpTestKernel(VirtualDriver & driver, std::string idisa_op, unsigned fw, unsigned imm,
+    IdisaBinaryOpTestKernel(LLVMTypeSystemInterface & ts, std::string idisa_op, unsigned fw, unsigned imm,
                             StreamSet * Operand1, StreamSet * Operand2, StreamSet * result);
 protected:
     void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfStrides) override;
@@ -79,9 +79,9 @@ private:
     const unsigned mImmediateShift;
 };
 
-IdisaBinaryOpTestKernel::IdisaBinaryOpTestKernel(VirtualDriver &driver, std::string idisa_op, unsigned fw, unsigned imm,
+IdisaBinaryOpTestKernel::IdisaBinaryOpTestKernel(LLVMTypeSystemInterface & ts, std::string idisa_op, unsigned fw, unsigned imm,
                                                  StreamSet *Operand1, StreamSet *Operand2, StreamSet *result)
-: MultiBlockKernel(driver, idisa_op + std::to_string(fw) + "_test",
+: MultiBlockKernel(ts, idisa_op + std::to_string(fw) + "_test",
      {Binding{"operand1", Operand1}, Binding{"operand2", Operand2}},
      {Binding{"result", result}},
      {}, {}, {}),
@@ -176,7 +176,7 @@ void IdisaBinaryOpTestKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::V
 
 class IdisaBinaryOpCheckKernel : public BlockOrientedKernel {
 public:
-    IdisaBinaryOpCheckKernel(VirtualDriver & driver, std::string idisa_op, unsigned fw, unsigned imm,
+    IdisaBinaryOpCheckKernel(LLVMTypeSystemInterface & ts, std::string idisa_op, unsigned fw, unsigned imm,
                              StreamSet * Operand1, StreamSet * Operand2, StreamSet * result,
                              StreamSet * expected, Scalar * failures);
 protected:
@@ -187,10 +187,10 @@ private:
     const unsigned mImmediateShift;
 };
 
-IdisaBinaryOpCheckKernel::IdisaBinaryOpCheckKernel(VirtualDriver &driver, std::string idisa_op, unsigned fw, unsigned imm,
+IdisaBinaryOpCheckKernel::IdisaBinaryOpCheckKernel(LLVMTypeSystemInterface & ts, std::string idisa_op, unsigned fw, unsigned imm,
                                                    StreamSet *Operand1, StreamSet *Operand2, StreamSet *result,
                                                    StreamSet *expected, Scalar *failures)
-: BlockOrientedKernel(driver, idisa_op + std::to_string(fw) + "_check" + std::to_string(QuietMode),
+: BlockOrientedKernel(ts, idisa_op + std::to_string(fw) + "_check" + std::to_string(QuietMode),
                            {Binding{"operand1", Operand1},
                             Binding{"operand2", Operand2},
                             Binding{"test_result", result}},

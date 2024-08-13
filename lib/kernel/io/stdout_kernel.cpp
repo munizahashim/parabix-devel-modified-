@@ -56,8 +56,8 @@ void StdOutKernel::generateDoSegmentMethod(KernelBuilder & b) {
     b.CreateCall(writeFunc, args3);
 }
 
-StdOutKernel::StdOutKernel(VirtualDriver &driver, StreamSet *codeUnitBuffer)
-: SegmentOrientedKernel(driver, "stdout" + std::to_string(codeUnitBuffer->getFieldWidth()),
+StdOutKernel::StdOutKernel(LLVMTypeSystemInterface & ts, StreamSet *codeUnitBuffer)
+: SegmentOrientedKernel(ts, "stdout" + std::to_string(codeUnitBuffer->getFieldWidth()),
 // input
 {Binding{"codeUnitBuffer", codeUnitBuffer}}
 // output & scalars
@@ -169,8 +169,8 @@ void FileSink::generateFinalizeMethod(KernelBuilder & b) {
     b.SetInsertPoint(exit);
 }
 
-FileSink::FileSink(VirtualDriver &driver, Scalar * outputFileName, StreamSet * codeUnitBuffer)
-: SegmentOrientedKernel(driver, "filesink" + std::to_string(codeUnitBuffer->getFieldWidth()),
+FileSink::FileSink(LLVMTypeSystemInterface & ts, Scalar * outputFileName, StreamSet * codeUnitBuffer)
+: SegmentOrientedKernel(ts, "filesink" + std::to_string(codeUnitBuffer->getFieldWidth()),
 // input
 {Binding{"codeUnitBuffer", codeUnitBuffer}},
 // output
@@ -180,8 +180,8 @@ FileSink::FileSink(VirtualDriver &driver, Scalar * outputFileName, StreamSet * c
 // output scalars
 {},
 // internal scalars
-{InternalScalar{driver.getInt8PtrTy(), "temporaryFileName"},
- InternalScalar{driver.getInt32Ty(), "fileDescriptor"}})
+{InternalScalar{ts.getInt8PtrTy(), "temporaryFileName"},
+ InternalScalar{ts.getInt32Ty(), "fileDescriptor"}})
 , mCodeUnitWidth(codeUnitBuffer->getFieldWidth()) {
     setStride((8 * BUFSIZ) / mCodeUnitWidth);
     addAttribute(SideEffecting());

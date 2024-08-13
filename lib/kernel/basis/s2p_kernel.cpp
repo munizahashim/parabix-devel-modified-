@@ -195,11 +195,11 @@ inline Bindings S2PKernel::makeOutputBindings(StreamSet * const BasisBits) {
     return {Binding("basisBits", BasisBits)};
 }
 
-S2PKernel::S2PKernel(VirtualDriver &driver,
+S2PKernel::S2PKernel(LLVMTypeSystemInterface & ts,
                      StreamSet * const codeUnitStream,
                      StreamSet * const BasisBits,
                      StreamSet * zeroMask)
-: MultiBlockKernel(driver, (zeroMask ? "s2pz" : "s2p") + std::to_string(BasisBits->getNumElements())
+: MultiBlockKernel(ts, (zeroMask ? "s2pz" : "s2p") + std::to_string(BasisBits->getNumElements())
 , makeInputBindings(codeUnitStream, zeroMask)
 , makeOutputBindings(BasisBits)
 , {}, {}, {})
@@ -210,7 +210,7 @@ S2PKernel::S2PKernel(VirtualDriver &driver,
 
 class BitPairsKernel final : public MultiBlockKernel {
 public:
-    BitPairsKernel(VirtualDriver & driver,
+    BitPairsKernel(LLVMTypeSystemInterface & ts,
               StreamSet * const codeUnitStream,
               StreamSet * const bitPairs);
 protected:
@@ -219,7 +219,7 @@ protected:
 
 class BitQuadsKernel final : public MultiBlockKernel {
 public:
-    BitQuadsKernel(VirtualDriver & driver,
+    BitQuadsKernel(LLVMTypeSystemInterface & ts,
               StreamSet * const bitPairs,
               StreamSet * const bitQuads);
 protected:
@@ -228,7 +228,7 @@ protected:
 
 class S2P_CompletionKernel final : public MultiBlockKernel {
 public:
-    S2P_CompletionKernel(VirtualDriver & driver,
+    S2P_CompletionKernel(LLVMTypeSystemInterface & ts,
                          StreamSet * const bitPacks,
                          StreamSet * const BasisBits,
                          bool completionFromQuads = false);
@@ -268,13 +268,13 @@ void BitPairsKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const nu
     b.SetInsertPoint(bitPairFinalize);
 }
 
-BitPairsKernel::BitPairsKernel(VirtualDriver &driver,
+BitPairsKernel::BitPairsKernel(LLVMTypeSystemInterface & ts,
                                StreamSet * const codeUnitStream,
                                StreamSet * const bitPairs)
-: MultiBlockKernel(driver, "BitPairs"
+: MultiBlockKernel(ts, "BitPairs"
 , {Binding{"byteStream", codeUnitStream, FixedRate(), Principal()}}
-                   , {Binding{"bitPairs", bitPairs, FixedRate(), RoundUpTo(2 * driver.getBitBlockWidth())}}, {}, {}, {}) {
-    setStride(2 * driver.getBitBlockWidth());
+                   , {Binding{"bitPairs", bitPairs, FixedRate(), RoundUpTo(2 * ts.getBitBlockWidth())}}, {}, {}, {}) {
+    setStride(2 * ts.getBitBlockWidth());
 }
 
 void BitQuadsKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
@@ -309,13 +309,13 @@ void BitQuadsKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const nu
     b.SetInsertPoint(bitQuadFinalize);
 }
 
-BitQuadsKernel::BitQuadsKernel(VirtualDriver &driver,
+BitQuadsKernel::BitQuadsKernel(LLVMTypeSystemInterface & ts,
                                StreamSet * const bitPairs,
                                StreamSet * const bitQuads)
-: MultiBlockKernel(driver, "BitQuads"
+: MultiBlockKernel(ts, "BitQuads"
 , {Binding{"bitPairs", bitPairs, FixedRate(), Principal()}}
-                   , {Binding{"bitQuads", bitQuads, FixedRate(), RoundUpTo(2 * driver.getBitBlockWidth())}}, {}, {}, {}) {
-    setStride(2 * driver.getBitBlockWidth());
+                   , {Binding{"bitQuads", bitQuads, FixedRate(), RoundUpTo(2 * ts.getBitBlockWidth())}}, {}, {}, {}) {
+    setStride(2 * ts.getBitBlockWidth());
 }
 
 void S2P_CompletionKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
@@ -351,14 +351,14 @@ void S2P_CompletionKernel::generateMultiBlockLogic(KernelBuilder & b, Value * co
     b.SetInsertPoint(s2pFinalize);
 }
 
-S2P_CompletionKernel::S2P_CompletionKernel(VirtualDriver &driver,
+S2P_CompletionKernel::S2P_CompletionKernel(LLVMTypeSystemInterface & ts,
                                            StreamSet * const bitPacks,
                                            StreamSet * const BasisBits,
                                            bool completionFromQuads)
-    : MultiBlockKernel(driver, completionFromQuads ? "S2PfromQuads" : "S2PfromPairs",
+    : MultiBlockKernel(ts, completionFromQuads ? "S2PfromQuads" : "S2PfromPairs",
                        {Binding{"bitPacks", bitPacks, FixedRate(), Principal()}},
                        {Binding{"basisBits", BasisBits}}, {}, {}, {}), mCompletionFromQuads(completionFromQuads) {
-        setStride(2 * driver.getBitBlockWidth());
+        setStride(2 * ts.getBitBlockWidth());
     }
 
 void Staged_S2P(const std::unique_ptr<ProgramBuilder> & P,
@@ -388,8 +388,8 @@ void Selected_S2P(const std::unique_ptr<ProgramBuilder> & P,
 }
 
 
-S2P_i21_3xi8::S2P_i21_3xi8(VirtualDriver &driver, StreamSet * const i32Stream, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2)
-: MultiBlockKernel(driver, "s2p_i21_3xi8",
+S2P_i21_3xi8::S2P_i21_3xi8(LLVMTypeSystemInterface & ts, StreamSet * const i32Stream, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2)
+: MultiBlockKernel(ts, "s2p_i21_3xi8",
 {Binding{"i32Stream", i32Stream, FixedRate(), Principal()}},
                    {Binding{"i8stream0", i8stream0}, Binding{"i8stream1", i8stream1}, Binding{"i8stream2", i8stream2}}, {}, {}, {})  {}
 
@@ -433,8 +433,8 @@ void S2P_i21_3xi8::generateMultiBlockLogic(KernelBuilder & b, Value * const numO
     b.SetInsertPoint(s2pDone);
 }
 
-S2P_3xi8_21xi1::S2P_3xi8_21xi1(VirtualDriver &driver, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2, StreamSet * const BasisBits)
-: MultiBlockKernel(driver, "s2p_3xi8_21xi1",
+S2P_3xi8_21xi1::S2P_3xi8_21xi1(LLVMTypeSystemInterface & ts, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2, StreamSet * const BasisBits)
+: MultiBlockKernel(ts, "s2p_3xi8_21xi1",
 {Binding{"i8stream0", i8stream0}, Binding{"i8stream1", i8stream1}, Binding{"i8stream2", i8stream2}},
 {Binding{"basisBits", BasisBits}}, {}, {}, {})  {}
 
@@ -511,8 +511,8 @@ void S2P_3xi8_21xi1::generateMultiBlockLogic(KernelBuilder & b, Value * const nu
     b.SetInsertPoint(s2pDone);
 }
 
-S2P_21Kernel::S2P_21Kernel(VirtualDriver &driver, StreamSet * const codeUnitStream, StreamSet * const BasisBits)
-: MultiBlockKernel(driver, "s2p_21",
+S2P_21Kernel::S2P_21Kernel(LLVMTypeSystemInterface & ts, StreamSet * const codeUnitStream, StreamSet * const BasisBits)
+: MultiBlockKernel(ts, "s2p_21",
 {Binding{"codeUnitStream", codeUnitStream, FixedRate(), Principal()}},
     {Binding{"basisBits", BasisBits}}, {}, {}, {})  {}
 
@@ -625,8 +625,8 @@ void S2P_PabloKernel::generatePabloMethod() {
     }
 }
 
-S2P_PabloKernel::S2P_PabloKernel(VirtualDriver &driver, StreamSet * const codeUnitStream, StreamSet * const BasisBits)
-: PabloKernel(driver, "s2p_pablo" + std::to_string(codeUnitStream->getFieldWidth()),
+S2P_PabloKernel::S2P_PabloKernel(LLVMTypeSystemInterface & ts, StreamSet * const codeUnitStream, StreamSet * const BasisBits)
+: PabloKernel(ts, "s2p_pablo" + std::to_string(codeUnitStream->getFieldWidth()),
 // input
 {Binding{"codeUnitStream", codeUnitStream}},
 // output

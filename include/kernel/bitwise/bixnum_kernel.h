@@ -12,8 +12,8 @@ using namespace kernel;
 namespace bixnum {
     class Add final : public pablo::PabloKernel {
     public:
-        Add(VirtualDriver & driver, StreamSet * a, StreamSet * b, StreamSet * sum)
-        : pablo::PabloKernel(driver, "Add_" + a->shapeString() + "+" + b->shapeString() + ":" + sum->shapeString(),
+        Add(LLVMTypeSystemInterface & ts, StreamSet * a, StreamSet * b, StreamSet * sum)
+        : pablo::PabloKernel(ts, "Add_" + a->shapeString() + "+" + b->shapeString() + ":" + sum->shapeString(),
                              {Binding{"a", a}, Binding{"b", b}}, {Binding{"sum", sum}}),
         mBixBits(sum->getNumElements()) {
         }

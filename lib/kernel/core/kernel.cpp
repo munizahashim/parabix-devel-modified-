@@ -1516,7 +1516,7 @@ std::string Kernel::getFamilyName() const {
 }
 
 // CONSTRUCTOR
-Kernel::Kernel(VirtualDriver & driver,
+Kernel::Kernel(LLVMTypeSystemInterface & ts,
                const TypeId typeId,
                std::string && kernelName,
                Bindings && stream_inputs,
@@ -1525,7 +1525,7 @@ Kernel::Kernel(VirtualDriver & driver,
                Bindings && scalar_outputs,
                InternalScalars && internal_scalars)
 : mTypeId(typeId)
-, mStride(driver.getBitBlockWidth())
+, mStride(ts.getBitBlockWidth())
 , mInputStreamSets(std::move(stream_inputs))
 , mOutputStreamSets(std::move(stream_outputs))
 , mInputScalars(std::move(scalar_inputs))
@@ -1535,14 +1535,14 @@ Kernel::Kernel(VirtualDriver & driver,
 
 }
 
-Kernel::Kernel(VirtualDriver & driver,
+Kernel::Kernel(LLVMTypeSystemInterface & ts,
                const TypeId typeId,
                Bindings && stream_inputs,
                Bindings && stream_outputs,
                Bindings && scalar_inputs,
                Bindings && scalar_outputs)
 : mTypeId(typeId)
-, mStride(driver.getBitBlockWidth())
+, mStride(ts.getBitBlockWidth())
 , mInputStreamSets(std::move(stream_inputs))
 , mOutputStreamSets(std::move(stream_outputs))
 , mInputScalars(std::move(scalar_inputs))
@@ -1555,14 +1555,14 @@ Kernel::Kernel(VirtualDriver & driver,
 Kernel::~Kernel() { }
 
 // CONSTRUCTOR
-SegmentOrientedKernel::SegmentOrientedKernel(VirtualDriver &driver,
+SegmentOrientedKernel::SegmentOrientedKernel(LLVMTypeSystemInterface & ts,
                                              std::string && kernelName,
                                              Bindings && stream_inputs,
                                              Bindings && stream_outputs,
                                              Bindings && scalar_parameters,
                                              Bindings && scalar_outputs,
                                              InternalScalars && internal_scalars)
-: Kernel(driver,
+: Kernel(ts,
 TypeId::SegmentOriented, std::move(kernelName),
 std::move(stream_inputs), std::move(stream_outputs),
 std::move(scalar_parameters), std::move(scalar_outputs),

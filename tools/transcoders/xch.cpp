@@ -68,7 +68,7 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 
 class AdjustU8bixnum : public pablo::PabloKernel {
 public:
-    AdjustU8bixnum(VirtualDriver & driver,
+    AdjustU8bixnum(LLVMTypeSystemInterface & ts,
                    StreamSet * Basis, StreamSet * InsertBixNum,
                    StreamSet * AdjustedBixNum);
 protected:
@@ -77,10 +77,10 @@ private:
     unsigned mBixBits;
 };
 
-AdjustU8bixnum::AdjustU8bixnum (VirtualDriver &driver,
+AdjustU8bixnum::AdjustU8bixnum (LLVMTypeSystemInterface & ts,
                                 StreamSet * Basis, StreamSet * InsertBixNum,
                                 StreamSet * AdjustedBixNum)
-: PabloKernel(driver, "adjust_bixnum" + std::to_string(InsertBixNum->getNumElements()) + "x1",
+: PabloKernel(ts, "adjust_bixnum" + std::to_string(InsertBixNum->getNumElements()) + "x1",
 // inputs
 {Binding{"basis", Basis}, Binding{"insert_bixnum", InsertBixNum, FixedRate(1), LookAhead(2)}},
 // output
@@ -126,7 +126,7 @@ void AdjustU8bixnum::generatePabloMethod() {
 
 class CreateU8delMask : public pablo::PabloKernel {
 public:
-    CreateU8delMask(VirtualDriver & driver,
+    CreateU8delMask(LLVMTypeSystemInterface & ts,
                     StreamSet * Basis, StreamSet * DeletionBixNum,
                     StreamSet * DelMask);
 protected:
@@ -135,10 +135,10 @@ private:
     unsigned mBixBits;
 };
 
-CreateU8delMask::CreateU8delMask (VirtualDriver &driver,
+CreateU8delMask::CreateU8delMask (LLVMTypeSystemInterface & ts,
                                 StreamSet * Basis, StreamSet * DeletionBixNum,
                                 StreamSet * DelMask)
-: PabloKernel(driver, "u8_delmask" + std::to_string(DeletionBixNum->getNumElements()) + "x1",
+: PabloKernel(ts, "u8_delmask" + std::to_string(DeletionBixNum->getNumElements()) + "x1",
 // inputs
 {Binding{"basis", Basis}, Binding{"deletion_bixnum", DeletionBixNum, FixedRate(1), LookAhead(3)}},
 // output
@@ -184,13 +184,13 @@ void CreateU8delMask::generatePabloMethod() {
 
 class UTF8_BytePosition : public pablo::PabloKernel {
 public:
-    UTF8_BytePosition(VirtualDriver & driver, StreamSet * Basis, StreamSet * Positions);
+    UTF8_BytePosition(LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * Positions);
 protected:
     void generatePabloMethod() override;
 };
 
-UTF8_BytePosition::UTF8_BytePosition(VirtualDriver &driver, StreamSet * Basis, StreamSet * Positions)
-: PabloKernel(driver, "UTF8_BytePosition",
+UTF8_BytePosition::UTF8_BytePosition(LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * Positions)
+: PabloKernel(ts, "UTF8_BytePosition",
 {Binding{"basis", Basis, FixedRate(1), LookAhead(2)}},
 // output
 {Binding{"positions", Positions}}) {
@@ -224,7 +224,7 @@ void UTF8_BytePosition::generatePabloMethod() {
 class UTF8_Target_Class : public pablo::PabloKernel {
 public:
     UTF8_Target_Class
-        (VirtualDriver & driver,
+        (LLVMTypeSystemInterface & ts,
          StreamSet * Positions, StreamSet * SpreadMask, StreamSet * FilterMask,
          StreamSet * TargetClass);
 protected:
@@ -235,10 +235,10 @@ private:
 };
 
 UTF8_Target_Class::UTF8_Target_Class
-    (VirtualDriver &driver,
+    (LLVMTypeSystemInterface & ts,
      StreamSet * Positions, StreamSet * SpreadMask, StreamSet * FilterMask,
      StreamSet * TargetClass)
-: PabloKernel(driver, "UTF8_Target_Class" +
+: PabloKernel(ts, "UTF8_Target_Class" +
               std::to_string(Positions->getNumElements()) + "x1" +
               (SpreadMask == nullptr ? "" : "+ins") +
               (FilterMask == nullptr ? "" : "+del"),
@@ -305,7 +305,7 @@ void UTF8_Target_Class::generatePabloMethod() {
 class UTF8_CharacterTranslator : public pablo::PabloKernel {
 public:
     UTF8_CharacterTranslator
-        (VirtualDriver & driver,
+        (LLVMTypeSystemInterface & ts,
          StreamSet * Basis, StreamSet * XfrmBasis, StreamSet * TargetPositions, StreamSet * SpreadMask, StreamSet * FilterMask,
          StreamSet * Output);
 protected:
@@ -317,10 +317,10 @@ private:
 };
 
 UTF8_CharacterTranslator::UTF8_CharacterTranslator
-    (VirtualDriver &driver,
+    (LLVMTypeSystemInterface & ts,
      StreamSet * Basis, StreamSet * XfrmBasis, StreamSet * TargetPositions, StreamSet * SpreadMask, StreamSet * FilterMask,
      StreamSet * Output)
-: PabloKernel(driver, "u8_transform_bits_" +
+: PabloKernel(ts, "u8_transform_bits_" +
                  std::to_string(XfrmBasis->getNumElements()) + "x1" +
                  (SpreadMask == nullptr ? "" : "+ins") +
                  (FilterMask == nullptr ? "" : "+del"),
@@ -451,15 +451,15 @@ void UTF8_CharacterTranslator::generatePabloMethod() {
 
 class ApplyTransform : public pablo::PabloKernel {
 public:
-    ApplyTransform(VirtualDriver & driver,
+    ApplyTransform(LLVMTypeSystemInterface & ts,
                    StreamSet * Basis, StreamSet * Xfrms, StreamSet * Output);
 protected:
     void generatePabloMethod() override;
 };
 
-ApplyTransform::ApplyTransform (VirtualDriver &driver,
+ApplyTransform::ApplyTransform (LLVMTypeSystemInterface & ts,
                                 StreamSet * Basis, StreamSet * Xfrms, StreamSet * Output)
-: PabloKernel(driver, "xfrm_" + std::to_string(Basis->getNumElements()) + "x1_" + std::to_string(Xfrms->getNumElements()),
+: PabloKernel(ts, "xfrm_" + std::to_string(Basis->getNumElements()) + "x1_" + std::to_string(Xfrms->getNumElements()),
 // inputs
 {Binding{"basis", Basis},
  Binding{"xfrms", Xfrms}

@@ -36,13 +36,13 @@ static cl::opt<bool> optVerbose("v", cl::desc("Verbose output"), cl::init(false)
 
 class CopyKernel final : public SegmentOrientedKernel {
 public:
-    CopyKernel(VirtualDriver & driver, StreamSet * input, StreamSet * output, Scalar * upTo);
+    CopyKernel(LLVMTypeSystemInterface & ts, StreamSet * input, StreamSet * output, Scalar * upTo);
 protected:
     void generateDoSegmentMethod(KernelBuilder & b) override;
 };
 
-CopyKernel::CopyKernel(VirtualDriver &driver, StreamSet * input, StreamSet * output, Scalar * upTo)
-: SegmentOrientedKernel(driver, [&]() {
+CopyKernel::CopyKernel(LLVMTypeSystemInterface & ts, StreamSet * input, StreamSet * output, Scalar * upTo)
+: SegmentOrientedKernel(ts, [&]() {
     std::string backing;
     raw_string_ostream str(backing);
     str << "copykernel"
@@ -133,13 +133,13 @@ void CopyKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
 class PassThroughKernel final : public SegmentOrientedKernel {
 public:
-    PassThroughKernel(VirtualDriver & driver, TruncatedStreamSet * output, Scalar * upTo);
+    PassThroughKernel(LLVMTypeSystemInterface & ts, TruncatedStreamSet * output, Scalar * upTo);
 protected:
     void generateDoSegmentMethod(KernelBuilder & b) override;
 };
 
-PassThroughKernel::PassThroughKernel(VirtualDriver &driver, TruncatedStreamSet * output, Scalar * upTo)
-: SegmentOrientedKernel(driver, "passThroughKernel",
+PassThroughKernel::PassThroughKernel(LLVMTypeSystemInterface & ts, TruncatedStreamSet * output, Scalar * upTo)
+: SegmentOrientedKernel(ts, "passThroughKernel",
 // input streams
 {},
 // output stream
@@ -174,18 +174,18 @@ class StreamEq : public MultiBlockKernel {
 public:
     enum class Mode { EQ, NE };
 
-    StreamEq(VirtualDriver & driver, StreamSet * x, StreamSet * y, Scalar * outPtr);
+    StreamEq(LLVMTypeSystemInterface & ts, StreamSet * x, StreamSet * y, Scalar * outPtr);
     void generateInitializeMethod(KernelBuilder & b) override;
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
     void generateFinalizeMethod(KernelBuilder & b) override;
 
 };
 
-StreamEq::StreamEq(VirtualDriver &driver,
+StreamEq::StreamEq(LLVMTypeSystemInterface & ts,
     StreamSet * lhs,
     StreamSet * rhs,
     Scalar * outPtr)
-    : MultiBlockKernel(driver, [&]() -> std::string {
+    : MultiBlockKernel(ts, [&]() -> std::string {
        std::string backing;
        raw_string_ostream str(backing);
        str << "StreamEq::["
@@ -200,7 +200,7 @@ StreamEq::StreamEq(VirtualDriver &driver,
     {},
     {{"result_ptr", outPtr}},
     {},
-    {InternalScalar(driver.getInt1Ty(), "accum")})
+    {InternalScalar(ts.getInt1Ty(), "accum")})
 {
     assert(lhs->getFieldWidth() == rhs->getFieldWidth());
     assert(lhs->getNumElements() == rhs->getNumElements());

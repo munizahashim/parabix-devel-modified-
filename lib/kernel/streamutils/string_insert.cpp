@@ -33,9 +33,9 @@ LLVM_READONLY std::string ZeroInsertName(const std::vector<unsigned> & insertAmt
     return name;
 }
     
-ZeroInsertBixNum::ZeroInsertBixNum(VirtualDriver &driver, const std::vector<unsigned> & insertAmts,
+ZeroInsertBixNum::ZeroInsertBixNum(LLVMTypeSystemInterface & ts, const std::vector<unsigned> & insertAmts,
                                        StreamSet * insertMarks, StreamSet * insertBixNum)
-: PabloKernel(driver, "StringInsertBixNum" + Kernel::getStringHash(ZeroInsertName(insertAmts, insertMarks)),
+: PabloKernel(ts, "StringInsertBixNum" + Kernel::getStringHash(ZeroInsertName(insertAmts, insertMarks)),
               {Binding{"insertMarks", insertMarks}},
               {Binding{"insertBixNum", insertBixNum}})
 , mInsertAmounts(insertAmts)
@@ -76,11 +76,11 @@ LLVM_READONLY std::string StringReplaceName(const std::vector<std::string> & ins
     return name;
 }
 
-StringReplaceKernel::StringReplaceKernel(VirtualDriver &driver, const std::vector<std::string> & insertStrs,
+StringReplaceKernel::StringReplaceKernel(LLVMTypeSystemInterface & ts, const std::vector<std::string> & insertStrs,
                                          StreamSet * basis, StreamSet * spreadMask,
                                          StreamSet * insertMarks, StreamSet * runIndex,
                                          StreamSet * output, int markOffset)
-: PabloKernel(driver, "StringReplaceBixNum" + Kernel::getStringHash(StringReplaceName(insertStrs, insertMarks, markOffset)),
+: PabloKernel(ts, "StringReplaceBixNum" + Kernel::getStringHash(StringReplaceName(insertStrs, insertMarks, markOffset)),
              {Binding{"basis", basis}, Binding{"spreadMask", spreadMask},
               Binding{"insertMarks", insertMarks, FixedRate(1), LookAhead(1 << (runIndex->getNumElements()))},
               Binding{"runIndex", runIndex}},

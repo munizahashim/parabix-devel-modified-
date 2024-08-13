@@ -20,7 +20,7 @@ protected:
 
 class CharacterClassKernelBuilder final : public CharacterClassesSignature, public pablo::PabloKernel {
 public:    
-    CharacterClassKernelBuilder(VirtualDriver & driver, std::vector<re::CC *> charClasses, StreamSet * source, StreamSet * ccStream, Scalar * signalNullObject = nullptr);
+    CharacterClassKernelBuilder(LLVMTypeSystemInterface & ts, std::vector<re::CC *> charClasses, StreamSet * source, StreamSet * ccStream, Scalar * signalNullObject = nullptr);
 protected:
     bool hasSignature() const override { return true; }
     llvm::StringRef getSignature() const override;

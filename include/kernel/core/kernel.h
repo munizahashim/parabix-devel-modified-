@@ -16,7 +16,7 @@
 #include <llvm/Support/Compiler.h>
 #include <kernel/illustrator/illustrator.h>
 #include <codegen/FunctionTypeBuilder.h>
-#include <codegen/virtual_driver.h>
+#include <codegen/LLVMTypeSystemInterface.h>
 #include <memory>
 #include <string>
 #include <vector>
@@ -545,14 +545,14 @@ protected:
 protected:
 
     // Constructor
-    Kernel(VirtualDriver & driver,
+    Kernel(LLVMTypeSystemInterface & ts,
            const TypeId typeId, std::string && kernelName,
            Bindings &&stream_inputs, Bindings &&stream_outputs,
            Bindings &&scalar_inputs, Bindings &&scalar_outputs,
            InternalScalars && internal_scalars);
 
     // Constructor used by pipeline
-    Kernel(VirtualDriver & driver,
+    Kernel(LLVMTypeSystemInterface & ts,
            const TypeId typeId,
            Bindings &&stream_inputs, Bindings &&stream_outputs,
            Bindings &&scalar_inputs, Bindings &&scalar_outputs);
@@ -596,7 +596,7 @@ public:
 
 protected:
 
-    SegmentOrientedKernel(VirtualDriver & driver,
+    SegmentOrientedKernel(LLVMTypeSystemInterface & ts,
                           std::string && kernelName,
                           Bindings &&stream_inputs,
                           Bindings &&stream_outputs,
@@ -624,7 +624,7 @@ public:
 
 protected:
 
-    MultiBlockKernel(VirtualDriver & driver,
+    MultiBlockKernel(LLVMTypeSystemInterface & ts,
                      std::string && kernelName,
                      Bindings && stream_inputs,
                      Bindings && stream_outputs,
@@ -632,7 +632,7 @@ protected:
                      Bindings && scalar_outputs,
                      InternalScalars && internal_scalars);
 
-    MultiBlockKernel(VirtualDriver & driver,
+    MultiBlockKernel(LLVMTypeSystemInterface & ts,
                      const TypeId kernelTypId,
                      std::string && kernelName,
                      Bindings && stream_inputs,
@@ -679,7 +679,7 @@ protected:
 
     virtual void generateFinalBlockMethod(KernelBuilder & b, llvm::Value * remainingItems);
 
-    BlockOrientedKernel(VirtualDriver & driver,
+    BlockOrientedKernel(LLVMTypeSystemInterface & ts,
                         std::string && kernelName,
                         Bindings && stream_inputs,
                         Bindings && stream_outputs,

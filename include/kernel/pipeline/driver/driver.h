@@ -1,7 +1,7 @@
 #pragma once
 
 #include <codegen/FunctionTypeBuilder.h>
-#include <codegen/virtual_driver.h>
+#include <codegen/LLVMTypeSystemInterface.h>
 #include <llvm/ExecutionEngine/GenericValue.h>
 #include <kernel/core/kernel.h>
 #include <kernel/core/relationship.h>
@@ -20,7 +20,7 @@ namespace kernel { class ProgramBuilder; }
 class CBuilder;
 class ParabixObjectCache;
 
-class BaseDriver : public VirtualDriver {
+class BaseDriver : public LLVMTypeSystemInterface {
     friend class CBuilder;
     friend class kernel::PipelineBuilder;
     friend class kernel::ProgramBuilder;

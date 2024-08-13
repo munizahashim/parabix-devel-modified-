@@ -66,8 +66,8 @@ typedef void (*CSVFunctionType)(uint32_t fd);
 
 class Invert : public PabloKernel {
 public:
-    Invert(VirtualDriver & driver, StreamSet * mask, StreamSet * inverted)
-        : PabloKernel(driver, "Invert",
+    Invert(LLVMTypeSystemInterface & ts, StreamSet * mask, StreamSet * inverted)
+        : PabloKernel(ts, "Invert",
                       {Binding{"mask", mask}},
                       {Binding{"inverted", inverted}}) {}
 protected:
@@ -84,8 +84,8 @@ void Invert::generatePabloMethod() {
 
 class BasisCombine : public PabloKernel {
 public:
-    BasisCombine(VirtualDriver & driver, StreamSet * basis1, StreamSet * basis2, StreamSet * combined)
-        : PabloKernel(driver, "BasisCombine",
+    BasisCombine(LLVMTypeSystemInterface & ts, StreamSet * basis1, StreamSet * basis2, StreamSet * combined)
+        : PabloKernel(ts, "BasisCombine",
                       {Binding{"basis1", basis1}, Binding{"basis2", basis2}},
                       {Binding{"combined", combined}}) {}
 protected:

@@ -100,17 +100,17 @@ extern "C" {
 
 class WordCountKernel final: public pablo::PabloKernel {
 public:
-    WordCountKernel(VirtualDriver & driver, StreamSet * const countable);
+    WordCountKernel(LLVMTypeSystemInterface & ts, StreamSet * const countable);
 protected:
     void generatePabloMethod() override;
 };
 
-WordCountKernel::WordCountKernel (VirtualDriver &driver, StreamSet * const countable)
-: PabloKernel(driver, "wc_" + wc_modes + UTF::kernelAnnotation(),
+WordCountKernel::WordCountKernel (LLVMTypeSystemInterface & ts, StreamSet * const countable)
+: PabloKernel(ts, "wc_" + wc_modes + UTF::kernelAnnotation(),
     {Bind("countable", countable, Principal())},
     {},
     {},
-    {Bind(driver.getSizeTy(), "lineCount"), Bind(driver.getSizeTy(), "wordCount"), Bind(driver.getSizeTy(), "charCount")}) {
+    {Bind(ts.getSizeTy(), "lineCount"), Bind(ts.getSizeTy(), "wordCount"), Bind(ts.getSizeTy(), "charCount")}) {
 
 }
 

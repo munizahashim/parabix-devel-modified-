@@ -56,13 +56,13 @@ inline bool useAVX2() {
 
 class U8U16Kernel final: public pablo::PabloKernel {
 public:
-    U8U16Kernel(VirtualDriver & driver, StreamSet * BasisBits, StreamSet * u8bits, StreamSet * DelMask);
+    U8U16Kernel(LLVMTypeSystemInterface & ts, StreamSet * BasisBits, StreamSet * u8bits, StreamSet * DelMask);
 protected:
     void generatePabloMethod() override;
 };
 
-U8U16Kernel::U8U16Kernel(VirtualDriver &driver, StreamSet *BasisBits, StreamSet *u8bits, StreamSet *selectors)
-: PabloKernel(driver, "u8u16",
+U8U16Kernel::U8U16Kernel(LLVMTypeSystemInterface & ts, StreamSet *BasisBits, StreamSet *u8bits, StreamSet *selectors)
+: PabloKernel(ts, "u8u16",
 // input
 {Binding{"u8bit", BasisBits}},
 // outputs
@@ -314,7 +314,7 @@ u8u16FunctionType generatePipeline(CPUDriver & driver, cc::ByteNumbering byteNum
 
 // ------------------------------------------------------
 
-void makeNonAsciiBranch(VirtualDriver & driver,
+void makeNonAsciiBranch(LLVMTypeSystemInterface & driver,
                         const std::unique_ptr<PipelineBuilder> & P,
                         StreamSet * const ByteStream, StreamSet * const u16bytes, cc::ByteNumbering byteNumbering) {
     // Transposed bits from s2p

@@ -124,14 +124,14 @@ namespace iso_8859_5 {
 
 class TranscoderKernelBuilder : public PabloKernel {
 public:
-    TranscoderKernelBuilder(VirtualDriver & driver, cc::UnicodeMappableAlphabet & a, StreamSet * sourceBasis, StreamSet * UnicodeBasis);
+    TranscoderKernelBuilder(LLVMTypeSystemInterface & ts, cc::UnicodeMappableAlphabet & a, StreamSet * sourceBasis, StreamSet * UnicodeBasis);
     void generatePabloMethod() override;
 private:
     cc::UnicodeMappableAlphabet & mAlphabet;
 };
 
-TranscoderKernelBuilder::TranscoderKernelBuilder(VirtualDriver &driver, cc::UnicodeMappableAlphabet & a, StreamSet * sourceBasis, StreamSet * UnicodeBasis)
-: PabloKernel(driver, a.getName() + "ToUnicode",
+TranscoderKernelBuilder::TranscoderKernelBuilder(LLVMTypeSystemInterface & ts, cc::UnicodeMappableAlphabet & a, StreamSet * sourceBasis, StreamSet * UnicodeBasis)
+: PabloKernel(ts, a.getName() + "ToUnicode",
 {Binding{"sourceBasis", sourceBasis}},
 {Binding{"UnicodeBasis", UnicodeBasis}},
 {}, {}), mAlphabet(a) {}

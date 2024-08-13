@@ -157,8 +157,8 @@ struct binding_list_construct_iterator {};
 /// terminus case
 template<>
 struct binding_list_construct_iterator<> {
-    static void call(VirtualDriver & driver, kernel::Bindings & bindings) {
-        bindings.push_back({driver.getInt32Ty()->getPointerTo(), "output"});
+    static void call(LLVMTypeSystemInterface & ts, kernel::Bindings & bindings) {
+        bindings.push_back({ts.getInt32Ty()->getPointerTo(), "output"});
     }
 };
 
@@ -166,35 +166,35 @@ struct binding_list_construct_iterator<> {
 template<typename I, typename... Rest>
 struct binding_list_construct_iterator<I, Rest...> {
     static_assert(std::is_integral<I>::value, "`I` must be an integer type");
-    static void call(VirtualDriver & driver, kernel::Bindings & bindings) {
+    static void call(LLVMTypeSystemInterface & ts, kernel::Bindings & bindings) {
         auto i = bindings.size();
         auto name = "scalar-" + std::to_string(i);
-        auto type = driver.getIntNTy(streamgen::field_width<I>::value);
+        auto type = ts.getIntNTy(streamgen::field_width<I>::value);
         bindings.push_back({type, name});
-        binding_list_construct_iterator<Rest...>::call(driver, bindings);
+        binding_list_construct_iterator<Rest...>::call(ts, bindings);
     }
 };
 
 /// stream case
 template<typename I, typename Decoder, typename... Rest>
 struct binding_list_construct_iterator<streamgen::basic_stream<I, Decoder>, Rest...> {
-    static void call(VirtualDriver & driver, kernel::Bindings & bindings) {
+    static void call(LLVMTypeSystemInterface & ts, kernel::Bindings & bindings) {
         auto i = std::to_string(bindings.size());
         auto ptr_name = "stream-ptr-" + i;
         auto len_name = "stream-len-" + i;
         auto buf_fw = streamgen::field_width<I>::value;
-        auto ptr_type = llvm::IntegerType::getIntNPtrTy(driver.getContext(), buf_fw);
+        auto ptr_type = llvm::IntegerType::getIntNPtrTy(ts.getContext(), buf_fw);
         bindings.push_back({ptr_type, ptr_name});
-        bindings.push_back({driver.getSizeTy(), len_name});
-        binding_list_construct_iterator<Rest...>::call(driver, bindings);
+        bindings.push_back({ts.getSizeTy(), len_name});
+        binding_list_construct_iterator<Rest...>::call(ts, bindings);
     }
 };
 
 /// Constructs pipeline input bindings based on a set of `PipelineParameters`.
 template<typename... PipelineParameters>
-inline kernel::Bindings construct_bindings(VirtualDriver & driver) {
+inline kernel::Bindings construct_bindings(LLVMTypeSystemInterface & ts) {
     kernel::Bindings bindings{};
-    binding_list_construct_iterator<PipelineParameters...>::call(driver, bindings);
+    binding_list_construct_iterator<PipelineParameters...>::call(ts, bindings);
     return bindings;
 }
 

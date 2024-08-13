@@ -79,26 +79,26 @@ namespace kernel {
  */
 class ScanReader : public MultiBlockKernel {
 public:
-    ScanReader(VirtualDriver & driver,
+    ScanReader(LLVMTypeSystemInterface & ts,
         StreamSet * source,
         StreamSet * scanIndices,
         std::string const & callbackName);
 
-    ScanReader(VirtualDriver & driver,
+    ScanReader(LLVMTypeSystemInterface & ts,
         StreamSet * source,
         StreamSet * scanIndices,
         std::string const & callbackName,
         std::string const & doneCallbackName);
 
     ScanReader(
-        VirtualDriver & driver,
+        LLVMTypeSystemInterface & ts,
         StreamSet * source,
         StreamSet * scanIndices,
         std::string const & callbackName,
         std::initializer_list<StreamSet *> additionalStreams);
 
     ScanReader(
-        VirtualDriver & driver,
+        LLVMTypeSystemInterface & ts,
         StreamSet * source,
         StreamSet * scanIndices,
         std::string const & callbackName,

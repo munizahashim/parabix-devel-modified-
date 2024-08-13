@@ -917,7 +917,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
-PipelineKernel::PipelineKernel(VirtualDriver & driver,
+PipelineKernel::PipelineKernel(LLVMTypeSystemInterface & ts,
                                std::string && signature,
                                const unsigned numOfKernelFamilyCalls,
                                Kernels && kernels, CallBindings && callBindings,
@@ -926,7 +926,7 @@ PipelineKernel::PipelineKernel(VirtualDriver & driver,
                                Relationships && internallyGenerated,
                                LengthAssertions && lengthAssertions)
 : PipelineKernel(Internal{}
-, driver
+, ts
 , annotateSignatureWithPipelineFlags(std::move(signature))
 , numOfKernelFamilyCalls
 , std::move(kernels)
@@ -942,7 +942,7 @@ PipelineKernel::PipelineKernel(VirtualDriver & driver,
 
 }
 
-PipelineKernel::PipelineKernel(Internal, VirtualDriver &driver,
+PipelineKernel::PipelineKernel(Internal, LLVMTypeSystemInterface & ts,
                std::string && signature,
                const unsigned numOfKernelFamilyCalls,
                Kernels && kernels, CallBindings && callBindings,
@@ -950,7 +950,7 @@ PipelineKernel::PipelineKernel(Internal, VirtualDriver &driver,
                Bindings && scalar_inputs, Bindings && scalar_outputs,
                Relationships && internallyGenerated,
                LengthAssertions && lengthAssertions)
-: Kernel(driver, TypeId::Pipeline,
+: Kernel(ts, TypeId::Pipeline,
          makePipelineHashName(signature),
          std::move(stream_inputs), std::move(stream_outputs),
          std::move(scalar_inputs), std::move(scalar_outputs),
@@ -967,10 +967,10 @@ PipelineKernel::PipelineKernel(Internal, VirtualDriver &driver,
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
-PipelineKernel::PipelineKernel(VirtualDriver & driver,
+PipelineKernel::PipelineKernel(LLVMTypeSystemInterface & ts,
                Bindings && stream_inputs, Bindings && stream_outputs,
                Bindings && scalar_inputs, Bindings && scalar_outputs)
-: Kernel(driver, TypeId::Pipeline,
+: Kernel(ts, TypeId::Pipeline,
          std::move(stream_inputs), std::move(stream_outputs),
          std::move(scalar_inputs), std::move(scalar_outputs))
 {

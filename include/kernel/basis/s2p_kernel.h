@@ -17,7 +17,7 @@ namespace kernel {
     
 class S2PKernel final : public MultiBlockKernel {
 public:
-    S2PKernel(VirtualDriver & driver,
+    S2PKernel(LLVMTypeSystemInterface & ts,
               StreamSet * const codeUnitStream,
               StreamSet * const BasisBits,
               StreamSet * zeroMask = nullptr);
@@ -44,28 +44,28 @@ void Selected_S2P(const std::unique_ptr<ProgramBuilder> & P,
 
 class S2P_i21_3xi8 final : public MultiBlockKernel {
 public:
-    S2P_i21_3xi8(VirtualDriver & driver, StreamSet * const i32Stream, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2);
+    S2P_i21_3xi8(LLVMTypeSystemInterface & ts, StreamSet * const i32Stream, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2);
 protected:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };
 
 class S2P_3xi8_21xi1 final : public MultiBlockKernel {
 public:
-    S2P_3xi8_21xi1(VirtualDriver & driver, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2, StreamSet * const BasisBits);
+    S2P_3xi8_21xi1(LLVMTypeSystemInterface & ts, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2, StreamSet * const BasisBits);
 protected:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };
 
 class S2P_21Kernel final : public MultiBlockKernel {
 public:
-    S2P_21Kernel(VirtualDriver & driver, StreamSet * const codeUnitStream, StreamSet * const BasisBits);
+    S2P_21Kernel(LLVMTypeSystemInterface & ts, StreamSet * const codeUnitStream, StreamSet * const BasisBits);
 protected:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };
 
 class S2P_PabloKernel final : public pablo::PabloKernel {
 public:
-    S2P_PabloKernel(VirtualDriver & driver, StreamSet * const codeUnitStream, StreamSet * const BasisBits);
+    S2P_PabloKernel(LLVMTypeSystemInterface & ts, StreamSet * const codeUnitStream, StreamSet * const BasisBits);
 protected:
     void generatePabloMethod() override;
 private:

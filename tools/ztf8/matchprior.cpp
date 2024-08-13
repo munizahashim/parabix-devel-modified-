@@ -45,13 +45,13 @@ using namespace kernel;
 
 class MatchPriorKernel final: public pablo::PabloKernel {
 public:
-    MatchPriorKernel(VirtualDriver & driver, StreamSet * const countable, Scalar * countResult);
+    MatchPriorKernel(LLVMTypeSystemInterface & ts, StreamSet * const countable, Scalar * countResult);
 protected:
     void generatePabloMethod() override;
 };
 
-MatchPriorKernel::MatchPriorKernel (VirtualDriver &driver, StreamSet * const countable, Scalar * countResult)
-    : pablo::PabloKernel(driver, "matchprior_" + std::to_string(priorDistance),
+MatchPriorKernel::MatchPriorKernel (LLVMTypeSystemInterface & ts, StreamSet * const countable, Scalar * countResult)
+    : pablo::PabloKernel(ts, "matchprior_" + std::to_string(priorDistance),
     {Binding{"countable", countable}},
     {},
     {},

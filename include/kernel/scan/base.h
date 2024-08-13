@@ -18,7 +18,7 @@ namespace kernel {
 class SingleStreamScanKernelTemplate : public MultiBlockKernel {
 public:
 
-    SingleStreamScanKernelTemplate(VirtualDriver & driver, std::string && name, StreamSet * scan);
+    SingleStreamScanKernelTemplate(LLVMTypeSystemInterface & ts, std::string && name, StreamSet * scan);
 
     virtual ~SingleStreamScanKernelTemplate() {}
 
@@ -44,7 +44,7 @@ protected:
         llvm::Constant * const WORDS_PER_STRIDE;
         llvm::Constant * const NUM_BLOCKS_PER_STRIDE;
 
-        ScanWordContext(VirtualDriver & driver, unsigned strideWidth);
+        ScanWordContext(LLVMTypeSystemInterface & ts, unsigned strideWidth);
     };
 
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final override;

@@ -45,14 +45,14 @@ void BlockOrientedKernel::generateFinalBlockMethod(KernelBuilder & b, llvm::Valu
 }
 
 // CONSTRUCTOR
-BlockOrientedKernel::BlockOrientedKernel(VirtualDriver &driver,
+BlockOrientedKernel::BlockOrientedKernel(LLVMTypeSystemInterface & ts,
     std::string && kernelName,
     Bindings && stream_inputs,
     Bindings && stream_outputs,
     Bindings && scalar_parameters,
     Bindings && scalar_outputs,
     InternalScalars && internal_scalars)
-: MultiBlockKernel(driver,
+: MultiBlockKernel(ts,
     TypeId::BlockOriented,
     std::move(kernelName),
     std::move(stream_inputs),

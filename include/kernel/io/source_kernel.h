@@ -12,7 +12,7 @@ namespace kernel {
 class MMapSourceKernel final : public SegmentOrientedKernel {
     friend class FDSourceKernel;
 public:
-    MMapSourceKernel(VirtualDriver & driver, Scalar * const fd, StreamSet * const outputStream);
+    MMapSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const fd, StreamSet * const outputStream);
     void linkExternalMethods(KernelBuilder & b) override;
     void generateInitializeMethod(KernelBuilder & b) override {
         generateInitializeMethod(mCodeUnitWidth, mStride, b);
@@ -39,7 +39,7 @@ protected:
 class ReadSourceKernel final : public SegmentOrientedKernel {
     friend class FDSourceKernel;
 public:
-    ReadSourceKernel(VirtualDriver & driver, Scalar * const fd, StreamSet * const outputStream);
+    ReadSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const fd, StreamSet * const outputStream);
     void linkExternalMethods(KernelBuilder & b) override;
     void generateInitializeMethod(KernelBuilder & b) override {
         generateInitializeMethod(mCodeUnitWidth, mStride, b);
@@ -65,7 +65,7 @@ private:
 
 class FDSourceKernel final : public SegmentOrientedKernel {
 public:
-    FDSourceKernel(VirtualDriver & driver, Scalar * const useMMap, Scalar * const fd, StreamSet * const outputStream);
+    FDSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const useMMap, Scalar * const fd, StreamSet * const outputStream);
     void linkExternalMethods(KernelBuilder & b) override;
     void generateInitializeMethod(KernelBuilder & b) override;
     void generateDoSegmentMethod(KernelBuilder & b) override;
@@ -77,7 +77,7 @@ protected:
 
 class MemorySourceKernel final : public SegmentOrientedKernel {
 public:
-    MemorySourceKernel(VirtualDriver & driver, Scalar * fileSource, Scalar * fileItems, StreamSet * const outputStream);
+    MemorySourceKernel(LLVMTypeSystemInterface & ts, Scalar * fileSource, Scalar * fileItems, StreamSet * const outputStream);
 protected:
     void generateInitializeMethod(KernelBuilder & b) override;
     void generateDoSegmentMethod(KernelBuilder & b) override;

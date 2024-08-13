@@ -126,8 +126,8 @@ SelectOperation Intersect(std::vector<StreamSet *> sets) {
     return __selops::__selop_init(__selops::__op::__intersect, std::move(sets));
 }
 
-StreamSelect::StreamSelect(VirtualDriver &driver, StreamSet * output, SelectOperation operation)
-: BlockOrientedKernel(driver, "StreamSelect" + streamutils::genSignature(operation), {}, {{"output", output}}, {}, {}, {})
+StreamSelect::StreamSelect(LLVMTypeSystemInterface & ts, StreamSet * output, SelectOperation operation)
+: BlockOrientedKernel(ts, "StreamSelect" + streamutils::genSignature(operation), {}, {{"output", output}}, {}, {}, {})
 {
 //    assert (resultStreamCount(operation) == output->getNumElements());
     for (auto const & kv : operation.bindings) {
@@ -142,8 +142,8 @@ StreamSelect::StreamSelect(VirtualDriver &driver, StreamSet * output, SelectOper
     }
 }
 
-StreamSelect::StreamSelect(VirtualDriver &driver, StreamSet * output, SelectOperationList operations)
-: BlockOrientedKernel(driver, "StreamSelect" + streamutils::genSignature(operations), {}, {{"output", output}}, {}, {}, {})
+StreamSelect::StreamSelect(LLVMTypeSystemInterface & ts, StreamSet * output, SelectOperationList operations)
+: BlockOrientedKernel(ts, "StreamSelect" + streamutils::genSignature(operations), {}, {{"output", output}}, {}, {}, {})
 {
 //    assert (resultStreamCount(operations) == output->getNumElements());
     std::unordered_map<StreamSet *, std::string> inputBindings;
@@ -160,8 +160,8 @@ void StreamSelect::generateDoBlockMethod(KernelBuilder & b) {
     }
 }
 
-IStreamSelect::IStreamSelect(VirtualDriver &driver, StreamSet * output, SelectOperation operation)
-: MultiBlockKernel(driver, "IStreamSelect" + streamutils::genSignature(operation),
+IStreamSelect::IStreamSelect(LLVMTypeSystemInterface & ts, StreamSet * output, SelectOperation operation)
+: MultiBlockKernel(ts, "IStreamSelect" + streamutils::genSignature(operation),
     {},
     {{"output", output}},
     {}, {}, {})

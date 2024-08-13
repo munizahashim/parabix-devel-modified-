@@ -9,12 +9,12 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Module.h>
 
-class VirtualDriver {
+namespace kernel { class Kernel; }
+
+class LLVMTypeSystemInterface {
+    friend class CBuilder;
+    friend class kernel::Kernel;
 public:
-
-    virtual bool hasExternalFunction(const llvm::StringRef functionName) const = 0;
-
-    virtual llvm::Function * addLinkFunction(llvm::Module * mod, llvm::StringRef name, llvm::FunctionType * type, void * functionPtr) const = 0;
 
     /// Get a constant value representing either true or false.
     llvm::ConstantInt * LLVM_READNONE getInt1(bool V) {
@@ -156,11 +156,7 @@ public:
       return llvm::Type::getDoubleTy(getContext());
     }
 
-    /// Fetch the type representing void.
-    llvm::Type * LLVM_READNONE getVoidTy() {
-      return llvm::Type::getVoidTy(getContext());
-    }
-
+    /// Fetch the type representing an untyped pointer.
     llvm::PointerType * LLVM_READNONE getVoidPtrTy(const unsigned AddressSpace = 0) const {
         return llvm::PointerType::get(llvm::Type::getInt8Ty(getContext()), AddressSpace);
     }
@@ -183,4 +179,9 @@ public:
 
     virtual llvm::LLVMContext & getContext() const = 0;
 
+protected:
+
+    virtual bool hasExternalFunction(const llvm::StringRef functionName) const = 0;
+
+    virtual llvm::Function * addLinkFunction(llvm::Module * mod, llvm::StringRef name, llvm::FunctionType * type, void * functionPtr) const = 0;
 };

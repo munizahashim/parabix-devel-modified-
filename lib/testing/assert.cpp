@@ -25,22 +25,22 @@ std::string KernelName(StreamEquivalenceKernel::Mode mode, StreamSet * x, Stream
     return str.str();
 }
 
-StreamEquivalenceKernel::StreamEquivalenceKernel(VirtualDriver &driver,
+StreamEquivalenceKernel::StreamEquivalenceKernel(LLVMTypeSystemInterface & ts,
     Mode mode,
     StreamSet * lhs,
     StreamSet * rhs,
     Scalar * outPtr)
-: MultiBlockKernel(driver, KernelName(mode, lhs, rhs),
+: MultiBlockKernel(ts, KernelName(mode, lhs, rhs),
     {{"lhs", lhs, FixedRate(), Principal()}, {"rhs", rhs, FixedRate(), ZeroExtended()}},
     {},
     {{"result_ptr", outPtr}},
     {},
-    {InternalScalar(driver.getInt1Ty(), "accum")})
+    {InternalScalar(ts.getInt1Ty(), "accum")})
 , mMode(mode)
 {
     assert(lhs->getFieldWidth() == rhs->getFieldWidth());
     assert(lhs->getNumElements() == rhs->getNumElements());
-    setStride(driver.getBitBlockWidth() / lhs->getFieldWidth());
+    setStride(ts.getBitBlockWidth() / lhs->getFieldWidth());
     addAttribute(SideEffecting());
 }
 

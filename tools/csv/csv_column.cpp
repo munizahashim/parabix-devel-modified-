@@ -52,7 +52,7 @@ static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (
 
 class SelectField : public PabloKernel {
 public:
-    SelectField(VirtualDriver & driver, StreamSet * csvMarks,
+    SelectField(LLVMTypeSystemInterface & ts, StreamSet * csvMarks,
                               StreamSet * Record_separators,
                               StreamSet * Field_separators,
                               StreamSet * toKeep,
@@ -62,12 +62,12 @@ protected:
     unsigned mColumnNo;
 };
 
-SelectField::SelectField(VirtualDriver &driver,  StreamSet * csvMarks,
+SelectField::SelectField(LLVMTypeSystemInterface & ts,  StreamSet * csvMarks,
                                         StreamSet * Record_separators,
                                         StreamSet * Field_separators,
                                         StreamSet * toKeep,
                                         unsigned columnNo)
-: PabloKernel(driver, "SelectField" + std::to_string(columnNo),
+: PabloKernel(ts, "SelectField" + std::to_string(columnNo),
   {Binding{"csvMarks", csvMarks, FixedRate(), LookAhead(1)},
    Binding{"Record_separators", Record_separators},
    Binding{"Field_separators", Field_separators}},

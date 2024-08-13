@@ -149,16 +149,16 @@ unicode::BitTranslationSets NFD_BixData::NFD_4th_BitCCs() {
 
 class NFD_Translation : public pablo::PabloKernel {
 public:
-    NFD_Translation(VirtualDriver & driver, NFD_BixData & BixData,
+    NFD_Translation(LLVMTypeSystemInterface & ts, NFD_BixData & BixData,
                     StreamSet * Basis, StreamSet * Output);
 protected:
     void generatePabloMethod() override;
     NFD_BixData & mBixData;
 };
 
-NFD_Translation::NFD_Translation (VirtualDriver &driver, NFD_BixData & BixData,
+NFD_Translation::NFD_Translation (LLVMTypeSystemInterface & ts, NFD_BixData & BixData,
                                   StreamSet * Basis, StreamSet * Output)
-: PabloKernel(driver, "NFD_Translation" + std::to_string(Basis->getNumElements()) + "x1" + UTF::kernelAnnotation(),
+: PabloKernel(ts, "NFD_Translation" + std::to_string(Basis->getNumElements()) + "x1" + UTF::kernelAnnotation(),
 // inputs
 {Binding{"basis", Basis}},
 // output
@@ -273,17 +273,17 @@ std::vector<re::CC *> VIndexBixNumCCs() {
 
 class Hangul_VT_Indices : public pablo::PabloKernel {
 public:
-    Hangul_VT_Indices(VirtualDriver & driver,
+    Hangul_VT_Indices(LLVMTypeSystemInterface & ts,
                       StreamSet * Basis, StreamSet * LV_LVT, StreamSet * L_index,
                       StreamSet * V_index, StreamSet * T_index);
 protected:
     void generatePabloMethod() override;
 };
 
-Hangul_VT_Indices::Hangul_VT_Indices (VirtualDriver &driver,
+Hangul_VT_Indices::Hangul_VT_Indices (LLVMTypeSystemInterface & ts,
                                       StreamSet * Basis, StreamSet * LV_LVT, StreamSet * L_index,
                                       StreamSet * V_index, StreamSet * T_index)
-: PabloKernel(driver, "Hangul_VT_indices_" + std::to_string(Basis->getNumElements()) + "x1",
+: PabloKernel(ts, "Hangul_VT_indices_" + std::to_string(Basis->getNumElements()) + "x1",
 // inputs
 {Binding{"basis", Basis},
     Binding{"LV_LVT", LV_LVT},
@@ -356,17 +356,17 @@ void Hangul_VT_Indices::generatePabloMethod() {
 
 class Hangul_NFD : public pablo::PabloKernel {
 public:
-    Hangul_NFD(VirtualDriver & driver,
+    Hangul_NFD(LLVMTypeSystemInterface & ts,
                StreamSet * Basis, StreamSet * LV_LVT, StreamSet * L_index,
                StreamSet * V_index, StreamSet * T_index, StreamSet * NFD_Basis);
 protected:
     void generatePabloMethod() override;
 };
 
-Hangul_NFD::Hangul_NFD (VirtualDriver & driver,
+Hangul_NFD::Hangul_NFD (LLVMTypeSystemInterface & ts,
                         StreamSet * Basis, StreamSet * LV_LVT, StreamSet * L_index,
                         StreamSet * V_index, StreamSet * T_index, StreamSet * NFD_Basis)
-: PabloKernel(driver, "Hangul_NFD_" + std::to_string(Basis->getNumElements()) + "x1",
+: PabloKernel(ts, "Hangul_NFD_" + std::to_string(Basis->getNumElements()) + "x1",
 // inputs
 {Binding{"basis", Basis},
     Binding{"L_index", L_index},
@@ -426,15 +426,15 @@ void Hangul_NFD::generatePabloMethod() {
 
 class CCC_Check : public pablo::PabloKernel {
 public:
-    CCC_Check(VirtualDriver & driver, StreamSet * CCC_Basis, StreamSet * CCC_Violation);
+    CCC_Check(LLVMTypeSystemInterface & ts, StreamSet * CCC_Basis, StreamSet * CCC_Violation);
 protected:
     void generatePabloMethod() override;
 private:
     unsigned mCCC_basis_size;
 };
 
-CCC_Check::CCC_Check (VirtualDriver &driver, StreamSet * CCC_Basis, StreamSet * CCC_Violation)
-: PabloKernel(driver, "CCC_Check",
+CCC_Check::CCC_Check (LLVMTypeSystemInterface & ts, StreamSet * CCC_Basis, StreamSet * CCC_Violation)
+: PabloKernel(ts, "CCC_Check",
 // inputs
 {Binding{"CCC_Basis", CCC_Basis, FixedRate(1), LookAhead(1)}},
 // output

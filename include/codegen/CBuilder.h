@@ -6,7 +6,7 @@
 
 #include <toolchain/toolchain.h>
 #include <codegen/FunctionTypeBuilder.h>
-#include <codegen/virtual_driver.h>
+#include <codegen/LLVMTypeSystemInterface.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Constants.h>
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
@@ -439,11 +439,11 @@ public:
     llvm::CallInst * CreateSRandCall(llvm::Value * randomSeed);
     llvm::CallInst * CreateRandCall();
 
-    void setDriver(VirtualDriver & driver) {
-        mDriver = &driver;
+    void setDriver(LLVMTypeSystemInterface & ts) {
+        mDriver = &ts;
     }
 
-    VirtualDriver & getDriver() const {
+    LLVMTypeSystemInterface & getDriver() const {
         return *mDriver;
     }
 
@@ -493,7 +493,7 @@ protected:
     unsigned                        mCacheLineAlignment;
     llvm::IntegerType * const       mSizeType;
     llvm::StructType *              mFILEtype;
-    VirtualDriver *        mDriver;
+    LLVMTypeSystemInterface *        mDriver;
     llvm::LLVMContext               mContext;
     const std::string               mTriple;
     #ifdef ENABLE_LIBBACKTRACE

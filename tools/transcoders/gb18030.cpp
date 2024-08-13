@@ -74,13 +74,13 @@ static cl::opt<std::string> OutputEncoding("encoding", cl::desc("Output encoding
 //
 class GB_18030_Parser : public pablo::PabloKernel {
 public:
-    GB_18030_Parser(VirtualDriver & driver, StreamSet * basis, StreamSet * GB_marks);
+    GB_18030_Parser(LLVMTypeSystemInterface & ts, StreamSet * basis, StreamSet * GB_marks);
 protected:
     void generatePabloMethod() override;
 };
 
-GB_18030_Parser::GB_18030_Parser (VirtualDriver &driver, StreamSet * basis, StreamSet * GB_marks)
-: PabloKernel(driver, "GB_18030_Parser",
+GB_18030_Parser::GB_18030_Parser (LLVMTypeSystemInterface & ts, StreamSet * basis, StreamSet * GB_marks)
+: PabloKernel(ts, "GB_18030_Parser",
 {Binding{"basis", basis}},
               {Binding{"GB_marks", GB_marks}}) {}
 
@@ -172,7 +172,7 @@ enum class GB_18030_IndexingKind {Codepoint, UTF16};
 
 class GB_18030_ExtractionMasks : public pablo::PabloKernel {
 public:
-    GB_18030_ExtractionMasks(VirtualDriver & driver, StreamSet * GB_marks, StreamSet * basis,
+    GB_18030_ExtractionMasks(LLVMTypeSystemInterface & ts, StreamSet * GB_marks, StreamSet * basis,
                              StreamSet * GB_1, StreamSet * GB_2, StreamSet * GB_3, StreamSet * GB_4, StreamSet * GB_prefix4, StreamSet * error,
                              GB_18030_IndexingKind k = GB_18030_IndexingKind::Codepoint);
 protected:
@@ -183,9 +183,9 @@ private:
 
 
 GB_18030_ExtractionMasks::GB_18030_ExtractionMasks
-    (VirtualDriver & driver,
+    (LLVMTypeSystemInterface & ts,
      StreamSet * GB_marks, StreamSet * basis, StreamSet * GB_1, StreamSet * GB_2, StreamSet * GB_3, StreamSet * GB_4, StreamSet * GB_prefix4, StreamSet * error, GB_18030_IndexingKind k)
-: PabloKernel(driver, (k == GB_18030_IndexingKind::UTF16) ? "GB_18030_ExtractionMasks_u16" : "GB_18030_ExtractionMasks",
+: PabloKernel(ts, (k == GB_18030_IndexingKind::UTF16) ? "GB_18030_ExtractionMasks_u16" : "GB_18030_ExtractionMasks",
 {Binding{"GB_marks", GB_marks, FixedRate(1), LookAhead(3)}, Binding{"basis", basis}},
 {Binding{"GB_1", GB_1}, Binding{"GB_2", GB_2}, Binding{"GB_3", GB_3}, Binding{"GB_4", GB_4}, Binding{"GB_prefix4", GB_prefix4}, Binding{"error", error}}),
 mExtractionKind(k)  {}
@@ -244,7 +244,7 @@ void GB_18030_ExtractionMasks::generatePabloMethod() {
 
 class GB_18030_DoubleByteIndex : public pablo::PabloKernel {
 public:
-    GB_18030_DoubleByteIndex(VirtualDriver & driver,
+    GB_18030_DoubleByteIndex(LLVMTypeSystemInterface & ts,
                              StreamSet * GB_4byte, StreamSet * byte1_basis, StreamSet * byte2_basis,
                              StreamSet * GB_2byte, StreamSet * gb15_index);
 protected:
@@ -252,9 +252,9 @@ protected:
 };
 
 GB_18030_DoubleByteIndex::GB_18030_DoubleByteIndex
-(VirtualDriver &driver,
+(LLVMTypeSystemInterface & ts,
  StreamSet * GB_4byte, StreamSet * byte1_basis, StreamSet * byte2_basis, StreamSet * GB_2byte, StreamSet * gb15_index)
-: PabloKernel(driver, "GB_18030_DoubleByteIndex",
+: PabloKernel(ts, "GB_18030_DoubleByteIndex",
               // input
 {Binding{"GB_4byte", GB_4byte}, Binding{"byte1_basis", byte1_basis}, Binding{"byte2_basis", byte2_basis}},
               // output
@@ -291,7 +291,7 @@ void GB_18030_DoubleByteIndex::generatePabloMethod() {
 
 class GB_18030_InitializeASCII : public pablo::PabloKernel {
 public:
-    GB_18030_InitializeASCII(VirtualDriver & driver,
+    GB_18030_InitializeASCII(LLVMTypeSystemInterface & ts,
                              StreamSet * byte1_basis, StreamSet * u16_basis);
     constexpr static unsigned ASCII_Bits = 7;
 protected:
@@ -299,8 +299,8 @@ protected:
 };
 
 GB_18030_InitializeASCII::GB_18030_InitializeASCII
-(VirtualDriver &driver, StreamSet * byte1_basis, StreamSet * u16_basis)
-: PabloKernel(driver, "GB_18030_InitializeASCII",
+(LLVMTypeSystemInterface & ts, StreamSet * byte1_basis, StreamSet * u16_basis)
+: PabloKernel(ts, "GB_18030_InitializeASCII",
               // input
 {Binding{"byte1_basis", byte1_basis}},
               // output
@@ -325,7 +325,7 @@ void GB_18030_InitializeASCII::generatePabloMethod() {
 
 class GB_18030_DoubleByteRangeKernel : public pablo::PabloKernel {
 public:
-    GB_18030_DoubleByteRangeKernel(VirtualDriver & driver,
+    GB_18030_DoubleByteRangeKernel(LLVMTypeSystemInterface & ts,
                                    StreamSet * GB_2byte, StreamSet * gb15_index, StreamSet * u16_in,
                                    StreamSet * u16_out,
                                    unsigned rangeBase, unsigned rangeBits);
@@ -337,11 +337,11 @@ private:
 };
 
 GB_18030_DoubleByteRangeKernel::GB_18030_DoubleByteRangeKernel
-(VirtualDriver &driver,
+(LLVMTypeSystemInterface & ts,
  StreamSet * GB_2byte, StreamSet * gb15_index, StreamSet * u16_in,
  StreamSet * u16_out,
  unsigned rangeBase, unsigned rangeBits)
-: PabloKernel(driver, "GB_18030_DoubleByteRangeKernel" + std::to_string(rangeBase) + "-" + std::to_string(rangeBase + (1 << rangeBits) - 1),
+: PabloKernel(ts, "GB_18030_DoubleByteRangeKernel" + std::to_string(rangeBase) + "-" + std::to_string(rangeBase + (1 << rangeBits) - 1),
               // input
 {Binding{"GB_2byte", GB_2byte}, Binding{"gb15_index", gb15_index}, Binding{"u16_in", u16_in}},
               // output
@@ -393,7 +393,7 @@ void GB_18030_DoubleByteRangeKernel::generatePabloMethod() {
 
 class GB_18030_FourByteLogic : public pablo::PabloKernel {
 public:
-    GB_18030_FourByteLogic(VirtualDriver & driver,
+    GB_18030_FourByteLogic(LLVMTypeSystemInterface & ts,
                            StreamSet * GB_4byte, StreamSet * byte1, StreamSet * nybble1, StreamSet * byte2, StreamSet * nybble2, StreamSet * u16_basis,
                            StreamSet * UTF_out,
                            GB_18030_IndexingKind k = GB_18030_IndexingKind::Codepoint);
@@ -404,10 +404,10 @@ private:
 };
 
 GB_18030_FourByteLogic::GB_18030_FourByteLogic
-(VirtualDriver &driver,
+(LLVMTypeSystemInterface & ts,
  StreamSet * GB_4byte, StreamSet * byte1, StreamSet * nybble1, StreamSet * byte2, StreamSet * nybble2, StreamSet * u16_basis,
  StreamSet * UTF_out, GB_18030_IndexingKind k)
-: PabloKernel(driver, (k == GB_18030_IndexingKind::UTF16) ? "GB_18030_FourByteLogic_u16" : "GB_18030_FourByteLogic",
+: PabloKernel(ts, (k == GB_18030_IndexingKind::UTF16) ? "GB_18030_FourByteLogic_u16" : "GB_18030_FourByteLogic",
               // input
 {Binding{"GB_4byte", GB_4byte},
     Binding{"byte1", byte1},

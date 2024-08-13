@@ -14,7 +14,7 @@ namespace kernel {
 
 class editdScanKernel : public BlockOrientedKernel {
 public:
-    editdScanKernel(VirtualDriver & driver, StreamSet * matchResults);
+    editdScanKernel(LLVMTypeSystemInterface & ts, StreamSet * matchResults);
 
 private:
     void generateDoBlockMethod(KernelBuilder & b) override;

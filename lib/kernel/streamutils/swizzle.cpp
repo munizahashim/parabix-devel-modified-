@@ -80,11 +80,11 @@ inline Bindings makeSwizzledOutputs(const std::vector<StreamSet *> & outputs, co
     return bindings;
 }
 
-SwizzleGenerator::SwizzleGenerator(VirtualDriver &driver,
+SwizzleGenerator::SwizzleGenerator(LLVMTypeSystemInterface & ts,
                                    const std::vector<StreamSet *> & inputs,
                                    const std::vector<StreamSet *> & outputs,
                                    const unsigned fieldWidth)
-: BlockOrientedKernel(driver, makeSwizzleName(inputs, outputs, fieldWidth),
+: BlockOrientedKernel(ts, makeSwizzleName(inputs, outputs, fieldWidth),
 makeSwizzledInputs(inputs),
 makeSwizzledOutputs(outputs, fieldWidth),
 {}, {}, {})
@@ -145,13 +145,13 @@ void SwizzleGenerator::generateDoBlockMethod(KernelBuilder & b) {
 }
 
 
-SwizzleByGather::SwizzleByGather(VirtualDriver &driver)
-: BlockOrientedKernel(driver, "swizzleByGather", {}, {}, {}, {}, {}){
+SwizzleByGather::SwizzleByGather(LLVMTypeSystemInterface & ts)
+: BlockOrientedKernel(ts, "swizzleByGather", {}, {}, {}, {}, {}){
     for (unsigned i = 0; i < 2; i++) {
-        mInputStreamSets.push_back(Binding{driver.getStreamSetTy(4, 1), "inputGroup" + std::to_string(i)});
+        mInputStreamSets.push_back(Binding{ts.getStreamSetTy(4, 1), "inputGroup" + std::to_string(i)});
     }
     for (unsigned i = 0; i < 1; i++) {
-        mOutputStreamSets.push_back(Binding{driver.getStreamSetTy(8, 1), "outputGroup" + std::to_string(i), FixedRate(1)});
+        mOutputStreamSets.push_back(Binding{ts.getStreamSetTy(8, 1), "outputGroup" + std::to_string(i), FixedRate(1)});
     }
 }
 

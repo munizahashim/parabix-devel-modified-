@@ -330,13 +330,13 @@ std::string && annotateKernelNameWithPabloDebugFlags(std::string && name) {
     return std::move(name);
 }
 
-PabloKernel::PabloKernel(VirtualDriver & driver,
+PabloKernel::PabloKernel(LLVMTypeSystemInterface & ts,
                          std::string && kernelName,
                          std::vector<Binding> stream_inputs,
                          std::vector<Binding> stream_outputs,
                          std::vector<Binding> scalar_parameters,
                          std::vector<Binding> scalar_outputs)
-: BlockOrientedKernel(driver, annotateKernelNameWithPabloDebugFlags(std::move(kernelName)),
+: BlockOrientedKernel(ts, annotateKernelNameWithPabloDebugFlags(std::move(kernelName)),
                       std::move(stream_inputs), std::move(stream_outputs),
                       std::move(scalar_parameters), std::move(scalar_outputs), {})
 , PabloAST(PabloAST::ClassTypeId::Kernel, nullptr, mAllocator)
@@ -346,11 +346,11 @@ PabloKernel::PabloKernel(VirtualDriver & driver,
 , mSizeTy(nullptr)
 , mStreamTy(nullptr)
 , mContext(nullptr) {
-    addNonPersistentScalar(driver.getBitBlockType(), "EOFbit");
-    addNonPersistentScalar(driver.getBitBlockType(), "EOFmask");
+    addNonPersistentScalar(ts.getBitBlockType(), "EOFbit");
+    addNonPersistentScalar(ts.getBitBlockType(), "EOFmask");
     if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        addNonPersistentScalar(driver.getSizeTy(), "EOFUnnecessaryData");
-        addInternalScalar(driver.getSizeTy(), KERNEL_ILLUSTRATOR_STRIDE_NUM);
+        addNonPersistentScalar(ts.getSizeTy(), "EOFUnnecessaryData");
+        addInternalScalar(ts.getSizeTy(), KERNEL_ILLUSTRATOR_STRIDE_NUM);
     }
 }
 

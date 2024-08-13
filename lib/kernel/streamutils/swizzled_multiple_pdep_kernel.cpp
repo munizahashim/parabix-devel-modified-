@@ -13,18 +13,18 @@ using namespace llvm;
 
 namespace kernel {
 
-SwizzledMultiplePDEPkernel::SwizzledMultiplePDEPkernel(VirtualDriver &driver, const unsigned swizzleFactor, const unsigned numberOfStreamSet, std::string name)
-: MultiBlockKernel(driver, std::move(name),
+SwizzledMultiplePDEPkernel::SwizzledMultiplePDEPkernel(LLVMTypeSystemInterface & ts, const unsigned swizzleFactor, const unsigned numberOfStreamSet, std::string name)
+: MultiBlockKernel(ts, std::move(name),
 // input stream sets
-{Binding{driver.getStreamSetTy(), "marker", FixedRate(), Principal()},
-Binding{driver.getStreamSetTy(swizzleFactor), "source0", PopcountOf("marker"), BlockSize(driver.getBitBlockWidth() / swizzleFactor) }},
+{Binding{ts.getStreamSetTy(), "marker", FixedRate(), Principal()},
+Binding{ts.getStreamSetTy(swizzleFactor), "source0", PopcountOf("marker"), BlockSize(ts.getBitBlockWidth() / swizzleFactor) }},
 // output stream set
-{Binding{driver.getStreamSetTy(swizzleFactor), "output0", FixedRate(), BlockSize(driver.getBitBlockWidth() / swizzleFactor)}},
+{Binding{ts.getStreamSetTy(swizzleFactor), "output0", FixedRate(), BlockSize(ts.getBitBlockWidth() / swizzleFactor)}},
 {}, {}, {})
 , mSwizzleFactor(swizzleFactor), mNumberOfStreamSet(numberOfStreamSet) {
     for (unsigned i = 1; i < numberOfStreamSet; i++) {
-        mInputStreamSets.push_back(Binding{driver.getStreamSetTy(swizzleFactor), "source" + std::to_string(i), RateEqualTo("source0"), BlockSize(driver.getBitBlockWidth() / swizzleFactor) });
-        mOutputStreamSets.push_back(Binding{driver.getStreamSetTy(swizzleFactor), "output" + std::to_string(i), RateEqualTo("output0"), BlockSize(driver.getBitBlockWidth() / swizzleFactor)});
+        mInputStreamSets.push_back(Binding{ts.getStreamSetTy(swizzleFactor), "source" + std::to_string(i), RateEqualTo("source0"), BlockSize(ts.getBitBlockWidth() / swizzleFactor) });
+        mOutputStreamSets.push_back(Binding{ts.getStreamSetTy(swizzleFactor), "output" + std::to_string(i), RateEqualTo("output0"), BlockSize(ts.getBitBlockWidth() / swizzleFactor)});
     }
 }
 
