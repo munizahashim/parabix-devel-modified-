@@ -69,6 +69,8 @@ public:
 
         P.identifyInterPartitionSymbolicRates();
 
+        P.addFlowControlAnnotations();
+
         P.identifyTerminationChecks();
 
         P.makeTerminationPropagationGraph();
@@ -76,10 +78,6 @@ public:
         P.analyzePrincipalRateIO();
 
         P.determinePartitionJumpIndices();
-
-        #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-        P.identifyPartitionGuidedSynchronizationVariables();
-        #endif
 
         P.annotateBufferGraphWithAddAttributes();
 
@@ -101,6 +99,8 @@ public:
         P.identifyPortsThatModifySegmentLength();
 
         P.mapInternallyGeneratedStreamSets();
+
+        P.identifySynchronizationVariableLevels();
 
         // Finish the buffer graph
 
@@ -127,7 +127,6 @@ private:
     PipelineAnalysis(PipelineKernel * const pipelineKernel)
     : PipelineCommonGraphFunctions(mStreamGraph, mBufferGraph)
     , mPipelineKernel(pipelineKernel)
-//    , mNumOfThreads(pipelineKernel->getNumOfThreads())
     , mKernels(pipelineKernel->mKernels)
     , mTraceProcessedProducedItemCounts(codegen::DebugOptionIsSet(codegen::TraceCounts))
     , mTraceDynamicBuffers(codegen::DebugOptionIsSet(codegen::TraceDynamicBuffers))
@@ -164,10 +163,6 @@ private:
     PartitionGraph identifyKernelPartitions();
 
     void determinePartitionJumpIndices();
-
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    void identifyPartitionGuidedSynchronizationVariables();
-    #endif
 
     // simple scheduling analysis
 
@@ -211,6 +206,8 @@ private:
     void identifyIllustratedStreamSets();
 
     void buildZeroInputGraph();
+
+    void addFlowControlAnnotations();
 
     // thread local analysis
 
@@ -263,6 +260,10 @@ private:
 
     void mapInternallyGeneratedStreamSets();
 
+    // Synchronization Level Analysis
+
+    void identifySynchronizationVariableLevels();
+
 public:
 
     // Debug functions
@@ -281,8 +282,8 @@ public:
     const bool                      mTraceIndividualConsumedItemCounts;
     const bool                      IsNestedPipeline;
 
-    static const unsigned           PipelineInput = 0U;
-    static const unsigned           FirstKernel = 1U;
+    static const unsigned           PipelineInput = 0;
+    unsigned                        FirstKernel = 0;
     unsigned                        LastKernel = 0;
     unsigned                        PipelineOutput = 0;
     unsigned                        FirstStreamSet = 0;
@@ -294,7 +295,10 @@ public:
     unsigned                        FirstScalar = 0;
     unsigned                        LastScalar = 0;
     unsigned                        PartitionCount = 0;
-    unsigned                        NumOfThreads = 0;
+    unsigned                        FirstComputePartitionId = 0;
+    unsigned                        LastComputePartitionId = 0;
+    bool                            AllowIOProcessThread = false;
+
     bool                            HasZeroExtendedStream = false;
 
     size_t                          RequiredThreadLocalStreamSetMemory = 0;
@@ -329,6 +333,7 @@ public:
     TerminationPropagationGraph         mTerminationPropagationGraph;
     InternallyGeneratedStreamSetGraph   mInternallyGeneratedStreamSetGraph;
     BitVector                           HasTerminationSignal;
+    std::vector<unsigned>               SynchronizationVariableNumber;
 
     FamilyScalarGraph               mFamilyScalarGraph;
     ZeroInputGraph                  mZeroInputGraph;

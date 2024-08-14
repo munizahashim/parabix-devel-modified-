@@ -423,7 +423,9 @@ protected:
     llvm::Value *                   mNumOfStrides = nullptr;
     llvm::Value *                   mFixedRateFactor = nullptr;
     llvm::Value *                   mExternalSegNo = nullptr;
-
+    #ifdef ENABLE_PAPI
+    llvm::Value *                   mPAPIEventSetId = nullptr;
+    #endif
     Vec<llvm::Value *>              mInputIsClosed;
 
     Vec<llvm::Value *>              mProcessedInputItemPtr;

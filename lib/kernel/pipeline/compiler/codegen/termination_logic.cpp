@@ -8,11 +8,21 @@ namespace kernel {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::addTerminationProperties(KernelBuilder & b, const size_t kernelId, const size_t groupId) {
     if (HasTerminationSignal.test(kernelId)) {
+
         IntegerType * const sizeTy = b.getSizeTy();
         mTarget->addInternalScalar(sizeTy, TERMINATION_PREFIX + std::to_string(kernelId), groupId);
         if (in_degree(kernelId, mTerminationPropagationGraph) != 0) {
             mTarget->addInternalScalar(sizeTy, CONSUMER_TERMINATION_COUNT_PREFIX + std::to_string(kernelId), groupId);
         }
+
+        for (auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
+            if (LLVM_UNLIKELY(mBufferGraph[e].isCrossThreaded())) {
+                mKernelProducesCrossThreadedData.set(kernelId);
+                mTarget->addInternalScalar(sizeTy, CROSS_THREADED_TERMINATION_SEGMENT_NUMBER_PREFIX + std::to_string(kernelId), groupId);
+                break;
+            }
+        }
+
     } else {
         assert (in_degree(kernelId, mTerminationPropagationGraph) == 0);
     }
@@ -23,11 +33,11 @@ void PipelineCompiler::addTerminationProperties(KernelBuilder & b, const size_t 
  * @brief getTerminationSignalIndex
  ** ------------------------------------------------------------------------------------------------------------- */
 unsigned PipelineCompiler::getTerminationSignalIndex(const unsigned kernel) const {
-    if (HasTerminationSignal[kernel]) {
+    if (HasTerminationSignal.test(kernel)) {
         return kernel;
     } else {
         const auto root = FirstKernelInPartition[KernelPartitionId[kernel]];
-        assert (HasTerminationSignal[root]);
+        assert (HasTerminationSignal.test(root));
         return root;
     }
 }
@@ -35,8 +45,19 @@ unsigned PipelineCompiler::getTerminationSignalIndex(const unsigned kernel) cons
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief hasKernelTerminated
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::hasKernelTerminated(KernelBuilder & b, const size_t kernel, const bool normally) const {
-    Value * const signal = mKernelTerminationSignal[getTerminationSignalIndex(kernel)]; assert (signal);
+Value * PipelineCompiler::hasKernelTerminated(KernelBuilder & b, const size_t kernel, const bool normally) {
+    Value * signal = mKernelIsClosed[kernel];
+    if (signal == nullptr) {
+        const auto partitionId = KernelPartitionId[kernel];
+        const auto isComputeThreadPartition = (FirstComputePartitionId <= partitionId) && (partitionId <= LastComputePartitionId);
+        if (mIsIOProcessThread != isComputeThreadPartition) {
+            const auto idx = getTerminationSignalIndex(kernel);
+            signal = mKernelTerminationSignal[idx];
+            assert (isFromCurrentFunction(b, signal, false));
+        } else {
+            signal = readTerminationSignal(b, kernel);
+        }
+    }
     if (normally) {
         Constant * const completed = getTerminationSignal(b, TerminationSignal::Completed);
         return b.CreateICmpEQ(signal, completed);
@@ -54,43 +75,54 @@ Value * PipelineCompiler::hasPipelineTerminated(KernelBuilder & b) {
     Value * hard = nullptr;
     Value * soft = nullptr;
 
+    assert (KernelPartitionId[PipelineInput] == 0);
+    assert (KernelPartitionId[PipelineOutput] == (PartitionCount - 1));
+
     Constant * const unterminated = getTerminationSignal(b, TerminationSignal::None);
     Constant * const aborted = getTerminationSignal(b, TerminationSignal::Aborted);
     Constant * const fatal = getTerminationSignal(b, TerminationSignal::Fatal);
 
-    assert (KernelPartitionId[PipelineInput] == 0);
-    assert (KernelPartitionId[PipelineOutput] == PartitionCount - 1);
-
-    for (unsigned partitionId = 1; partitionId < (PartitionCount - 1); ++partitionId) {
+    for (auto partitionId = 1U; partitionId < (PartitionCount - 1); ++partitionId) {
         if (const auto type = mTerminationCheck[partitionId]) {
             const auto root = FirstKernelInPartition[partitionId];
-            assert (HasTerminationSignal[root]);
-            Value * const signal = mKernelTerminationSignal[root];
-            assert (isFromCurrentFunction(b, signal, false));
-            if (type & TerminationCheckFlag::Hard) {
-                assert (signal);
-                Value * const final = b.CreateICmpEQ(signal, fatal);
-                if (hard) {
-                    hard = b.CreateOr(hard, final);
+            assert (HasTerminationSignal.test(root));
+            const auto onSameThread =
+                ((FirstComputePartitionId <= partitionId) && (partitionId <= LastComputePartitionId)) != mIsIOProcessThread;
+            if (onSameThread || (type & TerminationCheckFlag::Hard)) {
+                Value * signal = nullptr;
+                if (onSameThread) {
+                    signal = mKernelTerminationSignal[root];
+                    assert (signal);
                 } else {
-                    hard = final;
+                    signal = readTerminationSignal(b, root);
                 }
-            }
-            if (type & TerminationCheckFlag::Soft) {
-                assert (signal);
-                Value * const final = b.CreateICmpNE(signal, unterminated);
-                if (soft) {
-                    soft = b.CreateAnd(soft, final);
-                } else {
-                    soft = final;
+                if (type & TerminationCheckFlag::Hard) {
+                    Value * const final = b.CreateICmpEQ(signal, fatal);
+                    if (hard) {
+                        hard = b.CreateOr(hard, final);
+                    } else {
+                        hard = final;
+                    }
+                }
+                if (type & TerminationCheckFlag::Soft) {
+                    Value * const final = b.CreateICmpNE(signal, unterminated);
+                    if (soft) {
+                        soft = b.CreateAnd(soft, final);
+                    } else {
+                        soft = final;
+                    }
                 }
             }
         }
     }
-    assert (soft);
-    Value * signal = b.CreateSelect(soft, aborted, unterminated);
-    if (hard) {
-        signal = b.CreateSelect(hard, fatal, signal);
+    Value * signal = aborted;
+    if (soft) {
+        signal = b.CreateSelect(soft, aborted, unterminated);
+        if (hard) {
+            signal = b.CreateSelect(hard, fatal, signal);
+        }
+    } else {
+        assert (hard == nullptr);
     }
     return signal;
 
@@ -120,14 +152,14 @@ void PipelineCompiler::signalAbnormalTermination(KernelBuilder & b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isClosed
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::isClosed(KernelBuilder & b, const StreamSetPort inputPort, const bool normally) const {
+Value * PipelineCompiler::isClosed(KernelBuilder & b, const StreamSetPort inputPort, const bool normally) {
     return isClosed(b, getInputBufferVertex(inputPort), normally);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isClosed
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::isClosed(KernelBuilder & b, const unsigned streamSet, const bool normally) const {
+Value * PipelineCompiler::isClosed(KernelBuilder & b, const unsigned streamSet, const bool normally) {
     const BufferNode & bn = mBufferGraph[streamSet];
     if (LLVM_UNLIKELY(bn.isConstant())) {
         return b.getFalse();
@@ -143,14 +175,6 @@ Value * PipelineCompiler::isClosed(KernelBuilder & b, const unsigned streamSet, 
         }
     }
     return hasKernelTerminated(b, producer, normally && kernelCanTerminateAbnormally(producer));
-}
-
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief isClosedNormally
- ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::isClosedNormally(KernelBuilder & b, const StreamSetPort inputPort) const {
-    return isClosed(b, inputPort, true);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -174,10 +198,11 @@ bool PipelineCompiler::kernelCanTerminateAbnormally(const unsigned kernel) const
  * @brief checkIfKernelIsAlreadyTerminated
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::checkIfKernelIsAlreadyTerminated(KernelBuilder & b) {
-    if (mIsPartitionRoot || mKernelCanTerminateEarly) {
+    if (HasTerminationSignal.test(mKernelId)) {
         Value * const signal = readTerminationSignal(b, mKernelId);
         mKernelTerminationSignal[mKernelId] = signal;
         mInitialTerminationSignal = signal;
+        mKernelIsClosed[mKernelId] = nullptr;
         mInitiallyTerminated = hasKernelTerminated(b, mKernelId);
     }
 }
@@ -204,7 +229,8 @@ void PipelineCompiler::checkPropagatedTerminationSignals(KernelBuilder & b) {
         b.CreateUnlikelyCondBr(allConsumersFinished, caughtPropagatedTerminationSignal, np);
         if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
             b.SetInsertPoint(caughtPropagatedTerminationSignal);
-            acquireSynchronizationLock(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+            assert (!mIsIOProcessThread);
+            acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
             b.CreateBr(mKernelTerminated);
         }
         BasicBlock * const entryPoint = b.GetInsertBlock();
@@ -236,7 +262,7 @@ void PipelineCompiler::checkPropagatedTerminationSignals(KernelBuilder & b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readTerminationSignal
  ** ------------------------------------------------------------------------------------------------------------- */
-Value * PipelineCompiler::readTerminationSignal(KernelBuilder & b, const unsigned kernelId) {
+Value * PipelineCompiler::readTerminationSignal(KernelBuilder & b, const unsigned kernelId) const {
     assert (HasTerminationSignal.test(kernelId));
     const auto name = TERMINATION_PREFIX + std::to_string(kernelId);
     auto ref = b.getScalarFieldPtr(name);
@@ -250,6 +276,14 @@ void PipelineCompiler::writeTerminationSignal(KernelBuilder & b, const unsigned 
     assert (HasTerminationSignal.test(kernelId));
     Value * const ptr = b.getScalarFieldPtr(TERMINATION_PREFIX + std::to_string(kernelId)).first;
     b.CreateStore(signal, ptr, true);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getTerminationSignalPtr
+ ** ------------------------------------------------------------------------------------------------------------- */
+KernelBuilder::ScalarRef PipelineCompiler::getKernelTerminationSignalPtr(KernelBuilder & b, const unsigned kernelId) const {
+    assert (HasTerminationSignal.test(kernelId));
+    return b.getScalarFieldPtr(TERMINATION_PREFIX + std::to_string(kernelId));
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

@@ -29,7 +29,9 @@ namespace kernel {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializePAPI
  ** ------------------------------------------------------------------------------------------------------------- */
-int initializePAPI(SmallVector<int, 8> & PAPIEventList) {
+Constant * initializePAPI(KernelBuilder & b) {
+
+    SmallVector<int, 8> PAPIEventList;
 
     const int rvalInit = PAPI_library_init(PAPI_VER_CURRENT);
     if (rvalInit != PAPI_VER_CURRENT) {
@@ -40,17 +42,14 @@ int initializePAPI(SmallVector<int, 8> & PAPIEventList) {
         report_fatal_error(StringRef(out.str()));
     }
 
-    //    if (codegen::SegmentThreads > 1 || codegen::EnableDynamicMultithreading) {
-            const auto rvalThreaedInit = PAPI_thread_init(pthread_self);
-            if (rvalThreaedInit != PAPI_OK) {
-                SmallVector<char, 256> tmp;
-                raw_svector_ostream out(tmp);
-                out << "PAPI Thread Init Error: ";
-                out << PAPI_strerror(rvalThreaedInit);
-                report_fatal_error(StringRef(out.str()));
-            }
-    //    }
-
+    const auto rvalThreaedInit = PAPI_thread_init(pthread_self);
+    if (rvalThreaedInit != PAPI_OK) {
+        SmallVector<char, 256> tmp;
+        raw_svector_ostream out(tmp);
+        out << "PAPI Thread Init Error: ";
+        out << PAPI_strerror(rvalThreaedInit);
+        report_fatal_error(StringRef(out.str()));
+    }
 
     assert (!codegen::PapiCounterOptions.empty());
 
@@ -71,58 +70,15 @@ int initializePAPI(SmallVector<int, 8> & PAPIEventList) {
         }
     }
 
-    // sanity test whether this event set is valid
-    int EventSet = PAPI_NULL;
-    const auto rvalCreateEventSet = PAPI_create_eventset(&EventSet);
-    if (rvalCreateEventSet != PAPI_OK) {
-        SmallVector<char, 256> tmp;
-        raw_svector_ostream out(tmp);
-        out << "PAPI Create Event Set Error: ";
-        out << PAPI_strerror(rvalCreateEventSet);
-        report_fatal_error(StringRef(out.str()));
-    }
+    const auto n = PAPIEventList.size();
+    Constant * const initializer = ConstantDataArray::get(b.getContext(), ArrayRef<int>(PAPIEventList.data(), n));
+    Constant * gv = new GlobalVariable(*b.getModule(), initializer->getType(), true, GlobalVariable::ExternalLinkage, initializer);
+    return gv;
 
-    const auto rvalAddEvents = PAPI_add_events(EventSet, PAPIEventList.data(), (int)PAPIEventList.size());
-
-    if (rvalAddEvents != PAPI_OK) {
-        SmallVector<char, 256> tmp;
-        raw_svector_ostream out(tmp);
-        out << "PAPI Add Events Error: ";
-        out << PAPI_strerror(rvalCreateEventSet < PAPI_OK ? rvalCreateEventSet : PAPI_EINVAL);
-        out << "\n"
-               "Check papi_avail for available options or enter sysctl -w kernel.perf_event_paranoid=0\n"
-               "to reenable cpu event tracing at the kernel level.";
-        report_fatal_error(StringRef(out.str()));
-    }
-
-    const auto rvalStart = PAPI_start(EventSet);
-    if (rvalAddEvents != PAPI_OK) {
-        SmallVector<char, 256> tmp;
-        raw_svector_ostream out(tmp);
-        out << "PAPI Start Error: ";
-        out << PAPI_strerror(rvalCreateEventSet < PAPI_OK ? rvalCreateEventSet : PAPI_EINVAL);
-        report_fatal_error(StringRef(out.str()));
-    }
-
-    return EventSet;
 }
 
-void terminatePAPI(KernelBuilder & b, Value * eventSet) {
+void terminatePAPI(KernelBuilder & b) {
     Module * const m = b.getModule();
-    FixedArray<Value *, 1> args;
-    args[0] = eventSet;
-    Function * const PAPICleanupEventsetFn = m->getFunction("PAPI_cleanup_eventset");
-    b.CreateCall(PAPICleanupEventsetFn->getFunctionType(), PAPICleanupEventsetFn, args);
-    Function * const PAPIDestroyEventsetFn = m->getFunction("PAPI_destroy_eventset");
-
-    FunctionType * fTy = PAPIDestroyEventsetFn->getFunctionType();
-
-//    fTy->getFunctionParamType(0)->isPointerTy()
-    Value * eventSetData = b.CreateAllocaAtEntryPoint(eventSet->getType());
-    b.CreateStore(eventSet, eventSetData);
-    args[0] = eventSetData;
-
-    b.CreateCall(fTy, PAPIDestroyEventsetFn, args);
     Function * const PAPIShutdownFn = m->getFunction("PAPI_shutdown");
     b.CreateCall(PAPIShutdownFn->getFunctionType(), PAPIShutdownFn, {});
 }
@@ -701,16 +657,9 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     }
 
     #ifdef ENABLE_PAPI
-    Value * eventSet = nullptr;
-    Value * eventListVal = nullptr;
-
+    Constant * eventSetList = nullptr;
     if (LLVM_UNLIKELY(codegen::PapiCounterOptions.compare(codegen::OmittedOption) != 0)) {
-        SmallVector<int, 8> eventList;
-        Type * const intTy = TypeBuilder<int, false>::get(b.getContext());
-        eventSet = ConstantInt::get(intTy, initializePAPI(eventList));
-        const auto n = eventList.size();
-        Constant * const initializer = ConstantDataArray::get(b.getContext(), ArrayRef<int>(eventList.data(), n));
-        eventListVal = new GlobalVariable(*m, initializer->getType(), true, GlobalVariable::ExternalLinkage, initializer);
+        eventSetList = initializePAPI(b);
         PipelineCompiler::linkPAPILibrary(b);
     }
     #endif
@@ -748,11 +697,8 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
                     value = illustratorObj;
                     break;
                 #ifdef ENABLE_PAPI
-                case C::PAPIEventSet:
-                    value = eventSet;
-                    break;
                 case C::PAPIEventList:
-                    value = eventListVal;
+                    value = eventSetList;
                     break;
                 #endif
                 default:
@@ -876,8 +822,8 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         b.CreateFree(stateObj);
     }
     #ifdef ENABLE_PAPI
-    if (LLVM_UNLIKELY(eventSet != nullptr)) {
-        terminatePAPI(b, eventSet);
+    if (LLVM_UNLIKELY(eventSetList != nullptr)) {
+        terminatePAPI(b);
     }
     #endif
     b.CreateRet(result);
@@ -898,15 +844,15 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
             break;
     }
 
-
-    if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableAnonymousMMapedDynamicLinearBuffers))) {
-        out << "+AML";
-    }
-
     if (codegen::EnableDynamicMultithreading) {
         out << "+DM";
     }
-
+    if (codegen::EnableJumpGuidedSynchronizationVariables) {
+        out << "+JGS";
+    }
+    if (codegen::UseProcessThreadForIO) {
+        out << "+IOT";
+    }
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet())) {
         if (DebugOptionIsSet(codegen::EnableCycleCounter)) {
             out << "+CYC";
@@ -941,18 +887,15 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisableThreadLocalStreamSets))) {
             out << "-TL";
         }
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::EnableAnonymousMMapedDynamicLinearBuffers))) {
-            out << "+AML";
-        }
     }
     #ifdef ENABLE_PAPI
     const auto & S = codegen::PapiCounterOptions;
     if (LLVM_UNLIKELY(S.compare(codegen::OmittedOption) != 0)) {
         out << "+PAPI";
-        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
-            out << "TT";
-        }
         out << (std::count_if(S.begin(), S.end(), [](std::string::value_type c){return c == ',';}) + 1);
+        if (LLVM_UNLIKELY(DebugOptionIsSet(codegen::DisplayPAPICounterThreadTotalsOnly))) {
+            out << "+T";
+        }
     }
     #endif
     out.flush();

@@ -21,6 +21,7 @@ SRC
     compiler/analysis/dataflow_analysis.cpp
     compiler/analysis/evolutionary_algorithm.cpp
     compiler/analysis/family_analysis.cpp
+    compiler/analysis/flow_control_analysis.cpp
     compiler/analysis/internallygeneratedstreamset_analysis.cpp
     compiler/analysis/partitioning_analysis.cpp
     compiler/analysis/pipeline_graph_printers.cpp
@@ -29,6 +30,7 @@ SRC
     compiler/analysis/scheduling_analysis.cpp
     compiler/analysis/simple_scheduling_analysis.cpp
     compiler/analysis/simple_variable_rate_analysis.cpp
+    compiler/analysis/synchronization_level_variable_analysis.cpp
     compiler/analysis/termination_analysis.cpp
     compiler/analysis/thread_local_analysis.cpp
     compiler/analysis/variable_rate_analysis.cpp

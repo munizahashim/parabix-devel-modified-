@@ -16,6 +16,7 @@ void PipelineAnalysis::identifyTerminationChecks() {
 
     for (auto consumer = FirstKernel; consumer <= PipelineOutput; ++consumer) {
         const auto cid = KernelPartitionId[consumer];
+
         for (const auto e : make_iterator_range(in_edges(consumer, mBufferGraph))) {
             const auto streamSet = source(e, mBufferGraph);
             const BufferNode & bn = mBufferGraph[streamSet];
@@ -51,15 +52,34 @@ void PipelineAnalysis::identifyTerminationChecks() {
         }
     }
 
-    assert ("program has no outputs? relationship construction should have reported this case." && in_degree(terminal, G) > 0);
+    ReverseTopologicalOrdering ordering;
+    ordering.reserve(num_vertices(G));
+    topological_sort(G, std::back_inserter(ordering));
+    transitive_closure_dag(ordering, G);
 
-    transitive_reduction_dag(G);
+    if (1 < FirstComputePartitionId || LastComputePartitionId < (PartitionCount - 1)) {
+
+        #define ON_COMPUTE(id) ((FirstComputePartitionId <= id) && (id <= LastComputePartitionId))
+
+        #define ON_DIFFERENT_THREADS(a, b) (ON_COMPUTE(a) ^ ON_COMPUTE(b))
+
+        remove_edge_if([&](TerminationGraph::edge_descriptor e){
+            const auto a = source(e, G);
+            const auto b = target(e, G);
+            assert (a < b);
+            return ON_DIFFERENT_THREADS(a, b) && (b != (PartitionCount - 1));
+        }, G);
+
+    }
+
+    transitive_reduction_dag(ordering, G);
 
     mTerminationCheck.resize(PartitionCount, 0U);
 
     // we are only interested in the incoming edges of the pipeline output
     for (const auto e : make_iterator_range(in_edges(terminal, G))) {
-        mTerminationCheck[source(e, G)] = TerminationCheckFlag::Soft;
+        const auto partId = source(e, G);
+        mTerminationCheck[partId] = TerminationCheckFlag::Soft;
     }
 
     // hard terminations
@@ -86,6 +106,13 @@ void PipelineAnalysis::makeTerminationPropagationGraph() {
     mTerminationPropagationGraph = TerminationPropagationGraph(LastKernel + 1U);
 
     HasTerminationSignal.resize(PipelineOutput + 1U);
+
+    const auto firstComputeKernelId = FirstKernelInPartition[FirstComputePartitionId];
+//    const auto afterLastComputeKernelId = FirstKernelInPartition[LastComputePartitionId + 1];
+
+    for (auto kernel = FirstKernel; kernel < firstComputeKernelId; ++kernel) {
+        HasTerminationSignal.set(kernel);
+    }
 
     BitVector marks(PipelineOutput + 1U);
 
@@ -120,9 +147,23 @@ void PipelineAnalysis::makeTerminationPropagationGraph() {
             if (kernelObj->canSetTerminateSignal()) {
                 add_edge(i, start, true, mTerminationPropagationGraph);
                 HasTerminationSignal.set(i);
+            } else {
+                // If we have a cross threaded buffer, we cannot rely on only storing the root's
+                // termination signal because we need to know exactly when the actual producer
+                // is terminated. Threads executing the same code only need to know when the
+                // partition is terminated.
+                for (const auto e : make_iterator_range(out_edges(i , mBufferGraph))) {
+                    const BufferNode & bn = mBufferGraph[target(e, mBufferGraph)];
+                    if (LLVM_UNLIKELY(bn.isCrossThreaded())) {
+                        HasTerminationSignal.set(i);
+                        break;
+                    }
+                }
             }
         }
     }
+
+
 
     ReverseTopologicalOrdering ordering;
     ordering.reserve(num_vertices(mTerminationPropagationGraph));

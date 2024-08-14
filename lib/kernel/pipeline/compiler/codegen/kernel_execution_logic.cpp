@@ -41,6 +41,7 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
     if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
 
         assert (!mUsesIllustrator);
+        assert (!mIsIOProcessThread);
 
         if (mCurrentKernelIsStateFree) {
             updateProcessedAndProducedItemCounts(b);
@@ -231,9 +232,13 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
     buildKernelCallArgumentList(b, args);
 
     #ifdef ENABLE_PAPI
-    startPAPIMeasurement(b, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
+    if (NumOfPAPIEvents) {
+        startPAPIMeasurement(b, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
+    }
     #endif
-    startCycleCounter(b, CycleCounter::KERNEL_EXECUTION);
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        startCycleCounter(b, CycleCounter::KERNEL_EXECUTION);
+    }
     Value * doSegmentRetVal = nullptr;
     if (mRethrowException) {
         const auto prefix = makeKernelName(mKernelId);
@@ -247,10 +252,13 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
     } else {
         doSegmentRetVal = b.CreateCall(doSegFuncType, doSegment, args);
     }
-
-    updateCycleCounter(b, mKernelId, CycleCounter::KERNEL_EXECUTION);
+    if (LLVM_UNLIKELY(EnableCycleCounter)) {
+        updateCycleCounter(b, mKernelId, CycleCounter::KERNEL_EXECUTION);
+    }
     #ifdef ENABLE_PAPI
-    accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
+    if (NumOfPAPIEvents) {
+        accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
+    }
     #endif
 
     if (mKernelCanTerminateEarly) {
@@ -437,6 +445,11 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
     if (mCurrentFixedRateFactor) {
         addNextArg(mCurrentFixedRateFactor);
     }
+    #ifdef ENABLE_PAPI
+    if (LLVM_UNLIKELY(NumOfPAPIEvents > 0)) {
+        addNextArg(PAPIEventSetId);
+    }
+    #endif
 
     PointerType * const voidPtrTy = b.getVoidPtrTy();
 

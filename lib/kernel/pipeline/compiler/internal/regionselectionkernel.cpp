@@ -1,6 +1,9 @@
 #include "regionselectionkernel.h"
 
 #include <kernel/core/kernel_builder.h>
+#include <boost/intrusive/detail/math.hpp>
+
+using boost::intrusive::detail::floor_log2;
 
 using namespace llvm;
 
@@ -58,7 +61,7 @@ void RegionSelectionKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Val
 
     Constant * const ZERO = b.getSize(0);
     Constant * const ONE = b.getSize(1);
-    Constant * const LOG_2_BLOCK_WIDTH = b.getSize(std::log2(blockWidth));
+    Constant * const LOG_2_BLOCK_WIDTH = b.getSize(floor_log2(blockWidth));
     Constant * const BB_ZERO = Constant::getNullValue(bbTy);
     Constant * const INT_ZEROS = Constant::getNullValue(bbIntTy);
 

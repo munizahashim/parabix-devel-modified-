@@ -63,7 +63,6 @@ DebugOptions(cl::desc("Debugging Options"), cl::values(clEnumVal(VerifyIR, "Run 
                                                            "particular stream."),
                         clEnumVal(DisableIndirectBranch, "Disable use of indirect branches in kernel code."),
                         clEnumVal(DisableThreadLocalStreamSets, "Disable use of thread-local memory for streamsets within the same partition."),
-                        clEnumVal(EnableAnonymousMMapedDynamicLinearBuffers, "Use anonymous mmap for dynamic linear buffers instead of copyback mechanism."),
 
                         #ifdef ENABLE_PAPI
                         clEnumVal(DisplayPAPICounterThreadTotalsOnly, "Disable per-kernel PAPI counters when given a valid PapiCounters list."),
@@ -130,7 +129,7 @@ static cl::opt<std::string> ObjectCacheDirOption("object-cache-dir", cl::init(""
                                                  cl::desc("Path to the object cache diretory"), cl::cat(CodeGenOptions));
 
 bool EnableDynamicMultithreading;
-static cl::opt<bool, true> EnableDynamicMultithreadingOption("dynamic-multithreading", cl::location(EnableDynamicMultithreading), cl::init(false),
+static cl::opt<bool, true> EnableDynamicMultithreadingOption("dynamic-multithreading", cl::location(EnableDynamicMultithreading), cl::init(true),
                                                    cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
 
 float DynamicMultithreadingAddThreshold;
@@ -144,6 +143,11 @@ static cl::opt<float, true> DynamicMultithreadingRemoveThresholdOption("dynamic-
 size_t DynamicMultithreadingPeriod;
 static cl::opt<size_t, true> DynamicMultithreadingPeriodOption("dynamic-multithreading-period", cl::location(DynamicMultithreadingPeriod), cl::init(100),
                                                    cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
+
+
+bool EnableJumpGuidedSynchronizationVariables;
+static cl::opt<bool, true> EnableJumpGuidedSynchronizationVariablesOption("partition-guided-synchronization", cl::location(EnableJumpGuidedSynchronizationVariables), cl::init(true),
+                                                   cl::desc("Enable partition jump guided synchronization variables."), cl::cat(CodeGenOptions));
 
 
 static cl::opt<int, true> FreeCallBisectOption("free-bisect-value", cl::location(FreeCallBisectLimit), cl::init(-1),
@@ -221,6 +225,11 @@ static cl::opt<std::string, true> CCTypeOption("ccc-type", cl::location(CCCOptio
 bool TimeKernelsIsEnabled;
 static cl::opt<bool, true> OptCompileTime("time-kernels", cl::location(TimeKernelsIsEnabled),
                                         cl::desc("Times each kernel, printing elapsed time for each on exit"), cl::init(false));
+
+
+bool UseProcessThreadForIO;
+static cl::opt<bool, true> OptUseProcessThreadForIO("io-thread", cl::location(UseProcessThreadForIO),
+                                        cl::desc("Only permit the process thread to perform IO"), cl::init(false));
 
 CodeGenOpt::Level OptLevel;
 CodeGenOpt::Level BackEndOptLevel;

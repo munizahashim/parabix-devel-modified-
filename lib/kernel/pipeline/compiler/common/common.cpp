@@ -240,6 +240,12 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
 
     for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraphRef))) {
         const BufferPort & p = mBufferGraphRef[e];
+        #ifdef PREVENT_CROSS_THREAD_KERNELS_FROM_BEING_STATEFREE
+        const auto streamSet = source(e, mBufferGraphRef);
+        if (mBufferGraphRef[streamSet].isCrossThreaded()) {
+            return false;
+        }
+        #endif
         const Binding & b = p.Binding;
         const ProcessingRate & r = b.getRate();
         switch (r.getKind()) {

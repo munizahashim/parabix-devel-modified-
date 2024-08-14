@@ -15,7 +15,10 @@ namespace kernel {
  * @brief addSegmentLengthSlidingWindowKernelProperties
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::addSegmentLengthSlidingWindowKernelProperties(KernelBuilder & b, const size_t kernelId, const size_t groupId) {
+    assert (FirstKernel <= kernelId && kernelId <= LastKernel);
+    assert ("not root?" && (FirstKernelInPartition[KernelPartitionId[kernelId]] == kernelId));
     if (MinimumNumOfStrides[kernelId] != MaximumNumOfStrides[kernelId] || mIsNestedPipeline) {
+        assert (FirstComputePartitionId <= KernelPartitionId[kernelId] && KernelPartitionId[kernelId] <= LastComputePartitionId);
         mTarget->addInternalScalar(b.getSizeTy(), SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(kernelId), groupId);
     }
 }
@@ -24,11 +27,11 @@ void PipelineCompiler::addSegmentLengthSlidingWindowKernelProperties(KernelBuild
  * @brief initializeInitialSlidingWindowSegmentLengths
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initializeInitialSlidingWindowSegmentLengths(KernelBuilder & b, Value * const segmentLengthScalingFactor) {
-    for (unsigned i = 1U; i < (PartitionCount - 1U); ++i) {
+    for (unsigned i = FirstComputePartitionId; i <= LastComputePartitionId; ++i) {
         const auto f = FirstKernelInPartition[i];
-        const auto numOfStrides = MaximumNumOfStrides[f];
-        if (MinimumNumOfStrides[f] != numOfStrides || mIsNestedPipeline) {
-            Value * const init = b.CreateMul(segmentLengthScalingFactor, b.getSize(numOfStrides));
+      //  assert (FirstKernel <= f && f <= LastKernel);
+        if (MinimumNumOfStrides[f] != MaximumNumOfStrides[f] || mIsNestedPipeline) {
+            Value * const init = b.CreateMul(segmentLengthScalingFactor, b.getSize(MaximumNumOfStrides[f]));
             b.setScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(f), init);
         }
     }
@@ -38,8 +41,10 @@ void PipelineCompiler::initializeInitialSlidingWindowSegmentLengths(KernelBuilde
  * @brief initializeFlowControl
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::initializeFlowControl(KernelBuilder & b) {
-    if (RequiredThreadLocalStreamSetMemory > 0) {
+    if (RequiredThreadLocalStreamSetMemory > 0 && !mIsIOProcessThread) {
         mThreadLocalMemorySizePtr = b.getScalarFieldPtr(BASE_THREAD_LOCAL_STREAMSET_MEMORY_BYTES).first;
+    } else {
+        mThreadLocalMemorySizePtr = nullptr;
     }
 }
 
@@ -57,6 +62,7 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
     // the same partition refer to the mNumOfPartitionStrides to determine how their segment length.
 
     if (mIsPartitionRoot) {
+
 
         assert (mCurrentPartitionId == KernelPartitionId[mKernelId]);
         assert (mKernelId == FirstKernelInPartition[KernelPartitionId[mKernelId]]);
@@ -77,6 +83,8 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
             }
         }
 
+        assert (!mIsIOProcessThread || maxMemory == 0);
+
         Value * threadLocalPtr = nullptr;
         Type * threadLocalTy = nullptr;
         if (maxMemory) {
@@ -86,7 +94,8 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
         // If the min and max num of strides is equal, we almost certainly have strictly fixed
         // rate input into this partition. However if this a nested pipeline, we cannot assume
         // that the outer pipeline will feed data to this at a fixed rate.
-        if (MinimumNumOfStrides[mKernelId] != MaximumNumOfStrides[mKernelId] || mIsNestedPipeline) {
+        if (mBufferGraph[mKernelId].permitSlidingWindow()) {
+            assert (!mIsIOProcessThread);
 
             mMaximumNumOfStrides = b.getScalarField(SCALED_SLIDING_WINDOW_SIZE_PREFIX + std::to_string(mKernelId));
 
@@ -140,6 +149,7 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
         }
 
     } else {
+        assert (!mIsIOProcessThread);
         const auto ratio = Rational{StrideStepLength[mKernelId], StrideStepLength[mCurrentPartitionRoot]};
         const auto factor = ratio / mPartitionStrideRateScalingFactor;
         mMaximumNumOfStrides = b.CreateMulRational(mNumOfPartitionStrides, factor);
@@ -151,6 +161,7 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
  * @brief updateNextSlidingWindowSize
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateNextSlidingWindowSize(KernelBuilder & b, Value * const maxNumOfStrides, Value * const actualNumOfStrides) {
+    assert (!mIsIOProcessThread);
     if (MinimumNumOfStrides[mKernelId] != MaximumNumOfStrides[mKernelId] || mIsNestedPipeline) {
         ConstantInt * const TWO = b.getSize(2);
         Value * const A = b.CreateMul(maxNumOfStrides, TWO);

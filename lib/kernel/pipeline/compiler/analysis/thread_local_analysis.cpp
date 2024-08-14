@@ -192,6 +192,11 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
     // streamsets. (2) determine how many the number of pages to assign each streamset based on the
     // number of strides executed by the parition root.
 
+    if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
+        assert (LastStreamSet == PipelineOutput);
+        return;
+    }
+
     const auto n = LastStreamSet - FirstStreamSet + 1U;
 
     // TODO: can we insert a zero-extension region rather than having a secondary buffer?
@@ -315,7 +320,6 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
     BA.runGA();
 
     auto requiredMemory = BA.getBestFitnessValue();
-    assert (requiredMemory > 0);
     assert ((requiredMemory % pageSize) == 0);
     auto O = BA.getResult();
 

@@ -44,6 +44,9 @@
 #include "postprocess/json-detail.h"
 #include "postprocess/json-parens.h"
 #include "postprocess/json2csv.h"
+#include <boost/intrusive/detail/math.hpp>
+
+using boost::intrusive::detail::floor_log2;
 
 namespace su = kernel::streamutils;
 
@@ -172,7 +175,7 @@ jsonFunctionType json_parsing_gen(
         StreamSet * const depthErr = P->CreateStreamSet(1);
         StreamSet * const syntaxArrErr = P->CreateStreamSet(1);
         StreamSet * const syntaxObjErr = P->CreateStreamSet(1);
-        StreamSet * const encDepth = P->CreateStreamSet(std::ceil(std::log2(MaxDepth+1)));
+        StreamSet * const encDepth = P->CreateStreamSet(std::ceil(floor_log2(MaxDepth+1)));
         P->CreateKernelCall<NestingDepth>(
             brackets,
             encDepth,

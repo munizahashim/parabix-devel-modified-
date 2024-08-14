@@ -241,13 +241,6 @@ bool PipelineCompiler::hasPrincipalInputRate() const {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief isCurrentKernelStateFree
- ** ------------------------------------------------------------------------------------------------------------- */
-bool PipelineCompiler::isCurrentKernelStateFree() const {
-    return PipelineCommonGraphFunctions::isKernelStateFree(mKernelId);
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief getInputBufferVertex
  ** ------------------------------------------------------------------------------------------------------------- */
 unsigned PipelineCompiler::getInputBufferVertex(const StreamSetPort inputPort) const {

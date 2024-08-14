@@ -36,6 +36,11 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
 
     mTarget->addInternalScalar(sizeTy, EXPECTED_NUM_OF_STRIDES_MULTIPLIER, 0);
 
+    #ifdef ENABLE_PAPI
+    if (LLVM_LIKELY(NumOfPAPIEvents > 0)) {
+        mTarget->addThreadLocalScalar(b.getInt32Ty(), STATISTICS_PAPI_EVENT_SET, 0);
+    }
+    #endif
     if (LLVM_LIKELY(RequiredThreadLocalStreamSetMemory > 0)) {
         PointerType * const int8PtrTy = b.getInt8PtrTy();
         mTarget->addThreadLocalScalar(int8PtrTy, BASE_THREAD_LOCAL_STREAMSET_MEMORY, 0);
@@ -55,14 +60,14 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
     auto currentPartitionId = -1U;
     addBufferHandlesToPipelineKernel(b, PipelineInput, 0);
     addConsumerKernelProperties(b, PipelineInput);
-    #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-    unsigned nestedSynchronizationVariableCount = 0;
-    #endif
+    if (mUseDynamicMultithreading || UseJumpGuidedSynchronization) {
+        mTarget->addInternalScalar(sizeTy, NEXT_LOGICAL_SEGMENT_NUMBER, getCacheLineGroupId(PipelineInput));
+    }
+
     for (auto i = FirstKernel; i <= LastKernel; ++i) {
-        // Is this the start of a new partition?
         const auto partitionId = KernelPartitionId[i];
         const bool isRoot = (partitionId != currentPartitionId);
-        currentPartitionId = partitionId;
+        currentPartitionId = partitionId;        
         addInternalKernelProperties(b, i, isRoot);
         addCycleCounterProperties(b, i, isRoot);
         #ifdef ENABLE_PAPI
@@ -70,30 +75,40 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
         #endif
         addProducedItemCountDeltaProperties(b, i);
         addUnconsumedItemCountProperties(b, i);
-        #ifdef USE_PARTITION_GUIDED_SYNCHRONIZATION_VARIABLE_REGIONS
-        if (isRoot && PartitionJumpTargetId[partitionId] == (PartitionCount - 1)) {
+        if (LLVM_UNLIKELY(mBufferGraph[i].startsNestedSynchronizationRegion())) {
+            assert (isRoot);
+            assert (UseJumpGuidedSynchronization);
+            assert (FirstComputePartitionId <= partitionId && partitionId <= LastComputePartitionId);
             mTarget->addInternalScalar(sizeTy,
-                NESTED_LOGICAL_SEGMENT_NUMBER_PREFIX + std::to_string(++nestedSynchronizationVariableCount), getCacheLineGroupId(i));
+                NEXT_LOGICAL_SEGMENT_NUMBER + std::to_string(i), getCacheLineGroupId(i));
         }
-        #endif
     }
     if (LLVM_UNLIKELY(EnableCycleCounter)) {
         mTarget->addThreadLocalScalar(b.getInt64Ty(), STATISTICS_CYCLE_COUNT_TOTAL,
                                       getCacheLineGroupId(PipelineOutput), ThreadLocalScalarAccumulationRule::Sum);
     }
+    addCycleCounterProperties(b, PipelineOutput, true);
     addRepeatingStreamSetBufferProperties(b);
     generateMetaDataForRepeatingStreamSets(b);
     #ifdef ENABLE_PAPI
     addPAPIEventCounterPipelineProperties(b);
     #endif
-    if (mUseDynamicMultithreading) {
-        mTarget->addInternalScalar(sizeTy, NEXT_LOGICAL_SEGMENT_NUMBER, getCacheLineGroupId(PipelineOutput));
-        if (LLVM_UNLIKELY(TraceDynamicMultithreading)) {
-            addDynamicThreadingReportProperties(b, getCacheLineGroupId(PipelineOutput + 1));
-        }
+    if (LLVM_UNLIKELY(TraceDynamicMultithreading && mUseDynamicMultithreading)) {
+        addDynamicThreadingReportProperties(b, getCacheLineGroupId(PipelineOutput + 1));
     }
     addZeroInputStructProperties(b);
+
+    const auto first = FirstKernelInPartition[FirstComputePartitionId];
+    const auto last = FirstKernelInPartition[LastComputePartitionId + 1];
+
+    if (first > FirstKernel || last <= LastKernel) {
+        mTarget->addInternalScalar(sizeTy, COMPUTE_THREAD_TERMINATION_STATE);
+    }
+
+
 }
+
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief addInternalKernelProperties
@@ -102,15 +117,23 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
 
     mKernelId = kernelId;
     mKernel = getKernel(kernelId);
-    const auto isStateless = isKernelStateFree(kernelId);
-    if (LLVM_UNLIKELY(isStateless)) {
-        mIsStatelessKernel.set(kernelId);
+    bool isStateless = false;
+
+    const auto firstComputeKernelId = FirstKernelInPartition[FirstComputePartitionId];
+    const auto onAfterLastComputeKernelId = FirstKernelInPartition[LastComputePartitionId + 1];
+
+    if (LLVM_UNLIKELY(isKernelStateFree(kernelId))) {
+        if (LLVM_LIKELY(firstComputeKernelId <= mKernelId && mKernelId < onAfterLastComputeKernelId && !mUsesIllustrator)) {
+            isStateless = true;
+            mIsStatelessKernel.set(kernelId);
+        }
     }
-    assert (mIsStatelessKernel.test(kernelId) == isStateless);
+
     const auto isInternallySynchronized = mKernel->hasAttribute(AttrId::InternallySynchronized);
     if (LLVM_UNLIKELY(isInternallySynchronized)) {
         mIsInternallySynchronized.set(kernelId);
     }
+
     #if defined(DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION)
     const auto allowDataParallelExecution = false;
     #elif defined(ALLOW_INTERNALLY_SYNCHRONIZED_KERNELS_TO_BE_DATA_PARALLEL)
@@ -127,11 +150,12 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
 
     const auto name = makeKernelName(kernelId);
 
-    const auto syncLockType = allowDataParallelExecution ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
-    mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[syncLockType], groupId);
-
-    if (isRoot) {
-        addSegmentLengthSlidingWindowKernelProperties(b, kernelId, groupId);
+    if (kernelId < onAfterLastComputeKernelId) {
+        const auto syncLockType = allowDataParallelExecution ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
+        mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[syncLockType], groupId);
+        if (isRoot && (kernelId >= firstComputeKernelId)) {
+            addSegmentLengthSlidingWindowKernelProperties(b, kernelId, groupId);
+        }
     }
 
     addConsumerKernelProperties(b, kernelId);
@@ -191,6 +215,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
     }
 
     if (LLVM_UNLIKELY(allowDataParallelExecution)) {
+        assert (kernelId < onAfterLastComputeKernelId);
         mTarget->addInternalScalar(sizeTy, name + LOGICAL_SEGMENT_SUFFIX[SYNC_LOCK_POST_INVOCATION], groupId);
     }
 
@@ -250,6 +275,11 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
     // TODO: if we detect a fatal error at init, we should not execute
     // the pipeline loop.
 
+    if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
+        assert (LastKernel == PipelineInput);
+        return;
+    }
+
     initializeScalarValues(b);
 
     initializeKernelAssertions(b);
@@ -285,7 +315,9 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
                 assert (mScalarGraph[e].Type == PortType::Input);
                 assert (expected++ == mScalarGraph[e].Number);
                 const auto scalar = source(e, mScalarGraph);
-                args.push_back(getScalar(b, scalar));
+                Value * const scalarVal = getScalar(b, scalar);
+
+                args.push_back(scalarVal);
             }
             addFamilyCallInitializationArguments(b, i, args);
             addRepeatingStreamSetInitializationArguments(i, args);
@@ -315,7 +347,7 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
 
         // Is this the last kernel in a partition? If so, store the accumulated
         // termination signal.
-        if (terminated && HasTerminationSignal[mKernelId]) {
+        if (terminated && HasTerminationSignal.test(mKernelId)) {
             Value * const signal = b.CreateSelect(terminated, aborted, unterminated);
             writeTerminationSignal(b, mKernelId, signal);
             terminated = nullptr;
@@ -334,8 +366,19 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
  * @brief generateAllocateInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * const expectedNumOfStrides) {
+
     b.setScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER, expectedNumOfStrides);
 
+    if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
+        assert (LastKernel == PipelineInput);
+        #ifndef NDEBUG
+        for (auto streamSet = (PipelineOutput + 1); streamSet <= LastStreamSet; ++streamSet) {
+            const auto & bn = mBufferGraph[streamSet];
+            assert (bn.isUnowned() && bn.isExternal());
+        }
+        #endif
+        return;
+    }
 
     initializeInitialSlidingWindowSegmentLengths(b, expectedNumOfStrides);
 
@@ -437,12 +480,13 @@ void PipelineCompiler::generateKernelMethod(KernelBuilder & b) {
  * @brief generateFinalizeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateFinalizeMethod(KernelBuilder & b) {
-    if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet() || NumOfPAPIEvents > 0)) {
-        // get the last segment # used by any kernel in case any reports require it.
-        const auto type = isDataParallel(FirstKernel) ? SYNC_LOCK_PRE_INVOCATION : SYNC_LOCK_FULL;
-        Value * const ptr = getSynchronizationLockPtrForKernel(b, FirstKernel, type);
-        mSegNo = b.CreateLoad(b.getSizeTy(), ptr);
 
+    if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
+        assert (FirstKernel == LastKernel);
+        return;
+    }
+
+    if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet() || NumOfPAPIEvents > 0)) {
         printOptionalCycleCounter(b);
         #ifdef ENABLE_PAPI
         printPAPIReportIfRequested(b);
@@ -478,9 +522,11 @@ void PipelineCompiler::generateFinalizeMethod(KernelBuilder & b) {
         }
         mScalarValue[i] = callKernelFinalizeFunction(b, params);
     }
+
     if (LLVM_UNLIKELY(mGenerateTransferredItemCountHistogram || mGenerateDeferredItemCountHistogram)) {
         freeHistogramProperties(b);
     }
+
     deallocateRepeatingBuffers(b);
     releaseOwnedBuffers(b);
     resetInternalBufferHandles();
@@ -490,7 +536,14 @@ void PipelineCompiler::generateFinalizeMethod(KernelBuilder & b) {
  * @brief generateFinalizeThreadLocalMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
+
+    if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
+        assert (FirstKernel == LastKernel);
+        return;
+    }
+
     assert (mTarget->hasThreadLocal());
+
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernel = getKernel(i);
         assert (kernel->hasThreadLocal() || !isa<PipelineKernel>(kernel));

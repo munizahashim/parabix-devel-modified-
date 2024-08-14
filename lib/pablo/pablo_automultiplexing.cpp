@@ -20,6 +20,9 @@
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/ErrorHandling.h>
 #include <util/maxsat.hpp>
+#include <boost/intrusive/detail/math.hpp>
+
+using boost::intrusive::detail::floor_log2;
 
 using namespace llvm;
 using namespace boost;
@@ -550,7 +553,7 @@ static inline bool is_power_of_2(const size_t n) {
  * @brief log2_plus_one
  ** ------------------------------------------------------------------------------------------------------------- */
 static inline size_t log2_plus_one(const size_t n) {
-    return std::log2<size_t>(n) + 1;
+    return floor_log2<size_t>(n) + 1;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

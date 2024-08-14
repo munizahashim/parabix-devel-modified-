@@ -14,7 +14,9 @@
 #include <kernel/pipeline/pipeline_builder.h>
 #include <kernel/pipeline/driver/driver.h>
 #include <kernel/pipeline/driver/cpudriver.h>
+#include <boost/intrusive/detail/math.hpp>
 
+using boost::intrusive::detail::floor_log2;
 
 using namespace llvm;
 
@@ -202,7 +204,7 @@ void PEXTFieldCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::V
     Constant * const ZERO = b.getSize(0);
     Value * numOfBlocks = numOfStrides;
     if (getStride() != b.getBitBlockWidth()) {
-        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
     }
     const unsigned fieldsPerBlock = b.getBitBlockWidth()/mPEXTWidth;
     b.CreateBr(processBlock);
@@ -289,7 +291,7 @@ void StreamCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Valu
     Constant * const ONE = ConstantInt::get(sizeTy, 1);
     Value * numOfBlocks = numOfStrides;
     if (getStride() != b.getBitBlockWidth()) {
-        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
     }
 
     Value * const produced = b.getProducedItemCount("compressedOutput");
@@ -332,7 +334,7 @@ void StreamCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Valu
     SmallVector<Value *, 8> offsets(strideBlocks);
     SmallVector<Value *, 8> currentFieldMask(strideBlocks);
     SmallVector<Value *, 8> pendingFieldIdx(strideBlocks);
-    const unsigned fieldMovementSteps = std::log2(numFields);
+    const unsigned fieldMovementSteps = floor_log2(numFields);
     SmallVector<SmallVector<Value *, 8>, 8> fieldsToMove(strideBlocks, SmallVector<Value *, 4>(fieldMovementSteps));
     SmallVector<SmallVector<Value *, 8>, 8> combine(strideBlocks, SmallVector<Value *, 4>(fieldMovementSteps));
     SmallVector<Value *, 8> doesFit(strideBlocks);
@@ -362,7 +364,7 @@ void StreamCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Valu
         // be immediately combined into the current pending data field, so we calculate
         // field numbers for all subsequent fields, (the fields that receive overflow bits).
         Value * pendingSum = b.simd_add(mFW, partialSum, splatPending);
-        Value * initialFieldNo = b.simd_srli(mFW, pendingSum, std::log2(mFW));
+        Value * initialFieldNo = b.simd_srli(mFW, pendingSum, floor_log2(mFW));
         //
         // Each input field contains bits from at most two output fields.  After
         // rotatioh, overflow bits are at the beginning of the rotated field, while
@@ -649,7 +651,7 @@ void StreamCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Valu
     // be immediately combined into the current pending data field, so we calculate
     // field numbers for all subsequent fields, (the fields that receive overflow bits).
     Value * pendingSum = b.simd_add(mFW, partialSum, splatPending);
-    Value * fieldNo = b.simd_srli(mFW, pendingSum, std::log2(mFW));
+    Value * fieldNo = b.simd_srli(mFW, pendingSum, floor_log2(mFW));
     // Now process the input data block of each stream in the input stream set.
     //
     // First load all the stream set blocks and the pending data.
@@ -850,13 +852,13 @@ void SwizzledDeleteByPEXTkernel::generateMultiBlockLogic(KernelBuilder & b, llvm
     ConstantInt * const ZERO = b.getSize(0);
     ConstantInt * const BLOCK_WIDTH_MASK = b.getSize(b.getBitBlockWidth() - 1);
     ConstantInt * const PEXT_WIDTH = b.getSize(mPEXTWidth);
-    ConstantInt * const LOG_2_PEXT_WIDTH = b.getSize(std::log2(mPEXTWidth));
-    ConstantInt * const LOG_2_SWIZZLE_FACTOR = b.getSize(std::log2(mSwizzleFactor));
+    ConstantInt * const LOG_2_PEXT_WIDTH = b.getSize(floor_log2(mPEXTWidth));
+    ConstantInt * const LOG_2_SWIZZLE_FACTOR = b.getSize(floor_log2(mSwizzleFactor));
     ConstantInt * const PEXT_WIDTH_MASK = b.getSize(mPEXTWidth - 1);
 
     Value * numOfBlocks = numOfStrides;
     if (getStride() != b.getBitBlockWidth()) {
-        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(std::log2(getStride()/b.getBitBlockWidth())));
+        numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
     }
     // All output groups have the same count.
     Value * const baseOutputProduced = b.getProducedItemCount(getOutputStreamSetBinding(0).getName());
@@ -1140,7 +1142,7 @@ void SwizzledBitstreamCompressByCount::generateDoBlockMethod(KernelBuilder & b) 
     // Output is written and committed to the output buffer one swizzle at a time.
     //
     Constant * blockOffsetMask = b.getSize(b.getBitBlockWidth() - 1);
-    Constant * outputIndexShift = b.getSize(std::log2(mFieldWidth));
+    Constant * outputIndexShift = b.getSize(floor_log2(mFieldWidth));
 
     Value * outputProduced = b.getProducedItemCount("outputSwizzle0"); // All output groups have the same count.
     Value * producedOffset = b.CreateAnd(outputProduced, blockOffsetMask);
@@ -1193,7 +1195,7 @@ void SwizzledBitstreamCompressByCount::generateDoBlockMethod(KernelBuilder & b) 
 void SwizzledBitstreamCompressByCount::generateFinalBlockMethod(KernelBuilder & b, Value * /* remainingBytes */) {
     RepeatDoBlockLogic(b);
     Constant * blockOffsetMask = b.getSize(b.getBitBlockWidth() - 1);
-    Constant * outputIndexShift = b.getSize(std::log2(mFieldWidth));
+    Constant * outputIndexShift = b.getSize(floor_log2(mFieldWidth));
     Type * blockTy = b.getBitBlockType();
 
     Value * outputProduced = b.getProducedItemCount("outputSwizzle0"); // All output groups have the same count.
@@ -1262,10 +1264,10 @@ void FilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & kb, llvm::Value
     Type * const FieldPtrTy = fieldTy->getPointerTo();
     Type * blockTy = kb.getBitBlockType();
 
-    ConstantInt * const LOG_2_BLOCK_WIDTH = kb.getSize(std::log2(kb.getBitBlockWidth()));
+    ConstantInt * const LOG_2_BLOCK_WIDTH = kb.getSize(floor_log2(kb.getBitBlockWidth()));
     ConstantInt * const BLOCK_WIDTH_MASK = kb.getSize(kb.getBitBlockWidth() - 1);
     ConstantInt * const FIELD_WIDTH = kb.getSize(mFW);
-    ConstantInt * const LOG_2_FIELD_WIDTH = kb.getSize(std::log2(mFW));
+    ConstantInt * const LOG_2_FIELD_WIDTH = kb.getSize(floor_log2(mFW));
     ConstantInt * const FIELD_WIDTH_MASK = kb.getSize(mFW - 1);
 
     BasicBlock * const entryBlock = kb.GetInsertBlock();

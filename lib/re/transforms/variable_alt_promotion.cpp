@@ -39,11 +39,11 @@ std::vector<RE *> LengthFactorAlts(Alt * alt, const cc::Alphabet * lengthAlphabe
     return newAlts;
 }
 
-RE * SeqOfAlt2AltOfSeq(std::vector<std::vector<RE *>> SofA, int from) {
+RE * SeqOfAlt2AltOfSeq(const std::vector<std::vector<RE *>> & SofA, const size_t from) {
     if (SofA.size() <= from) {
         return makeSeq();
     }
-    std::vector<RE *> a1 = SofA[from];
+    const std::vector<RE *> & a1 = SofA[from];
     RE * AoS_tail = SeqOfAlt2AltOfSeq(SofA, from + 1);
     std::vector<RE *> alts;
     if (Alt * alt_tail = dyn_cast<Alt>(AoS_tail)) {

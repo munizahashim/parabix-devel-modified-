@@ -179,7 +179,19 @@ Value * PipelineCompiler::callKernelInitializeFunction(KernelBuilder & b, const 
     } else {
         args.push_back(threadLocal);
     }
-    Value * const retVal = b.CreateCall(init->getFunctionType(), func, args);
+    FunctionType * fty = init->getFunctionType();
+    for (unsigned i = 0; i < fty->getNumParams(); ++i) {
+        if (LLVM_UNLIKELY(fty->getParamType(i) != args[i]->getType())) {
+            SmallVector<char, 256> tmp;
+            raw_svector_ostream out(tmp);
+            out << "Argument " << i << "of kernel " << mKernel->getName() << " expected scalar type ";
+            fty->getParamType(i)->print(out);
+            out << " but was given scalar of type ";
+            args[i]->getType()->print(out);
+            report_fatal_error(out.str());
+        }
+    }
+    Value * const retVal = b.CreateCall(fty, func, args);
     if (isKernelFamilyCall(mKernelId)) {
         b.CreateStore(b.CreatePointerCast(retVal, b.getVoidPtrTy()), threadLocal);
     }
