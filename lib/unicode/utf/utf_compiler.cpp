@@ -766,12 +766,11 @@ protected:
     //  sets and code unit compilers.
     unsigned                mMaxLength;
     SeqData                 mSeqData[4];
-    unsigned                mScopeLength;
     Basis_Set               mScopeBasis[4];
     std::unique_ptr<cc::CC_Compiler> mCodeUnitCompilers[4];
     void lengthAnalysis(CC_List & ccs);
     void createLengthHierarchy(CC_List & ccs);
-    void extendLengthHierarchy(unsigned i, PabloBuilder & pb);
+    void extendLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb);
     void subrangePartitioning(CC_List & ccs, Range & range, PabloAST * rangeTest, PabloBuilder & pb);
     void compileSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb);
     void compileUnguardedSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb);
@@ -803,7 +802,6 @@ void New_UTF_Compiler::compile(Target_List targets, CC_List ccs) {
     }
     mCodeUnitCompilers[0] =
         std::make_unique<cc::Parabix_CC_Compiler_Builder>(mScopeBasis[0]);
-    mScopeLength = 1;
     createLengthHierarchy(ccs);
 }
 
@@ -851,20 +849,25 @@ void New_UTF_Compiler::createLengthHierarchy(CC_List & ccs) {
     }
 }
 
-void New_UTF_Compiler::extendLengthHierarchy(unsigned k, PabloBuilder & pb) {
+void New_UTF_Compiler::extendLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb) {
     if (mSeqData[k].combinedTest == nullptr) return;
-    PabloAST * outer_test = mSeqData[k].combinedTest;
-    auto nested = pb.createScope();
-    pb.createIf(outer_test, nested);
-    prepareScope(mScopeLength, nested);
-    mScopeLength++;
-    if (!mSeqData[k].actualRange.is_empty()) {
-        codepoint_t test_lo = mEncoder.minCodePointWithCommonCodeUnits(mSeqData[k].actualRange.lo, 1);
-        codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(mSeqData[k].actualRange.hi, 1);
-        Range testRange{test_lo, test_hi};
-        subrangePartitioning(mSeqData[k].seqCCs, testRange, mSeqData[k].test, nested);
+    if (!mSeqData[k].byte1CC->empty()) {
+        PabloAST * outer_test = mSeqData[k].combinedTest;
+        auto nested = pb.createScope();
+        pb.createIf(outer_test, nested);
+        prepareScope(k, nested);
+        if (!mSeqData[k].actualRange.is_empty()) {
+            codepoint_t test_lo = mEncoder.minCodePointWithCommonCodeUnits(mSeqData[k].actualRange.lo, 1);
+            codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(mSeqData[k].actualRange.hi, 1);
+            Range testRange{test_lo, test_hi};
+            subrangePartitioning(mSeqData[k].seqCCs, testRange, mSeqData[k].test, nested);
+        }
+        if (k == TwoByte) extendLengthHierarchy(ThreeByte, nested);
+        else if (k == ThreeByte) extendLengthHierarchy(FourByte, nested);
+    } else {
+        if (k == TwoByte) extendLengthHierarchy(ThreeByte, pb);
+        else if (k == ThreeByte) extendLengthHierarchy(FourByte, pb);
     }
-    if (k != FourByte) extendLengthHierarchy(k+1, nested);
 }
 
 void New_UTF_Compiler::subrangePartitioning(CC_List & ccs, Range & range, PabloAST * rangeTest, PabloBuilder & pb) {
@@ -1076,9 +1079,23 @@ UTF_Advance_Compiler::UTF_Advance_Compiler(pablo::Var * v, PabloBuilder & pb) :
     New_UTF_Compiler(v, pb) {}
 
 void UTF_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
-    mScopeBasis[scope].resize(mScopeBasis[0].size());
-    for (unsigned i = 0; i < mScopeBasis[0].size(); i++) {
-        mScopeBasis[scope][i] = pb.createAdvance(mScopeBasis[0][i], scope);
+    if (mSeqData[scope].byte1CC->empty()) return;
+    for (unsigned sfx = 1; sfx <= scope; sfx++) {
+        bool basis_needed = (sfx < scope) && (mScopeBasis[sfx].size() == 0);
+        basis_needed |= (sfx == scope) && (mSeqData[scope].byte1CC->count() > 1);
+        if (basis_needed) {
+            mScopeBasis[sfx].resize(mScopeBasis[0].size());
+            for (unsigned i = 0; i < mScopeBasis[0].size(); i++) {
+                mScopeBasis[sfx][i] = pb.createAdvance(mScopeBasis[0][i], sfx);
+            }
+            mCodeUnitCompilers[sfx] =
+            std::make_unique<cc::Parabix_CC_Compiler_Builder>(mScopeBasis[sfx]);
+        }
+    }
+    if (mSeqData[scope].byte1CC->count() == 1) {
+        mSeqData[scope].test = pb.createAdvance(mSeqData[scope].test, scope);
+    } else {
+        mSeqData[scope].test = mCodeUnitCompilers[scope] -> compileCC(mSeqData[scope].byte1CC, pb);
     }
 #if 0
     // Combine the suffix bits into the current test and discard them.
@@ -1089,8 +1106,6 @@ void UTF_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
         mScopeBasis[scope].resize(6);
     }
 #endif
-    mCodeUnitCompilers[scope] =
-    std::make_unique<cc::Parabix_CC_Compiler_Builder>(mScopeBasis[scope]);
 }
 
 PabloAST * UTF_Advance_Compiler::compile_code_unit(unsigned lgth, unsigned pos, re::CC * unitCC, PabloBuilder & pb) {
