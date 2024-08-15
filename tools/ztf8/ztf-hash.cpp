@@ -42,7 +42,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <iomanip>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include "ztf-logic.h"
 #include "ztf-scan.h"
 #ifdef ENABLE_PAPI
@@ -121,7 +121,7 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
     P->CreateKernelCall<S2PKernel>(u8bytes, encoded);
 
     StreamSet * const ZTF_basis = P->CreateStreamSet(8);
-    FilterByMask(P, combinedMask, encoded, ZTF_basis);
+    FilterByMask(*P.get(), combinedMask, encoded, ZTF_basis);
 
     StreamSet * const ZTF_bytes = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(ZTF_basis, ZTF_bytes);
@@ -141,10 +141,10 @@ ztfHashFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
     P->CreateKernelCall<S2PKernel>(source, ztfHashBasis);
     StreamSet * const ztfInsertionLengths = P->CreateStreamSet(4);
     P->CreateKernelCall<ZTF_ExpansionDecoder>(encodingScheme1, ztfHashBasis, ztfInsertionLengths);
-    StreamSet * const ztfRunSpreadMask = InsertionSpreadMask(P, ztfInsertionLengths);
+    StreamSet * const ztfRunSpreadMask = InsertionSpreadMask(*P.get(), ztfInsertionLengths);
 
     StreamSet * const ztfHash_u8_Basis = P->CreateStreamSet(8);
-    SpreadByMask(P, ztfRunSpreadMask, ztfHashBasis, ztfHash_u8_Basis);
+    SpreadByMask(*P.get(), ztfRunSpreadMask, ztfHashBasis, ztfHash_u8_Basis);
 
     StreamSet * decodedMarks = P->CreateStreamSet(encodingScheme1.byLength.size());
     P->CreateKernelCall<ZTF_DecodeLengths>(encodingScheme1, ztfHash_u8_Basis, decodedMarks);

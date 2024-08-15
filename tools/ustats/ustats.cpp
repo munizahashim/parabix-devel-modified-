@@ -20,7 +20,7 @@
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <kernel/pipeline/driver/driver.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/unicode/UCD_property_kernel.h>
 #include <kernel/util/hex_convert.h>
 

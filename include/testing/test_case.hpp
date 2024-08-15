@@ -17,7 +17,7 @@
 #include <llvm/IR/Type.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/core/relationship.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <testing/stream_gen.hpp>
 #include <util/apply.hpp>
@@ -27,7 +27,7 @@ namespace testing {
 
 namespace tc {
 
-using ProgramBuilderRef = const std::unique_ptr<kernel::ProgramBuilder> &;
+using ProgramBuilderRef = kernel::ProgramBuilder &;
 
 /*
     Pipeline Return Type Deduction
@@ -286,7 +286,7 @@ struct runtime_val_construct_iterator<Index, I, Rest...> {
     // copy over scalar values with no processing
     template<typename Tuple>
     static void call(Tuple & out, ProgramBuilderRef P, size_t binding_idx) {
-        std::get<Index>(out) = P->getInputScalar(binding_idx);
+        std::get<Index>(out) = P.getInputScalar(binding_idx);
         recursive_t::call(out, P, binding_idx + 1);
     }
 };
@@ -299,8 +299,8 @@ struct runtime_val_construct_iterator<Index, streamgen::basic_stream<I, Decoder>
     // construct a streamset from the buffer pointer and size
     template<typename Tuple>
     static void call(Tuple & out, ProgramBuilderRef P, size_t binding_idx) {
-        auto ptr = P->getInputScalar(binding_idx);
-        auto len = P->getInputScalar(binding_idx + 1);
+        auto ptr = P.getInputScalar(binding_idx);
+        auto len = P.getInputScalar(binding_idx + 1);
         auto fw = stream_t::field_width_v;
         auto count = stream_t::num_elements_v;
         auto streamset = ToStreamSet(P, fw, count, ptr, len);
@@ -326,9 +326,8 @@ public:
 
     test_engine()
     : mDriver("unit-test-framework")
-    , mPipelineBuilder(mDriver.makePipeline(construct_bindings<PipelineParameters...>(mDriver)))
-    {
-        construct_pipeline_input_values<pipeline_input_pack_t, PipelineParameters...>(mPipelineInputs, mPipelineBuilder);
+    , mPipelineBuilder(mDriver.makePipeline(construct_bindings<PipelineParameters...>(mDriver))) {
+        construct_pipeline_input_values<pipeline_input_pack_t, PipelineParameters...>(mPipelineInputs, pipeline());
     }
 
     test_engine(const Self &) = delete;
@@ -345,7 +344,7 @@ public:
     CPUDriver & driver() noexcept { return mDriver; }
 
     /// Returns a reference to the engine's internal `ProgramBuilder`.
-    ProgramBuilderRef pipeline() noexcept { return mPipelineBuilder; }
+    ProgramBuilderRef pipeline() noexcept { return *mPipelineBuilder.get(); }
 
     /// Implicit cast to `ProgramBuilder` reference.
     operator ProgramBuilderRef () { return pipeline(); }
@@ -354,9 +353,9 @@ public:
     ProgramBuilderRef operator -> () { return pipeline(); }
 
 private:
-    CPUDriver                               mDriver;
-    std::unique_ptr<kernel::ProgramBuilder> mPipelineBuilder;
-    pipeline_input_pack_t                   mPipelineInputs;
+    CPUDriver                                   mDriver;
+    std::unique_ptr<kernel::ProgramBuilder>     mPipelineBuilder;
+    pipeline_input_pack_t                       mPipelineInputs;
 };
 
 
@@ -389,7 +388,7 @@ public:
         // populate pipline
         body(T, T.pipeline());
         // compile and invoke
-        auto fn = reinterpret_cast<pipeline_fn_t>(T->compile());
+        auto fn = reinterpret_cast<pipeline_fn_t>(T.pipeline().compile());
         meta::apply(fn, std::move(invocation_pack));
     }
 

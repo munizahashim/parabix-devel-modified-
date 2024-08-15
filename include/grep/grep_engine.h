@@ -21,12 +21,10 @@
 
 namespace re { class CC; class Name; class RE; }
 namespace llvm { namespace cl { class OptionCategory; } }
-namespace kernel { class ProgramBuilder; }
+namespace kernel { class PipelineBuilder; }
 namespace kernel { class StreamSet; }
 namespace kernel { class ExternalStreamObject; }
 class BaseDriver;
-
-using ProgBuilderRef = const std::unique_ptr<kernel::ProgramBuilder> &;
 
 namespace grep {
 
@@ -107,7 +105,7 @@ public:
     bool searchAllFiles();
     void * DoGrepThreadMethod();
     virtual void showResult(uint64_t grepResult, const std::string & fileName, std::ostringstream & strm);
-    unsigned RunGrep(ProgBuilderRef P, const cc::Alphabet * a, re::RE * re, kernel::StreamSet * Matches);
+    unsigned RunGrep(kernel::PipelineBuilder & P, const cc::Alphabet * a, re::RE * re, kernel::StreamSet * Matches);
 
 protected:
     // Functional components that may be required for grep searches,
@@ -127,22 +125,22 @@ protected:
     bool matchesToEOLrequired();
 
     // Transpose to basis bit streams, if required otherwise return the source byte stream.
-    kernel::StreamSet * getBasis(ProgBuilderRef P, kernel::StreamSet * ByteStream);
+    kernel::StreamSet * getBasis(const std::unique_ptr<kernel::PipelineBuilder> & P, kernel::StreamSet * ByteStream);
 
     // Initial grep set-up.
     // Implement any required checking/processing of null characters, determine the
     // line break stream and the U8 index stream (if required).
-    void grepPrologue(ProgBuilderRef P, kernel::StreamSet * SourceStream);
+    void grepPrologue(const std::unique_ptr<kernel::PipelineBuilder> & P, kernel::StreamSet * SourceStream);
     // Prepare external property and GCB streams, if required.
-    void prepareExternalStreams(ProgBuilderRef P, kernel::StreamSet * SourceStream);
-    kernel::StreamSet * getMatchSpan(ProgBuilderRef P, re::RE * r, kernel::StreamSet * MatchResults);
-    void addExternalStreams(ProgBuilderRef P, const cc::Alphabet * a, std::unique_ptr<kernel::GrepKernelOptions> & options, re::RE * regexp, kernel::StreamSet * indexMask = nullptr);
-    kernel::StreamSet * initialMatches(ProgBuilderRef P, kernel::StreamSet * ByteStream);
-    kernel::StreamSet * matchedLines(ProgBuilderRef P, kernel::StreamSet * ByteStream);
-    kernel::StreamSet * grepPipeline(ProgBuilderRef P, kernel::StreamSet * ByteStream);
+    void prepareExternalStreams(const std::unique_ptr<kernel::PipelineBuilder> & P, kernel::StreamSet * SourceStream);
+    kernel::StreamSet * getMatchSpan(const std::unique_ptr<kernel::PipelineBuilder> & P, re::RE * r, kernel::StreamSet * MatchResults);
+    void addExternalStreams(kernel::PipelineBuilder & P, const cc::Alphabet * a, std::unique_ptr<kernel::GrepKernelOptions> & options, re::RE * regexp, kernel::StreamSet * indexMask = nullptr);
+    kernel::StreamSet * initialMatches(const std::unique_ptr<kernel::PipelineBuilder> & P, kernel::StreamSet * ByteStream);
+    kernel::StreamSet * matchedLines(const std::unique_ptr<kernel::PipelineBuilder> & P, kernel::StreamSet * ByteStream);
+    kernel::StreamSet * grepPipeline(const std::unique_ptr<kernel::PipelineBuilder> & P, kernel::StreamSet * ByteStream);
     virtual uint64_t doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm);
     int32_t openFile(const std::string & fileName, std::ostringstream & msgstrm);
-    void applyColorization(const std::unique_ptr<kernel::ProgramBuilder> & E,
+    void applyColorization(const std::unique_ptr<kernel::PipelineBuilder> & E,
                                               kernel::StreamSet * SourceCoords,
                                               kernel::StreamSet * MatchSpans,
                                               kernel::StreamSet * Basis);
@@ -244,7 +242,7 @@ protected:
 class EmitMatchesEngine final : public GrepEngine {
 public:
     EmitMatchesEngine(BaseDriver & driver);
-    void grepPipeline(ProgBuilderRef P, kernel::StreamSet * ByteStream);
+    void grepPipeline(const std::unique_ptr<kernel::PipelineBuilder> & P, kernel::StreamSet * ByteStream);
     void grepCodeGen() override;
 private:
     uint64_t doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm) override;

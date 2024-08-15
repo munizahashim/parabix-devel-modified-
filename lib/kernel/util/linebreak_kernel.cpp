@@ -287,7 +287,7 @@ void UnicodeLinesKernelBuilder::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("LB"), pb.getInteger(0)), LineBreak);
 }
 
-void UnicodeLinesLogic(const std::unique_ptr<kernel::ProgramBuilder> & P,
+void UnicodeLinesLogic(const std::unique_ptr<PipelineBuilder> &P,
                        StreamSet * Basis,
                        StreamSet * UnicodeLB,
                        StreamSet * u8index,

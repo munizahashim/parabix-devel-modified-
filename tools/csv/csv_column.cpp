@@ -13,7 +13,7 @@
 #include <re/adt/re_name.h>
 #include <re/adt/re_re.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/run_index.h>
@@ -133,7 +133,7 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
 
     
     StreamSet * filteredBasis = P->CreateStreamSet(8);
-    FilterByMask(P, Selected, BasisBits, filteredBasis);
+    FilterByMask(*P.get(), Selected, BasisBits, filteredBasis);
     StreamSet * Filtered = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(filteredBasis, Filtered);
     if (codegen::EnableIllustrator) {

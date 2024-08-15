@@ -13,7 +13,7 @@
 #include <re/adt/re_name.h>
 #include <re/adt/re_re.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/run_index.h>
@@ -103,19 +103,18 @@ void BasisCombine::generatePabloMethod() {
     }
 }
 
-void MergeByMask01(const std::unique_ptr<ProgramBuilder> & P,
-                 StreamSet * mask, StreamSet * a, StreamSet * b, StreamSet * merged) {
+inline void MergeByMask01(PipelineBuilder & P, StreamSet * mask, StreamSet * a, StreamSet * b, StreamSet * merged) {
     unsigned elems = merged->getNumElements();
     if ((a->getNumElements() != elems) || (b->getNumElements() != elems)) {
         llvm::report_fatal_error("MergeByMask called with incompatible element counts");
     }
-    StreamSet * expandedA = P->CreateStreamSet(elems);
+    StreamSet * expandedA = P.CreateStreamSet(elems);
     SpreadByMask(P, mask, a, expandedA);
-    StreamSet * inverted = P->CreateStreamSet(1);
-    P->CreateKernelCall<Invert>(mask, inverted);
-    StreamSet * expandedB = P->CreateStreamSet(elems);
+    StreamSet * inverted = P.CreateStreamSet(1);
+    P.CreateKernelCall<Invert>(mask, inverted);
+    StreamSet * expandedB = P.CreateStreamSet(elems);
     SpreadByMask(P, inverted, b, expandedB);
-    P->CreateKernelCall<BasisCombine>(expandedA, expandedB, merged);
+    P.CreateKernelCall<BasisCombine>(expandedA, expandedB, merged);
 }
 
 CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::string> & templateStrs) {
@@ -133,7 +132,7 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     //  The Parabix basis bits representation is created by the Parabix S2P kernel.
     //  S2P stands for serial-to-parallel.
     StreamSet * BasisBits = P->CreateStreamSet(8);
-    Selected_S2P(P, ByteStream, BasisBits);
+    Selected_S2P(*P.get(), ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
     //  We need to know which input positions are dquotes and which are not.
     StreamSet * csvCCs = P->CreateStreamSet(5);
@@ -155,7 +154,7 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     // Normally this will be a stream having exactly one bit set for every
     // N positions, where N is the number of entries per row.
     StreamSet * recordsByField = P->CreateStreamSet(1);
-    FilterByMask(P, fieldSeparators, recordSeparators, recordsByField);
+    FilterByMask(*P.get(), fieldSeparators, recordSeparators, recordsByField);
     SHOW_STREAM(recordsByField);
 
     StreamSet * translatedBasis = P->CreateStreamSet(8);
@@ -164,10 +163,10 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
 
     StreamSet * filteredBasis = P->CreateStreamSet(8);
     StreamSet * filteredFieldSeparators = P->CreateStreamSet(1);
-    FilterByMask(P, toKeep, translatedBasis, filteredBasis);
+    FilterByMask(*P.get(), toKeep, translatedBasis, filteredBasis);
     SHOW_BIXNUM(filteredBasis);
 
-    FilterByMask(P, toKeep, fieldSeparators, filteredFieldSeparators);
+    FilterByMask(*P.get(), toKeep, fieldSeparators, filteredFieldSeparators);
     SHOW_STREAM(filteredFieldSeparators);
 
     std::vector<uint64_t> insertionAmts;
@@ -186,7 +185,7 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     SHOW_STREAM(fieldStarts);
 
     StreamSet * PrefixInsertBixNum = P->CreateStreamSet(insertLengthBits);
-    SpreadByMask(P, fieldStarts, PrefixLgths, PrefixInsertBixNum);
+    SpreadByMask(*P.get(), fieldStarts, PrefixLgths, PrefixInsertBixNum);
     SHOW_BIXNUM(PrefixInsertBixNum);
 
     std::vector<uint64_t> fieldSuffixLgths;
@@ -201,14 +200,14 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     StreamSet * RepeatingSuffixLgths = P->CreateRepeatingBixNum(suffixLgthBits, fieldSuffixLgths, TestDynamicRepeatingFile);
 
     StreamSet * SuffixInsertBixNum = P->CreateStreamSet(suffixLgthBits);
-    SpreadByMask(P, filteredFieldSeparators, RepeatingSuffixLgths, SuffixInsertBixNum);
+    SpreadByMask(*P.get(), filteredFieldSeparators, RepeatingSuffixLgths, SuffixInsertBixNum);
     SHOW_BIXNUM(SuffixInsertBixNum);
 
     StreamSet * InsertBixNum = P->CreateStreamSet(insertLengthBits);
     P->CreateKernelCall<bixnum::Add>(PrefixInsertBixNum, SuffixInsertBixNum, InsertBixNum);
     SHOW_BIXNUM(InsertBixNum);
 
-    StreamSet * const BasisSpreadMask = InsertionSpreadMask(P, InsertBixNum, InsertPosition::Before);
+    StreamSet * const BasisSpreadMask = InsertionSpreadMask(*P.get(), InsertBixNum, InsertPosition::Before);
     SHOW_STREAM(BasisSpreadMask);
     
     std::vector<uint64_t> templateBytes;
@@ -226,9 +225,9 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
 
     StreamSet * FinalBasis = P->CreateStreamSet(8);
     if (UseMergeByMaskKernel) {
-        MergeByMask(P, BasisSpreadMask, filteredBasis, TemplateBasis, FinalBasis);
+        MergeByMask(*P.get(), BasisSpreadMask, filteredBasis, TemplateBasis, FinalBasis);
     } else {
-        MergeByMask01(P, BasisSpreadMask, filteredBasis, TemplateBasis, FinalBasis);
+        MergeByMask01(*P.get(), BasisSpreadMask, filteredBasis, TemplateBasis, FinalBasis);
     }
     SHOW_BIXNUM(FinalBasis);
     StreamSet * Instantiated = P->CreateStreamSet(1, 8);

@@ -38,7 +38,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <iomanip>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include "json-kernel.h"
 #include "postprocess/json-simple.h"
 #include "postprocess/json-detail.h"
@@ -90,7 +90,7 @@ jsonFunctionType json_parsing_gen(
     StreamSet * const codeUnitStream = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
     StreamSet * const u8basis = P->CreateStreamSet(8);
-    Selected_S2P(P, codeUnitStream, u8basis);
+    Selected_S2P(*P.get(), codeUnitStream, u8basis);
 
     // 1. Find string marker (without backslashes)
     // 2. and make string span
@@ -170,7 +170,7 @@ jsonFunctionType json_parsing_gen(
 
     // 9.1 Prepare and validate StreamSets
     if (ParallelProcess) {
-        StreamSet * const brackets = su::Select(P, combinedLexers, su::Range(1, 3));
+        StreamSet * const brackets = su::Select(*P.get(), combinedLexers, su::Range(1, 3));
         StreamSet * const depthErr = P->CreateStreamSet(1);
         StreamSet * const syntaxArrErr = P->CreateStreamSet(1);
         StreamSet * const syntaxObjErr = P->CreateStreamSet(1);
@@ -208,7 +208,7 @@ jsonFunctionType json_parsing_gen(
             std::vector<StreamSet *>{extraErr, utf8Err, numberErr, depthErr, syntaxArrErr, syntaxObjErr},
             Errors
         );
-        StreamSet * const Errs = su::Collapse(P, Errors);
+        StreamSet * const Errs = su::Collapse(*P.get(), Errors);
         auto simpleErrFn = SCAN_CALLBACK(postproc_parensError);
         Scalar * const errCount = P->getOutputScalar("errCount");
         P->CreateKernelCall<PopcountKernel>(Errs, errCount);
@@ -226,7 +226,7 @@ jsonFunctionType json_parsing_gen(
         }
     } else {
         StreamSet * collapsedLex;
-        StreamSet * const symbols = su::Select(P, combinedLexers, 0);
+        StreamSet * const symbols = su::Select(*P.get(), combinedLexers, 0);
         if (ToCSVFlag) {
             StreamSet * allLex = P->CreateStreamSet(8, 1);
             P->CreateKernelCall<StreamsMerge>(
@@ -236,7 +236,7 @@ jsonFunctionType json_parsing_gen(
                     },
                     allLex
             );
-            collapsedLex = su::Collapse(P, allLex);
+            collapsedLex = su::Collapse(*P.get(), allLex);
         } else {
             StreamSet * allLex = P->CreateStreamSet(7, 1);
             P->CreateKernelCall<StreamsMerge>(
@@ -246,7 +246,7 @@ jsonFunctionType json_parsing_gen(
                 },
                 allLex
             );
-            collapsedLex = su::Collapse(P, allLex);
+            collapsedLex = su::Collapse(*P.get(), allLex);
         }
 
         // 9.1.1 Prepare StreamSets to show lines on error
@@ -258,15 +258,15 @@ jsonFunctionType json_parsing_gen(
 
         auto const LineBreaks = P->CreateStreamSet(1);
         P->CreateKernelCall<UnixLinesKernelBuilder>(codeUnitStream, LineBreaks, UnterminatedLineAtEOF::Add1);
-        StreamSet * const LineNumbers = scan::LineNumbers(P, collapsedLex, LineBreaks);
-        StreamSet * const LineSpans = scan::LineSpans(P, LineBreaks);
-        StreamSet * const Spans = scan::FilterLineSpans(P, LineNumbers, LineSpans);
-        StreamSet * const Indices = scan::ToIndices(P, collapsedLex);
+        StreamSet * const LineNumbers = scan::LineNumbers(*P.get(), collapsedLex, LineBreaks);
+        StreamSet * const LineSpans = scan::LineSpans(*P.get(), LineBreaks);
+        StreamSet * const Spans = scan::FilterLineSpans(*P.get(), LineNumbers, LineSpans);
+        StreamSet * const Indices = scan::ToIndices(*P.get(), collapsedLex);
 
         // 10 Validate objects and arrays and output error in case JSON is not valid
         auto fn = ToCSVFlag ? normalCsv2JsonFn : normalJsonFn;
         auto doneFn = ToCSVFlag ? doneCsv2JsonFn : doneJsonFn;
-        scan::Reader(P, driver, fn, doneFn, codeUnitStream, { Indices, Spans }, { LineNumbers, Indices });
+        scan::Reader(*P.get(), driver, fn, doneFn, codeUnitStream, { Indices, Spans }, { LineNumbers, Indices });
     }
 
     return reinterpret_cast<jsonFunctionType>(P->compile());

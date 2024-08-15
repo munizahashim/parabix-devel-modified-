@@ -26,26 +26,26 @@ inline size_t ceil_udiv(const size_t n, const size_t m) {
 
 namespace kernel {
 
-void FilterByMask(const std::unique_ptr<ProgramBuilder> & P,
+void FilterByMask(PipelineBuilder & P,
                   StreamSet * mask, StreamSet * inputs, StreamSet * outputs,
                   unsigned streamOffset,
                   unsigned extractionFieldWidth,
                   bool byteDeletion) {
     if (byteDeletion) {
-        StreamSet * const input_streams = P->CreateStreamSet(8);
-        P->CreateKernelCall<S2PKernel>(inputs, input_streams);
-        StreamSet * const output_streams = P->CreateStreamSet(8);
-        StreamSet * const compressed = P->CreateStreamSet(output_streams->getNumElements());
+        StreamSet * const input_streams = P.CreateStreamSet(8);
+        P.CreateKernelCall<S2PKernel>(inputs, input_streams);
+        StreamSet * const output_streams = P.CreateStreamSet(8);
+        StreamSet * const compressed = P.CreateStreamSet(output_streams->getNumElements());
         std::vector<uint32_t> output_indices = streamutils::Range(streamOffset, streamOffset + output_streams->getNumElements());
-        P->CreateKernelCall<FieldCompressKernel>(Select(mask, {0}), SelectOperationList { Select(input_streams, output_indices)}, compressed, extractionFieldWidth);
-        P->CreateKernelCall<StreamCompressKernel>(mask, compressed, output_streams, extractionFieldWidth);
-        P->CreateKernelCall<P2SKernel>(output_streams, outputs);
+        P.CreateKernelCall<FieldCompressKernel>(Select(mask, {0}), SelectOperationList { Select(input_streams, output_indices)}, compressed, extractionFieldWidth);
+        P.CreateKernelCall<StreamCompressKernel>(mask, compressed, output_streams, extractionFieldWidth);
+        P.CreateKernelCall<P2SKernel>(output_streams, outputs);
     }
     else {
-        StreamSet * const compressed = P->CreateStreamSet(outputs->getNumElements());
+        StreamSet * const compressed = P.CreateStreamSet(outputs->getNumElements());
         std::vector<uint32_t> output_indices = streamutils::Range(streamOffset, streamOffset + outputs->getNumElements());
-        P->CreateKernelCall<FieldCompressKernel>(Select(mask, {0}), SelectOperationList { Select(inputs, output_indices)}, compressed, extractionFieldWidth);
-        P->CreateKernelCall<StreamCompressKernel>(mask, compressed, outputs, extractionFieldWidth);
+        P.CreateKernelCall<FieldCompressKernel>(Select(mask, {0}), SelectOperationList { Select(inputs, output_indices)}, compressed, extractionFieldWidth);
+        P.CreateKernelCall<StreamCompressKernel>(mask, compressed, outputs, extractionFieldWidth);
     }
 }
 

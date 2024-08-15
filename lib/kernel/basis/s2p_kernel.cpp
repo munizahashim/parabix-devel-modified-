@@ -361,29 +361,28 @@ S2P_CompletionKernel::S2P_CompletionKernel(LLVMTypeSystemInterface & ts,
         setStride(2 * ts.getBitBlockWidth());
     }
 
-void Staged_S2P(const std::unique_ptr<ProgramBuilder> & P,
+void Staged_S2P(PipelineBuilder &P,
                 StreamSet * ByteStream, StreamSet * BasisBits,
                 bool completionFromQuads) {
-    StreamSet * BitPairs = P->CreateStreamSet(8, 1);
-    P->CreateKernelCall<BitPairsKernel>(ByteStream, BitPairs);
+    StreamSet * BitPairs = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<BitPairsKernel>(ByteStream, BitPairs);
     if (completionFromQuads) {
-        StreamSet * BitQuads = P->CreateStreamSet(8, 1);
-        P->CreateKernelCall<BitQuadsKernel>(BitPairs, BitQuads);
-        P->CreateKernelCall<S2P_CompletionKernel>(BitQuads, BasisBits, completionFromQuads);
+        StreamSet * BitQuads = P.CreateStreamSet(8, 1);
+        P.CreateKernelCall<BitQuadsKernel>(BitPairs, BitQuads);
+        P.CreateKernelCall<S2P_CompletionKernel>(BitQuads, BasisBits, completionFromQuads);
     } else {
-        P->CreateKernelCall<S2P_CompletionKernel>(BitPairs, BasisBits, completionFromQuads);
+        P.CreateKernelCall<S2P_CompletionKernel>(BitPairs, BasisBits, completionFromQuads);
     }
-    P->AssertEqualLength(BasisBits, ByteStream);
+    P.AssertEqualLength(BasisBits, ByteStream);
 }
 
-void Selected_S2P(const std::unique_ptr<ProgramBuilder> & P,
-                StreamSet * ByteStream, StreamSet * BasisBits) {
+void Selected_S2P(PipelineBuilder & P, StreamSet * ByteStream, StreamSet * BasisBits) {
     if (codegen::PabloTransposition) {
-        P->CreateKernelCall<S2P_PabloKernel>(ByteStream, BasisBits);
+        P.CreateKernelCall<S2P_PabloKernel>(ByteStream, BasisBits);
     } else if (codegen::SplitTransposition) {
         Staged_S2P(P, ByteStream, BasisBits);
     } else {
-        P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+        P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     }
 }
 

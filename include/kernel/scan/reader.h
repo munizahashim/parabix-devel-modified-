@@ -148,7 +148,7 @@ CallbackPair<U...> make_callback_pair(std::string const & name, void(* func)(U..
  *      extern "C" foo(const uint8_t * ptr, uint64_t lineNum);
  *      // -- snip --
  *      CPUDriver driver = ...;
- *      std::unique_ptr<ProgramBuilder> P = ...;
+ *      std::unique_ptr<PipelineBuilder> P = ...;
  *      StreamSet * Source = ...; // <i8>[1]
  *      StreamSet * Indices = ...; // <i64>[1]
  *      StreamSet * LineNums = ...; // <i64>[1]
@@ -202,7 +202,7 @@ CallbackPair<U...> make_callback_pair(std::string const & name, void(* func)(U..
 template<typename... Args>
 inline
 void Reader(
-    const std::unique_ptr<ProgramBuilder> & P,
+    PipelineBuilder & P,
     BaseDriver & driver,
     CallbackPair<Args...> callback,
     StreamSet * source,
@@ -211,14 +211,14 @@ void Reader(
     using Fn = typename CallbackPair<Args...>::FunctionType;
     assert(scanIndices->getFieldWidth() == 64);
     assert(source->getFieldWidth() != 1);
-    Kernel * const reader = P-> template CreateKernelCall<ScanReader>(source, scanIndices, callback.name);
+    Kernel * const reader = P. template CreateKernelCall<ScanReader>(source, scanIndices, callback.name);
     reader->link<Fn>(callback.name, *callback.func);
 }
 
 template<typename... Args, typename... Args2>
 inline
 void Reader(
-    const std::unique_ptr<ProgramBuilder> & P,
+    PipelineBuilder & P,
     BaseDriver & driver,
     CallbackPair<Args...> callback,
     CallbackPair<Args2...> doneCallback,
@@ -229,7 +229,7 @@ void Reader(
     using Fn2 = typename CallbackPair<Args2...>::FunctionType;
     assert(scanIndices->getFieldWidth() == 64);
     assert(source->getFieldWidth() != 1);
-    Kernel * const reader = P-> template CreateKernelCall<ScanReader>(source, scanIndices, callback.name, doneCallback.name);
+    Kernel * const reader = P. template CreateKernelCall<ScanReader>(source, scanIndices, callback.name, doneCallback.name);
     reader->link<Fn>(callback.name, *callback.func);
     reader->link<Fn2>(doneCallback.name, &doneCallback.func);
 }
@@ -262,7 +262,7 @@ void Reader(
 template<typename... Args>
 inline
 void Reader(
-    const std::unique_ptr<ProgramBuilder> & P,
+    PipelineBuilder & P,
     BaseDriver & driver,
     CallbackPair<Args...> callback,
     StreamSet * source,
@@ -270,7 +270,7 @@ void Reader(
     std::initializer_list<StreamSet *> additionalStreams)
 {
     using Fn = typename CallbackPair<Args...>::FunctionType;
-    Kernel * const reader = P-> template CreateKernelCall<ScanReader>(source, scanIndices, callback.name, std::move(additionalStreams));
+    Kernel * const reader = P. template CreateKernelCall<ScanReader>(source, scanIndices, callback.name, std::move(additionalStreams));
     reader->link<Fn>(callback.name, *callback.func);
 }
 
@@ -283,7 +283,7 @@ void Reader(
 template<typename... Args, typename... Args2>
 inline
 void Reader(
-    const std::unique_ptr<ProgramBuilder> & P,
+    PipelineBuilder & P,
     BaseDriver & driver,
     CallbackPair<Args...> callback,
     CallbackPair<Args2...> doneCallback,
@@ -293,7 +293,7 @@ void Reader(
 {
     using Fn = typename CallbackPair<Args...>::FunctionType;
     using Fn2 = typename CallbackPair<Args2...>::FunctionType;
-    Kernel * const reader = P-> template CreateKernelCall<ScanReader>(source, scanIndices, callback.name, doneCallback.name, std::move(additionalStreams));
+    Kernel * const reader = P. template CreateKernelCall<ScanReader>(source, scanIndices, callback.name, doneCallback.name, std::move(additionalStreams));
     reader->link<Fn>(callback.name, *callback.func);
     reader->link<Fn2>(doneCallback.name, *doneCallback.func);
 }
@@ -308,7 +308,7 @@ void Reader(
 template<typename... Args>
 inline
 void Reader(
-    const std::unique_ptr<ProgramBuilder> & P,
+    PipelineBuilder & P,
     BaseDriver & driver,
     CallbackPair<Args...> callback,
     StreamSet * source,
@@ -317,7 +317,7 @@ void Reader(
     namespace su = kernel::streamutils;
     using Fn = typename CallbackPair<Args...>::FunctionType;
     StreamSet * const indices = su::Select(P, std::vector<StreamSet *>(ptrStreams));
-    Kernel * const reader = P-> template CreateKernelCall<ScanReader>(source, indices, callback.name);
+    Kernel * const reader = P. template CreateKernelCall<ScanReader>(source, indices, callback.name);
     reader->link<Fn>(callback.name, *callback.func);
 }
 
@@ -330,7 +330,7 @@ void Reader(
 template<typename... Args, typename... Args2>
 inline
 void Reader(
-    const std::unique_ptr<ProgramBuilder> & P,
+    PipelineBuilder & P,
     BaseDriver & driver,
     CallbackPair<Args...> callback,
     CallbackPair<Args2...> doneCallback,
@@ -341,7 +341,7 @@ void Reader(
     using Fn = typename CallbackPair<Args...>::FunctionType;
     using Fn2 = typename CallbackPair<Args2...>::FunctionType;
     StreamSet * const indices = su::Select(P, std::vector<StreamSet *>(ptrStreams));
-    Kernel * const reader = P-> template CreateKernelCall<ScanReader>(source, indices, callback.name, doneCallback.name);
+    Kernel * const reader = P. template CreateKernelCall<ScanReader>(source, indices, callback.name, doneCallback.name);
     reader->link<Fn>(callback.name, *callback.func);
     reader->link<Fn2>(doneCallback.name, *doneCallback.func);
 }
@@ -356,7 +356,7 @@ void Reader(
 template<typename... Args>
 inline
 void Reader(
-    const std::unique_ptr<ProgramBuilder> & P,
+    PipelineBuilder & P,
     BaseDriver & driver,
     CallbackPair<Args...> callback,
     StreamSet * source,
@@ -366,7 +366,7 @@ void Reader(
     namespace su = kernel::streamutils;
     using Fn = typename CallbackPair<Args...>::FunctionType;
     StreamSet * const indices = su::Select(P, std::move(ptrStreams));
-    Kernel * const reader = P-> template CreateKernelCall<ScanReader>(source, indices, callback.name, std::move(additionalStreams));
+    Kernel * const reader = P. template CreateKernelCall<ScanReader>(source, indices, callback.name, std::move(additionalStreams));
     reader->link<Fn>(callback.name, *callback.func);
 }
 
@@ -379,7 +379,7 @@ void Reader(
 template<typename... Args, typename... Args2>
 inline
 void Reader(
-    const std::unique_ptr<ProgramBuilder> & P,
+    PipelineBuilder & P,
     BaseDriver & driver,
     CallbackPair<Args...> callback,
     CallbackPair<Args2...> doneCallback,
@@ -391,7 +391,7 @@ void Reader(
     using Fn = typename CallbackPair<Args...>::FunctionType;
     using Fn2 = typename CallbackPair<Args2...>::FunctionType;
     StreamSet * const indices = su::Select(P, std::move(ptrStreams));
-    Kernel * const reader = P-> template CreateKernelCall<ScanReader>(source, indices, callback.name, doneCallback.name, std::move(additionalStreams));
+    Kernel * const reader = P.template CreateKernelCall<ScanReader>(source, indices, callback.name, doneCallback.name, std::move(additionalStreams));
     reader->link<Fn>(callback.name, *callback.func);
     reader->link<Fn2>(doneCallback.name, *doneCallback.func);
 }

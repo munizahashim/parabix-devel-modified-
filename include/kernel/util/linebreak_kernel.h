@@ -19,7 +19,7 @@
 #include <re/alphabet/alphabet.h>
 
 namespace kernel { class KernelBuilder; }
-namespace kernel { class ProgramBuilder; }
+namespace kernel { class PipelineBuilder; }
 
 /*  An input file may contain a final line without a line terminator.
     Line break kernels can add logic to produce a mark one past EOF
@@ -53,7 +53,7 @@ protected:
     NullCharMode mNullMode;
 };
 
-void UnicodeLinesLogic(const std::unique_ptr<kernel::ProgramBuilder> & P,
+void UnicodeLinesLogic(const std::unique_ptr<kernel::PipelineBuilder> & P,
                        kernel::StreamSet * Basis,
                        kernel::StreamSet * LineEnds,
                        kernel::StreamSet * u8index,

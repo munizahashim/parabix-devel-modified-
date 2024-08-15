@@ -11,7 +11,7 @@
 #include <re/cc/cc_compiler_target.h>
 #include <re/cc/cc_kernel.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/basis/p2s_kernel.h>
 #include <kernel/basis/s2p_kernel.h>
@@ -276,7 +276,7 @@ u8u16FunctionType generatePipeline(CPUDriver & driver, cc::ByteNumbering byteNum
 
     // Transposed bits from s2p
     StreamSet * BasisBits = P->CreateStreamSet(8);
-    Selected_S2P(P, ByteStream, BasisBits);
+    Selected_S2P(*P.get(), ByteStream, BasisBits);
 
     // Calculate UTF-16 data bits through bitwise logic on u8-indexed streams.
     StreamSet * u8bits = P->CreateStreamSet(16);

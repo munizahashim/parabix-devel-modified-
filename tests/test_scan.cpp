@@ -14,6 +14,7 @@
 #include <kernel/unicode/charclasses.h>
 #include <re/adt/re_cc.h>
 #include <util/iota_fill.hpp>
+#include <kernel/pipeline/program_builder.h>
 
 using namespace kernel;
 using namespace testing;
@@ -23,7 +24,7 @@ static auto tiny_scan_e = IntStream<uint64_t>({0, 8, 16});
 
 TEST_CASE(tiny_scan, tiny_scan_i, tiny_scan_e) {
     auto Result = scan::ToIndices(T, Input<0>(T));
-    AssertEQ(T, Result, Input<1>(T));
+    AssertEQ(P, Result, Input<1>(T));
 }
 
 
@@ -32,7 +33,7 @@ static auto no_bits_e = IntStream<uint64_t>({});
 
 TEST_CASE(no_bits, no_bits_i, no_bits_e) {
     auto Result = scan::ToIndices(T, Input<0>(T));
-    AssertEQ(T, Result, Input<1>(T));
+    AssertEQ(P, Result, Input<1>(T));
 }
 
 static auto long_scan_i = BinaryStream(".{105123} 1 .{3000}");
@@ -40,7 +41,7 @@ static auto long_scan_e = IntStream<uint64_t>({105123});
 
 TEST_CASE(long_scan, long_scan_i, long_scan_e) {
     auto Result = scan::ToIndices(T, Input<0>(T));
-    AssertEQ(T, Result, Input<1>(T));
+    AssertEQ(P, Result, Input<1>(T));
 }
 
 // 445 characters
@@ -59,12 +60,12 @@ TEST_CASE(scan_index_integration,
     scan_index_integration_text,
     scan_index_integration_expected)
 {
-    auto Basis = P->CreateStreamSet(8, 1);
-    P->CreateKernelCall<S2PKernel>(Input<0>(T), Basis);
-    auto Marker = P->CreateStreamSet(1, 1);
+    auto Basis = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<S2PKernel>(Input<0>(T), Basis);
+    auto Marker = P.CreateStreamSet(1, 1);
     std::vector<re::CC *> ccs;
     ccs.push_back(re::makeByte('.'));
-    P->CreateKernelCall<ByteClassesKernel>(ccs, Basis, Marker);
+    P.CreateKernelCall<ByteClassesKernel>(ccs, Basis, Marker);
     auto Collapsed = streamutils::Collapse(P, Marker);
     auto Indices = scan::ToIndices(P, Collapsed);
     AssertEQ(P, Indices, Input<1>(T));
@@ -78,8 +79,8 @@ static auto simple_line_span_e = IntStreamSet<uint64_t>({
 });
 
 TEST_CASE(simple_line_span, simple_line_span_i, simple_line_span_e) {
-    auto Result = scan::LineSpans(T, Input<0>(T));
-    AssertEQ(T, Result, Input<1>(T));
+    auto Result = scan::LineSpans(P, Input<0>(T));
+    AssertEQ(P, Result, Input<1>(T));
 }
 
 
@@ -94,10 +95,10 @@ static auto text_line_span_e = IntStreamSet<uint64_t>({
 });
 
 TEST_CASE(text_line_span, text_line_span_source, text_line_span_e) {
-    auto const LineBreaks = T->CreateStreamSet();
-    P->CreateKernelCall<UnixLinesKernelBuilder>(Input<0>(T), LineBreaks, UnterminatedLineAtEOF::Add1);
+    auto const LineBreaks = P.CreateStreamSet();
+    P.CreateKernelCall<UnixLinesKernelBuilder>(Input<0>(T), LineBreaks, UnterminatedLineAtEOF::Add1);
     auto const Result = scan::LineSpans(T, LineBreaks);
-    AssertEQ(T, Result, Input<1>(T));
+    AssertEQ(P, Result, Input<1>(T));
 }
 
 static auto long_spans_i = BinaryStream(".{1000} 1 .{512} 1");
@@ -109,7 +110,7 @@ static auto long_spans_e = IntStreamSet<uint64_t>({
 
 TEST_CASE(long_spans, long_spans_i, long_spans_e) {
     auto Result = scan::LineSpans(T, Input<0>(T));
-    AssertEQ(T, Result, Input<1>(T));
+    AssertEQ(P, Result, Input<1>(T));
 }
 
 
@@ -129,7 +130,7 @@ static auto filter_spans_e = IntStreamSet<uint64_t>({
 
 TEST_CASE(filter_spans, filter_spans_spans, filter_spans_filter, filter_spans_e) {
     auto Result = scan::FilterLineSpans(T, Input<1>(T), Input<0>(T));
-    AssertEQ(T, Result, Input<2>(T));
+    AssertEQ(P, Result, Input<2>(T));
 }
 
 static auto filter_no_spans_spans = IntStreamSet<uint64_t>({
@@ -143,7 +144,7 @@ static auto filter_no_spans_e = IntStreamSet<uint64_t>({{}, {}});
 
 TEST_CASE(filter_no_spans, filter_no_spans_spans, filter_no_spans_filter, filter_no_spans_e) {
     auto Result = scan::FilterLineSpans(T, Input<1>(T), Input<0>(T));
-    AssertEQ(T, Result, Input<2>(T));
+    AssertEQ(P, Result, Input<2>(T));
 }
 
 
@@ -153,7 +154,7 @@ static auto one_per_line_e = IntStream<uint64_t>(meta::iota_fill<uint64_t>(40, 0
 
 TEST_CASE(one_per_line, one_per_line_markers, one_per_line_linebreaks, one_per_line_e) {
     auto Result = scan::LineNumbers(T, Input<0>(T), Input<1>(T));
-    AssertEQ(T, Result, Input<2>(T));
+    AssertEQ(P, Result, Input<2>(T));
 }
 
 RUN_TESTS(

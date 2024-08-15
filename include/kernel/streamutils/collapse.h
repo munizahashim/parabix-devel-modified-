@@ -40,7 +40,7 @@ namespace streamutils {
      * 
      * This function is a wrapper for a kernel call to `CollapseStreamSet`.
      */
-    StreamSet * Collapse(const std::unique_ptr<ProgramBuilder> & P, StreamSet * i);
+    StreamSet * Collapse(PipelineBuilder & P, StreamSet * i);
 
 }
 

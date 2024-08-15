@@ -13,7 +13,7 @@
 #include <re/transforms/re_simplifier.h>
 #include <re/cc/cc_kernel.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/core/streamset.h>
@@ -85,7 +85,7 @@ UCountFunctionType pipelineGen(CPUDriver & driver, re::Name * CC_name) {
         if (codegen::EnableIllustrator) {
             P->captureByteData("bytedata", ByteStream, '.');
             for (unsigned i = 0; i < 21; i++) {
-                StreamSet * u21_basis_i = streamutils::Select(P, u21_Basis, i);
+                StreamSet * u21_basis_i = streamutils::Select(*P.get(), u21_Basis, i);
                 P->captureBitstream("u21_" + std::to_string(i), u21_basis_i);
             }
         }

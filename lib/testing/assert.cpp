@@ -7,6 +7,7 @@
 
 #include <kernel/core/kernel_builder.h>
 #include <llvm/Support/raw_ostream.h>
+#include <kernel/pipeline/program_builder.h>
 
 using namespace llvm;
 using namespace kernel;
@@ -146,24 +147,24 @@ void StreamEquivalenceKernel::generateFinalizeMethod(KernelBuilder & b) {
 
 namespace testing {
 
-void AssertEQ(const std::unique_ptr<kernel::ProgramBuilder> & P, StreamSet * lhs, StreamSet * rhs) {
-    auto ptr = P->getInputScalar("output");
-    P->CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::EQ, lhs, rhs, ptr);
-    P->CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::EQ, rhs, lhs, ptr);
+void AssertEQ(kernel::PipelineBuilder & P, StreamSet * lhs, StreamSet * rhs) {
+    auto ptr = P.getInputScalar("output");
+    P.CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::EQ, lhs, rhs, ptr);
+    P.CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::EQ, rhs, lhs, ptr);
 }
 
-void AssertNE(const std::unique_ptr<kernel::ProgramBuilder> & P, StreamSet * lhs, StreamSet * rhs) {
-    auto ptr = P->getInputScalar("output");
-    P->CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, lhs, rhs, ptr);
-    P->CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, rhs, lhs, ptr);
+void AssertNE(kernel::PipelineBuilder & P, StreamSet * lhs, StreamSet * rhs) {
+    auto ptr = P.getInputScalar("output");
+    P.CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, lhs, rhs, ptr);
+    P.CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, rhs, lhs, ptr);
 }
 
-void AssertDebug(const std::unique_ptr<kernel::ProgramBuilder> & P, kernel::StreamSet * lhs, kernel::StreamSet * rhs) {
-    P->captureBitstream("lhs", lhs);
-    P->captureBitstream("rhs", rhs);
+void AssertDebug(kernel::PipelineBuilder & P, kernel::StreamSet * lhs, kernel::StreamSet * rhs) {
+    P.captureBitstream("lhs", lhs);
+    P.captureBitstream("rhs", rhs);
     // return false
-    auto ptr = P->getInputScalar("output");
-    P->CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, lhs, lhs, ptr);
+    auto ptr = P.getInputScalar("output");
+    P.CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, lhs, lhs, ptr);
 }
 
 } // namespace testing

@@ -32,15 +32,14 @@ private:
 
 // Equivalent to S2P, but split into stages for better balancing
 // with multiple cores.
-void Staged_S2P(const std::unique_ptr<ProgramBuilder> & P,
+void Staged_S2P(PipelineBuilder & P,
                 StreamSet * codeUnitStream, StreamSet * BasisBits,
                 bool completionFromQuads = false);
 
 //
 // Selected S2P algorithm based on command-line parameters:
 // SplitTransposition, PabloTransposition
-void Selected_S2P(const std::unique_ptr<ProgramBuilder> & P,
-                StreamSet * codeUnitStream, StreamSet * BasisBits);
+void Selected_S2P(PipelineBuilder & P, StreamSet * codeUnitStream, StreamSet * BasisBits);
 
 class S2P_i21_3xi8 final : public MultiBlockKernel {
 public:

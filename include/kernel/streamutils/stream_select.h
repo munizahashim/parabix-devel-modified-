@@ -275,7 +275,7 @@ std::vector<llvm::Value *> loadInputSelectionsBlock(KernelBuilder & b, SelectedI
     `IStreamSelect` kernel. The size of the output stream set is automatically 
     calculated.
 
-    Examples in this section assume a `ProgramBuilder` pointer `P` exists and
+    Examples in this section assume a `PipelineBuilder` pointer `P` exists and
     the namespace alias`namespace su = kernel::streamutils;` is defined.
  */
 
@@ -300,7 +300,7 @@ std::vector<llvm::Value *> loadInputSelectionsBlock(KernelBuilder & b, SelectedI
  *          out:    { B }
  *
  */
-StreamSet * Select(const std::unique_ptr<ProgramBuilder> & P, StreamSet * from, uint32_t index);
+StreamSet * Select(PipelineBuilder & P, StreamSet * from, uint32_t index);
 
 /**
  * Selects multiple streams from a given stream set, packages them up into a new
@@ -327,7 +327,7 @@ StreamSet * Select(const std::unique_ptr<ProgramBuilder> & P, StreamSet * from, 
  *          in:     { A, B, C, D }
  *          out:    { C, A, D }
  */
-StreamSet * Select(const std::unique_ptr<ProgramBuilder> & P, StreamSet * from, std::vector<uint32_t> indices);
+StreamSet * Select(PipelineBuilder & P, StreamSet * from, std::vector<uint32_t> indices);
 
 /**
  * Selects multple streams from multiple different stream sets, packages them
@@ -364,7 +364,7 @@ StreamSet * Select(const std::unique_ptr<ProgramBuilder> & P, StreamSet * from, 
  *          in2:    { G, H, I }
  *          out:    { C, A, E, G, I }
  */
-StreamSet * Select(const std::unique_ptr<ProgramBuilder> & P, std::vector<std::pair<StreamSet *, std::vector<uint32_t>>> selections);
+StreamSet * Select(PipelineBuilder &P, std::vector<std::pair<StreamSet *, std::vector<uint32_t>>> selections);
 
 /**
  * Combines all streams from each stream set in `sets` into a new stream set.
@@ -391,7 +391,7 @@ StreamSet * Select(const std::unique_ptr<ProgramBuilder> & P, std::vector<std::p
  *          in1:    { C }
  *          out:    { C, A, B }
  */
-StreamSet * Select(const std::unique_ptr<ProgramBuilder> & P, std::vector<StreamSet *> sets);
+StreamSet * Select(PipelineBuilder & P, std::vector<StreamSet *> sets);
 
 /**
  * Merges the streams from the stream set `from`, indexed by values in
@@ -410,7 +410,7 @@ StreamSet * Select(const std::unique_ptr<ProgramBuilder> & P, std::vector<Stream
  *          in:     { A, B, C, D }
  *          out:    { (A | C) }
  */
-StreamSet * Merge(const std::unique_ptr<ProgramBuilder> & P, StreamSet * from, std::vector<uint32_t> indices);
+StreamSet * Merge(PipelineBuilder &P, StreamSet * from, std::vector<uint32_t> indices);
 
 /**
  * Merges specific streams from multiple different stream sets into a single
@@ -434,7 +434,7 @@ StreamSet * Merge(const std::unique_ptr<ProgramBuilder> & P, StreamSet * from, s
  *          in1:    { D, E, F }
  *          out:    { (A | C | E) }
  */
-StreamSet * Merge(const std::unique_ptr<ProgramBuilder> & P, std::vector<std::pair<StreamSet *, std::vector<uint32_t>>> selections);
+StreamSet * Merge(PipelineBuilder & P, std::vector<std::pair<StreamSet *, std::vector<uint32_t>>> selections);
 
 /**
  * Intersects the streams from the stream set `from`, indexed by values in
@@ -453,7 +453,7 @@ StreamSet * Merge(const std::unique_ptr<ProgramBuilder> & P, std::vector<std::pa
  *          in:     { A, B, C, D }
  *          out:    { (A & C) }
  */
-StreamSet * Intersect(const std::unique_ptr<ProgramBuilder> & P, StreamSet * from, std::vector<uint32_t> indices);
+StreamSet * Intersect(PipelineBuilder &P, StreamSet * from, std::vector<uint32_t> indices);
 
 /**
  * Intersects specific streams from multiple different stream sets into a single
@@ -477,7 +477,7 @@ StreamSet * Intersect(const std::unique_ptr<ProgramBuilder> & P, StreamSet * fro
  *          in1:    { D, E, F }
  *          out:    { (A & C & E) }
  */
-StreamSet * Intersect(const std::unique_ptr<ProgramBuilder> & P, std::vector<std::pair<StreamSet *, std::vector<uint32_t>>> selections);
+StreamSet * Intersect(PipelineBuilder & P, std::vector<std::pair<StreamSet *, std::vector<uint32_t>>> selections);
 
 } // namespace kernel::streamutils
 

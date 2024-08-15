@@ -12,7 +12,7 @@
 #include <re/unicode/resolve_properties.h>
 #include <re/cc/cc_kernel.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/core/streamset.h>
@@ -75,7 +75,7 @@ GCountFunctionType pipelineGen(CPUDriver & driver) {
     
     StreamSet * GCB = P->CreateStreamSet(1, 1);
     re::UTF8_Transformer U8xfrmer;
-    GraphemeClusterLogic(P, BasisBits, u8index, GCB);
+    GraphemeClusterLogic(*P.get(), BasisBits, u8index, GCB);
 
     P->CreateKernelCall<PopcountKernel>(GCB, P->getOutputScalar("countResult"));
 

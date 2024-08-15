@@ -19,7 +19,7 @@
 #include <kernel/io/stdout_kernel.h>
 #include <toolchain/toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <boost/filesystem.hpp>

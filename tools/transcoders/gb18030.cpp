@@ -12,7 +12,7 @@
 #include <re/cc/GB_18030_data.h>
 #include <kernel/unicode/utf8gen.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/basis/p2s_kernel.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/io/source_kernel.h>
@@ -563,7 +563,7 @@ gb18030FunctionType generatePipeline(CPUDriver & driver, unsigned encodingBits, 
 
     // Transposed bits from s2p
     StreamSet * BasisBits = P->CreateStreamSet(8);
-    Selected_S2P(P, ByteStream, BasisBits);
+    Selected_S2P(*P.get(), ByteStream, BasisBits);
 
     GB_18030_IndexingKind indexing = (encodingBits == 16) ? GB_18030_IndexingKind::UTF16 : GB_18030_IndexingKind::Codepoint;
 
@@ -613,11 +613,11 @@ gb18030FunctionType generatePipeline(CPUDriver & driver, unsigned encodingBits, 
     StreamSet * const byte2 = P->CreateStreamSet(8);
     StreamSet * const nybble2 = P->CreateStreamSet(4);
 
-    FilterByMask(P, GB_mask1, GB_prefix4, GB_4byte);
-    FilterByMask(P, GB_mask1, BasisBits, byte1);
-    FilterByMask(P, GB_mask2, BasisBits, nybble1);
-    FilterByMask(P, GB_mask3, BasisBits, byte2);
-    FilterByMask(P, GB_mask4, BasisBits, nybble2);
+    FilterByMask(*P.get(), GB_mask1, GB_prefix4, GB_4byte);
+    FilterByMask(*P.get(), GB_mask1, BasisBits, byte1);
+    FilterByMask(*P.get(), GB_mask2, BasisBits, nybble1);
+    FilterByMask(*P.get(), GB_mask3, BasisBits, byte2);
+    FilterByMask(*P.get(), GB_mask4, BasisBits, nybble2);
 
     StreamSet * const GB_2byte = P->CreateStreamSet(1); // markers for 2-byte sequences
     StreamSet * const gb15index = P->CreateStreamSet(15);
@@ -674,10 +674,10 @@ gb18030FunctionType generatePipeline(CPUDriver & driver, unsigned encodingBits, 
 
         P->CreateKernelCall<UTF8_DepositMasks>(u8final, u8initial, u8mask12_17, u8mask6_11);
 
-        SpreadByMask(P, u8initial, utfBasis, deposit18_20, /* inputOffset = */ 18);
-        SpreadByMask(P, u8mask12_17, utfBasis, deposit12_17, /* inputOffset = */ 12);
-        SpreadByMask(P, u8mask6_11, utfBasis, deposit6_11, /* inputOffset = */ 6);
-        SpreadByMask(P, u8final, utfBasis, deposit0_5, /* inputOffset = */ 0);
+        SpreadByMask(*P.get(), u8initial, utfBasis, deposit18_20, /* inputOffset = */ 18);
+        SpreadByMask(*P.get(), u8mask12_17, utfBasis, deposit12_17, /* inputOffset = */ 12);
+        SpreadByMask(*P.get(), u8mask6_11, utfBasis, deposit6_11, /* inputOffset = */ 6);
+        SpreadByMask(*P.get(), u8final, utfBasis, deposit0_5, /* inputOffset = */ 0);
 
         P->CreateKernelCall<UTF8assembly>(deposit18_20, deposit12_17, deposit6_11, deposit0_5,
                                         u8initial, u8final, u8mask6_11, u8mask12_17,

@@ -20,34 +20,34 @@ using namespace pablo;
 using namespace kernel;
 using namespace llvm;
 
-void U21_to_UTF8(ProgBuilderRef P, StreamSet * U21, StreamSet * U8) {
+void U21_to_UTF8(PipelineBuilder & P, StreamSet * U21, StreamSet * U8) {
 
     // Buffers for calculated deposit masks.
-    StreamSet * const u8fieldMask = P->CreateStreamSet();
-    StreamSet * const u8final = P->CreateStreamSet();
-    StreamSet * const u8initial = P->CreateStreamSet();
-    StreamSet * const u8mask12_17 = P->CreateStreamSet();
-    StreamSet * const u8mask6_11 = P->CreateStreamSet();
+    StreamSet * const u8fieldMask = P.CreateStreamSet();
+    StreamSet * const u8final = P.CreateStreamSet();
+    StreamSet * const u8initial = P.CreateStreamSet();
+    StreamSet * const u8mask12_17 = P.CreateStreamSet();
+    StreamSet * const u8mask6_11 = P.CreateStreamSet();
 
     // Intermediate buffers for deposited bits
-    StreamSet * const deposit18_20 = P->CreateStreamSet(3);
-    StreamSet * const deposit12_17 = P->CreateStreamSet(6);
-    StreamSet * const deposit6_11 = P->CreateStreamSet(6);
-    StreamSet * const deposit0_5 = P->CreateStreamSet(6);
+    StreamSet * const deposit18_20 = P.CreateStreamSet(3);
+    StreamSet * const deposit12_17 = P.CreateStreamSet(6);
+    StreamSet * const deposit6_11 = P.CreateStreamSet(6);
+    StreamSet * const deposit0_5 = P.CreateStreamSet(6);
 
     // Calculate the u8final deposit mask.
-    StreamSet * const extractionMask = P->CreateStreamSet();
-    P->CreateKernelCall<UTF8fieldDepositMask>(U21, u8fieldMask, extractionMask);
-    P->CreateKernelCall<StreamCompressKernel>(extractionMask, u8fieldMask, u8final);
+    StreamSet * const extractionMask = P.CreateStreamSet();
+    P.CreateKernelCall<UTF8fieldDepositMask>(U21, u8fieldMask, extractionMask);
+    P.CreateKernelCall<StreamCompressKernel>(extractionMask, u8fieldMask, u8final);
 
-    P->CreateKernelCall<UTF8_DepositMasks>(u8final, u8initial, u8mask12_17, u8mask6_11);
+    P.CreateKernelCall<UTF8_DepositMasks>(u8final, u8initial, u8mask12_17, u8mask6_11);
 
     SpreadByMask(P, u8initial, U21, deposit18_20, /* inputOffset = */ 18);
     SpreadByMask(P, u8mask12_17, U21, deposit12_17, /* inputOffset = */ 12);
     SpreadByMask(P, u8mask6_11, U21, deposit6_11, /* inputOffset = */ 6);
     SpreadByMask(P, u8final, U21, deposit0_5, /* inputOffset = */ 0);
 
-    P->CreateKernelCall<UTF8assembly>(deposit18_20, deposit12_17, deposit6_11, deposit0_5,
+    P.CreateKernelCall<UTF8assembly>(deposit18_20, deposit12_17, deposit6_11, deposit0_5,
                                       u8initial, u8final, u8mask6_11, u8mask12_17,
                                       U8);
 }

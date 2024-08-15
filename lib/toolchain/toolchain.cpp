@@ -146,7 +146,7 @@ static cl::opt<size_t, true> DynamicMultithreadingPeriodOption("dynamic-multithr
 
 
 bool EnableJumpGuidedSynchronizationVariables;
-static cl::opt<bool, true> EnableJumpGuidedSynchronizationVariablesOption("partition-guided-synchronization", cl::location(EnableJumpGuidedSynchronizationVariables), cl::init(true),
+static cl::opt<bool, true> EnableJumpGuidedSynchronizationVariablesOption("partition-guided-synchronization", cl::location(EnableJumpGuidedSynchronizationVariables), cl::init(false),
                                                    cl::desc("Enable partition jump guided synchronization variables."), cl::cat(CodeGenOptions));
 
 

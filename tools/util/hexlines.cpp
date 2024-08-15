@@ -82,7 +82,7 @@
 #include <re/adt/re_name.h>
 #include <re/adt/re_re.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/stream_select.h>
@@ -216,7 +216,7 @@ HexLinesFunctionType generatePipeline(CPUDriver & driver) {
     //  takes care of this using a mask of positions for insertion of one position.
     //  We insert one position for eacn nonLF character.    Given the
     //  nonLF stream "11111", the hexInsertMask is "1.1.1.1.1.1"
-    StreamSet * hexInsertMask = UnitInsertionSpreadMask(P, nonLF, InsertPosition::After);
+    StreamSet * hexInsertMask = UnitInsertionSpreadMask(*P.get(), nonLF, InsertPosition::After);
     SHOW_STREAM(hexInsertMask);
 
     // The parabix SpreadByMask function copies bits from an input stream
@@ -224,7 +224,7 @@ HexLinesFunctionType generatePipeline(CPUDriver & driver) {
     // argument (the spread mask).   Zeroes are inserted everywhere else.
     // This function performs STEP 1 in the comments above.
     StreamSet * spreadBasis = P->CreateStreamSet(8);
-    SpreadByMask(P, hexInsertMask, BasisBits, spreadBasis);
+    SpreadByMask(*P.get(), hexInsertMask, BasisBits, spreadBasis);
     SHOW_BIXNUM(spreadBasis);
 
     // Perform the logic of the Hexify kernel.

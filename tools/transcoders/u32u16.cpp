@@ -33,7 +33,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <pablo/builder.hpp>
 #include <fcntl.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 
 using namespace pablo;
 using namespace kernel;
@@ -85,16 +85,9 @@ u32u16FunctionType u32u16_gen (CPUDriver & driver, cc::ByteNumbering byteNumberi
     P->CreateKernelCall<StreamCompressKernel>(extractionMask, u16fieldMask, u16final);
     P->CreateKernelCall<UTF16_InitialMask>(u16final, u16initial);
 
-    SpreadByMask(P, u16initial, u16_SMP_basis, SMP4_0);
-    SpreadByMask(P, u16initial, u32basis, deposit15_10,  /* inputOffset = */ 10);
-    SpreadByMask(P, u16final, u32basis, deposit9_0);
-
-//    void SpreadByMask(PipelineBuilder & P,
-//                      StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
-//                      unsigned streamOffset = 0,
-//                      StreamExpandOptimization opt = StreamExpandOptimization::None,
-//                      unsigned expansionFieldWidth = 64,
-//                      ProcessingRateProbabilityDistribution itemsPerOutputUnit = GammaDistribution(5.0f, 0.1f));
+    SpreadByMask(*P.get(), u16initial, u16_SMP_basis, SMP4_0);
+    SpreadByMask(*P.get(), u16initial, u32basis, deposit15_10,  /* inputOffset = */ 10);
+    SpreadByMask(*P.get(), u16final, u32basis, deposit9_0);
 
     P->CreateKernelCall<UTF16assembly>(SMP4_0, deposit15_10, deposit9_0, u16final,
                                       u16basis);

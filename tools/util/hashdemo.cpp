@@ -50,7 +50,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <iomanip>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
@@ -264,7 +264,7 @@ HashDemoFunctionType hashdemo_gen (CPUDriver & driver) {
     SHOW_STREAM(Lgth6symEnds);
     
     StreamSet * const L6_Hashes = P->CreateStreamSet(hash_bits);
-    FilterByMask(P, Lgth6symEnds, BixHashes, L6_Hashes);
+    FilterByMask(*P.get(), Lgth6symEnds, BixHashes, L6_Hashes);
     SHOW_BIXNUM(L6_Hashes);
     
     StreamSet * const hashValues = P->CreateStreamSet(1, 8);
@@ -273,7 +273,7 @@ HashDemoFunctionType hashdemo_gen (CPUDriver & driver) {
     StreamSet * const scanIndices = P->CreateStreamSet(1, 64);
     P->CreateKernelCall<ScanIndexGenerator>(Lgth6symEnds, scanIndices);
     
-    scan::Reader(P, driver, SCAN_CALLBACK(callback), codeUnitStream, scanIndices, { hashValues });
+    scan::Reader(*P.get(), driver, SCAN_CALLBACK(callback), codeUnitStream, scanIndices, { hashValues });
     
     return reinterpret_cast<HashDemoFunctionType>(P->compile());
 }

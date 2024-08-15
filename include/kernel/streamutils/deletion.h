@@ -29,7 +29,7 @@ namespace kernel {
 
 */
     
-void FilterByMask(const std::unique_ptr<ProgramBuilder> & P,
+void FilterByMask(PipelineBuilder & P,
                   StreamSet * mask, StreamSet * inputs, StreamSet * outputs,
                   unsigned streamOffset = 0,
                   unsigned extractionFieldWidth = 64,

@@ -338,24 +338,6 @@ protected:
 };
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief ProgramBuilder
- ** ------------------------------------------------------------------------------------------------------------- */
-class ProgramBuilder final : public PipelineBuilder {
-    friend class ::BaseDriver;
-public:
-
-    void * compile();
-
-    Kernel * makeKernel() override;
-
-    ProgramBuilder(BaseDriver & driver, PipelineKernel * const kernel);
-
-private:
-
-    void * compileKernel(Kernel * const kernel);
-};
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief PipelineBranchBuilder
  ** ------------------------------------------------------------------------------------------------------------- */
 class OptimizationBranchBuilder final : public PipelineBuilder {

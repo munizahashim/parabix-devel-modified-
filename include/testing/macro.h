@@ -16,7 +16,7 @@
 template<typename... Ps>                                                                                        \
 struct test_case_##NAME {                                                                                       \
     using engine_t = testing::tc::test_engine<Ps...>;                                                           \
-    using pipeline_t = const std::unique_ptr<kernel::ProgramBuilder> &;                                         \
+    using pipeline_t = tc::ProgramBuilderRef;                                                                   \
     template<size_t Index>                                                                                      \
     using input_t = typename std::tuple_element<Index, typename engine_t::pipeline_input_pack_t>::type;         \
                                                                                                                 \

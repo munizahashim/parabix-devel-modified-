@@ -30,7 +30,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <mutex>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <util/aligned_allocator.h>
 #include <kernel/core/streamsetptr.h>
 #ifdef ENABLE_PAPI

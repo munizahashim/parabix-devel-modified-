@@ -11,7 +11,6 @@
 #include <re/unicode/resolve_properties.h>
 #include <unicode/utf/utf_compiler.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/core/streamset.h>
@@ -24,6 +23,7 @@
 #include <pablo/pe_zeroes.h>
 #include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
+#include <kernel/pipeline/program_builder.h>
 #include <toolchain/toolchain.h>
 #include <fileselect/file_select.h>
 #include <fcntl.h>
@@ -232,9 +232,11 @@ void WordCountKernel::generatePabloMethod() {
 
 typedef void (*WordCountFunctionType)(uint32_t fd, uint32_t fileIdx);
 
-WordCountFunctionType wcPipelineGen(CPUDriver & driver) {
+auto wcPipelineGen(CPUDriver & driver) {
 
     Type * const int32Ty = driver.getInt32Ty();
+
+//    auto P = driver.CreatePipeline(InputScalar{int32Ty, "fd"}, InputScalar{int32Ty, "fileIdx"});
 
     auto P = driver.makePipeline({Binding{int32Ty, "fd"}, Binding{int32Ty, "fileIdx"}});
 

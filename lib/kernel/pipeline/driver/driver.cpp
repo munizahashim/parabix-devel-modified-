@@ -1,7 +1,7 @@
 #include <kernel/pipeline/driver/driver.h>
 
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <llvm/IR/Module.h>
 #include <toolchain/toolchain.h>
 #include <objcache/object_cache.h>
@@ -210,9 +210,7 @@ BaseDriver::BaseDriver(std::string && moduleName)
     }
 }
 
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief destructor
- ** ------------------------------------------------------------------------------------------------------------- */
 BaseDriver::~BaseDriver() {
 
 }
+

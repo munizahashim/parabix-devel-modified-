@@ -26,9 +26,9 @@ CollapseStreamSet::CollapseStreamSet(LLVMTypeSystemInterface & ts, StreamSet * i
 
 namespace streamutils {
 
-StreamSet * Collapse(const std::unique_ptr<ProgramBuilder> & P, StreamSet * i) {
-    StreamSet * const result = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<CollapseStreamSet>(i, result);
+StreamSet * Collapse(PipelineBuilder & P, StreamSet * i) {
+    StreamSet * const result = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<CollapseStreamSet>(i, result);
     return result;
 }
 

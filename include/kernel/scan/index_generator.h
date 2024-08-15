@@ -67,18 +67,18 @@ namespace scan {
  *      // -- snip --
  *      extern "C" void callback_fn(const uint8_t * ptr) { ... }
  *      // -- snip --
- *      std::unique_ptr<ProgramBuilder> P = ...;
+ *      std::unique_ptr<PipelineBuilder> P = ...;
  *      CPUDriver & Driver = ...;
  *      StreamSet * Source = ...; // <i8>[1]
  *      StreamSet * Scan = ...; // <i1>[1]
  *      StreamSet * Indices = scan::ToIndices(P, Scan); 
  *      scan::Read(P, Driver, Source, Indices, SCAN_CALLBACK(callback_fn));
  */
-inline StreamSet * ToIndices(const std::unique_ptr<ProgramBuilder> & P, StreamSet * s) {
+inline StreamSet * ToIndices(PipelineBuilder & P, StreamSet * s) {
     assert(s->getFieldWidth() == 1);
     assert(s->getNumElements() == 1);
-    StreamSet * const out = P->CreateStreamSet(1, 64);
-    P->CreateKernelCall<ScanIndexGenerator>(s, out);
+    StreamSet * const out = P.CreateStreamSet(1, 64);
+    P.CreateKernelCall<ScanIndexGenerator>(s, out);
     return out;
 }
 

@@ -33,7 +33,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <pablo/builder.hpp>
 #include <fcntl.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #ifdef ENABLE_PAPI
 #include <util/papi_helper.hpp>
 #endif
@@ -67,7 +67,7 @@ u32u8FunctionType u32u8_gen (CPUDriver & driver) {
     StreamSet * const u8basis = P->CreateStreamSet(8);
     StreamSet * const u8bytes = P->CreateStreamSet(1, 8);
 
-    U21_to_UTF8(P, u32basis, u8basis);
+    U21_to_UTF8(*P.get(), u32basis, u8basis);
 
     P->CreateKernelCall<P2SKernel>(u8basis, u8bytes);
 

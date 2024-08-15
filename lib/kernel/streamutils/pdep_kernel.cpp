@@ -823,14 +823,14 @@ StreamSet * InsertionSpreadMask(PipelineBuilder & P,
     spread1_mask = UnitInsertionSpreadMask(P, bixNumInsertCount, pos, expansionRate);
     /* Spread out the counts so that there are two positions for each nonzero entry. */
     StreamSet * spread_counts = P.CreateStreamSet(steps);
-    SpreadByMask(P, spread1_mask, bixNumInsertCount, spread_counts, false, 0, itemsPerOutputUnit);
+    SpreadByMask(P, spread1_mask, bixNumInsertCount, spread_counts, false, 0); // , itemsPerOutputUnit);
     /* Divide the count at each original position equally into the
        two positions that were created by the unit spread process. */
     StreamSet * reduced_counts = P.CreateStreamSet(steps - 1);
     P.CreateKernelCall<SpreadMaskStep>(spread_counts, reduced_counts, pos);
     StreamSet * submask = InsertionSpreadMask(P, reduced_counts, pos, itemsPerOutputUnit, expansionRate);
     StreamSet * finalmask = P.CreateStreamSet(1);
-    SpreadByMask(P, submask, spread1_mask, finalmask, false, 0, itemsPerOutputUnit);
+    SpreadByMask(P, submask, spread1_mask, finalmask, false, 0); // , itemsPerOutputUnit);
     return finalmask;
 }
 }

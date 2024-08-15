@@ -35,7 +35,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <iomanip>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include "ztf-logic.h"
 
 using namespace pablo;
@@ -188,7 +188,7 @@ ztfRunsFunctionType ztfRuns_compression_gen (CPUDriver & driver) {
     P->CreateKernelCall<ZTF_CompressionMask>(byteRuns, runIndex, toExtract);
 
     StreamSet * const ztf_basis = P->CreateStreamSet(8);
-    FilterByMask(P, toExtract, replacedBasis, ztf_basis);
+    FilterByMask(*P.get(), toExtract, replacedBasis, ztf_basis);
     StreamSet * const ZTF_bytes = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(ztf_basis, ZTF_bytes);
     P->CreateKernelCall<StdOutKernel>(ZTF_bytes);
@@ -207,9 +207,9 @@ ztfRunsFunctionType ztfRuns_decompression_gen (CPUDriver & driver) {
     P->CreateKernelCall<S2PKernel>(source, ztfRunsBasis);
     StreamSet * const ztfRunLengths = P->CreateStreamSet(3);
     P->CreateKernelCall<ZTF_Run_Length_Decoder>(ztfRunsBasis, ztfRunLengths);
-    StreamSet * const ztfRunSpreadMask = InsertionSpreadMask(P, ztfRunLengths);
+    StreamSet * const ztfRunSpreadMask = InsertionSpreadMask(*P.get(), ztfRunLengths);
     StreamSet * const ztfRuns_u8_Basis = P->CreateStreamSet(8);
-    SpreadByMask(P, ztfRunSpreadMask, ztfRunsBasis, ztfRuns_u8_Basis);
+    SpreadByMask(*P.get(), ztfRunSpreadMask, ztfRunsBasis, ztfRuns_u8_Basis);
     StreamSet * const ztfRunCodes = P->CreateStreamSet(1);
     re::CC * const runCodeCC = re::makeByte(0xF9, 0xFF);
     P->CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{runCodeCC}, ztfRuns_u8_Basis, ztfRunCodes);

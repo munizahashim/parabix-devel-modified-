@@ -53,15 +53,15 @@ namespace streamutils {
  *  Multiplex:
  *      codes:      0x3, 0xC, 0x9, 0x4
  */
-inline StreamSet * Multiplex(std::unique_ptr<ProgramBuilder> & P, StreamSet * basis) {
+inline StreamSet * Multiplex(PipelineBuilder & P, StreamSet * basis) {
     assert(basis->getFieldWidth() == 1);
     assert(basis->getNumElements() <= 8);
 
     StreamSet * mask = Collapse(P, basis);
-    StreamSet * filtered = P->CreateStreamSet(basis->getNumElements(), 1);
+    StreamSet * filtered = P.CreateStreamSet(basis->getNumElements(), 1);
     FilterByMask(P, mask, basis, filtered);
-    StreamSet * codes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(filtered, codes);
+    StreamSet * codes = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(filtered, codes);
     return codes;
 }
 
@@ -91,16 +91,16 @@ inline StreamSet * Multiplex(std::unique_ptr<ProgramBuilder> & P, StreamSet * ba
  *  Multiplex:
  *      codes:      0x3, 0xC, 0x0, 0x9, 0x4
  */
-inline StreamSet * MultiplexWithMask(std::unique_ptr<ProgramBuilder> & P, StreamSet * basis, StreamSet * mask) {
+inline StreamSet * MultiplexWithMask(PipelineBuilder & P, StreamSet * basis, StreamSet * mask) {
     assert(basis->getFieldWidth() == 1);
     assert(basis->getNumElements() <= 8);
     assert(mask->getFieldWidth() == 1);
     assert(mask->getNumElements() == 1);
 
-    StreamSet * filtered = P->CreateStreamSet(basis->getNumElements(), 1);
+    StreamSet * filtered = P.CreateStreamSet(basis->getNumElements(), 1);
     FilterByMask(P, mask, basis, filtered);
-    StreamSet * codes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(filtered, codes);
+    StreamSet * codes = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(filtered, codes);
     return codes;
 }
 

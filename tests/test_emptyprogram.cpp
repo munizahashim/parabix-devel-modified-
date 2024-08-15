@@ -8,7 +8,7 @@
 #include <kernel/core/kernel_builder.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/io/source_kernel.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/raw_ostream.h>

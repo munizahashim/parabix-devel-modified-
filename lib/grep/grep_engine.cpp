@@ -23,7 +23,7 @@
 #include <kernel/core/idisa_target.h>
 #include <kernel/core/streamset.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/core/callback.h>
 #include <kernel/unicode/charclasses.h>
@@ -473,7 +473,7 @@ void GrepEngine::initRE(re::RE * re) {
     }
 }
 
-StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
+StreamSet * GrepEngine::getBasis(const std::unique_ptr<PipelineBuilder> & P, StreamSet * ByteStream) {
     StreamSet * Source = ByteStream;
     if (codegen::EnableIllustrator) {
         P->captureByteData("Source", ByteStream);
@@ -481,7 +481,7 @@ StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
     auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
     if (hasComponent(mExternalComponents, Component::S2P)) {
         StreamSet * BasisBits = P->CreateStreamSet(ENCODING_BITS, 1);
-        Selected_S2P(P, ByteStream, BasisBits);
+        Selected_S2P(*P.get(), ByteStream, BasisBits);
         Source = BasisBits;
         mExternalTable.declareExternal(u8, "basis", new PreDefined(BasisBits));
     } else {
@@ -490,7 +490,7 @@ StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
     return Source;
 }
 
-void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
+void GrepEngine::grepPrologue(const std::unique_ptr<PipelineBuilder> &P, StreamSet * SourceStream) {
     mLineBreakStream = nullptr;
     mU8index = nullptr;
 
@@ -514,7 +514,7 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
         if (mGrepRecordBreak == GrepRecordBreakKind::LF) {
             Kernel * k = P->CreateKernelCall<UnixLinesKernelBuilder>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1, mNullMode, callbackObject);
             if (mNullMode == NullCharMode::Abort) {
-                k->link("signal_dispatcher", kernel::signal_dispatcher);
+                k->link("signal_dispatcher", signal_dispatcher);
             }
         } else { // if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
             P->CreateKernelCall<NullDelimiterKernel>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1);
@@ -543,11 +543,11 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
     }
 }
 
-void GrepEngine::prepareExternalStreams(ProgBuilderRef P, StreamSet * SourceStream) {
+void GrepEngine::prepareExternalStreams(const std::unique_ptr<PipelineBuilder> & P, StreamSet * SourceStream) {
     mExternalTable.resolveExternals(P);
 }
 
-void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * indexAlphabet, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
+void GrepEngine::addExternalStreams(PipelineBuilder & P, const cc::Alphabet * indexAlphabet, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
     auto indexing = mExternalTable.getStreamIndex(indexAlphabet->getCode());
     re::Alphabet_Set alphas;
     re::collectAlphabets(regexp, alphas);
@@ -576,8 +576,8 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * index
         if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
             std::string basisName = a->getName() + "_basis";
             StreamSet * alphabetBasis = mExternalTable.getStreamSet(P, indexing, basisName);
-            if (codegen::EnableIllustrator) {
-                P->captureBixNum(basisName, alphabetBasis);
+            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+                P.captureBixNum(basisName, alphabetBasis);
             }
             options->addAlphabet(mpx, alphabetBasis);
         } else {
@@ -587,12 +587,12 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * index
     }
 }
 
-StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * MatchResults) {
+StreamSet * GrepEngine::getMatchSpan(const std::unique_ptr<PipelineBuilder> & P, re::RE * r, StreamSet * MatchResults) {
     auto indexing = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
     if (mSpanNames.empty() == false) {
         std::vector<StreamSet *> allSpans;
         for (unsigned i = 0; i < mSpanNames.size(); i++) {
-            allSpans.push_back(mExternalTable.getStreamSet(P, indexing, mSpanNames[i]));
+            allSpans.push_back(mExternalTable.getStreamSet(*P.get(), indexing, mSpanNames[i]));
         }
         if (allSpans.size() == 1) return allSpans[0];
         StreamSet * mergedSpans = P->CreateStreamSet(1, 1);
@@ -623,7 +623,7 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
     }
 }
 
-unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabet, re::RE * re, StreamSet * Results) {
+unsigned GrepEngine::RunGrep(kernel::PipelineBuilder & P, const cc::Alphabet * indexAlphabet, re::RE * re, StreamSet * Results) {
     auto options = std::make_unique<GrepKernelOptions>(indexAlphabet);
     StreamSet * indexStream = nullptr;
     if (indexAlphabet == &cc::UTF8) {
@@ -637,25 +637,25 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabe
     options->setBarrier(mExternalTable.getStreamSet(P, indexing, "$"));
     addExternalStreams(P, indexAlphabet, options, re, indexStream);
     options->setResults(Results);
-    Kernel * k = P->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
-    if (codegen::EnableIllustrator) {
-        P->captureBitstream("RunGrep", Results);
+    Kernel * k = P.CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        P.captureBitstream("RunGrep", Results);
     }
     return reinterpret_cast<ICGrepKernel *>(k)->getOffset();
 }
 
-StreamSet * GrepEngine::initialMatches(ProgBuilderRef P, StreamSet * InputStream) {
+StreamSet * GrepEngine::initialMatches(const std::unique_ptr<PipelineBuilder> & P, StreamSet * InputStream) {
     mExternalTable.resetExternals();
     StreamSet * SourceStream = getBasis(P, InputStream);
     grepPrologue(P, SourceStream);
     prepareExternalStreams(P, SourceStream);
     StreamSet * Matches = P->CreateStreamSet();
-    RunGrep(P, mIndexAlphabet, mRE, Matches);
+    RunGrep(*P.get(), mIndexAlphabet, mRE, Matches);
     if (mIndexAlphabet == &cc::Unicode) {
         StreamSet * u8index1 = P->CreateStreamSet(1, 1);
         P->CreateKernelCall<AddSentinel>(mU8index, u8index1);
         StreamSet * Results = P->CreateStreamSet(1, 1);
-        SpreadByMask(P, u8index1, Matches, Results);
+        SpreadByMask(*P.get(), u8index1, Matches, Results);
         Matches = Results;
     }
     if (codegen::EnableIllustrator) {
@@ -664,7 +664,7 @@ StreamSet * GrepEngine::initialMatches(ProgBuilderRef P, StreamSet * InputStream
     return Matches;
 }
 
-StreamSet * GrepEngine::matchedLines(ProgBuilderRef P, StreamSet * initialMatches) {
+StreamSet * GrepEngine::matchedLines(const std::unique_ptr<PipelineBuilder> & P, StreamSet * initialMatches) {
     StreamSet * MatchedLineEnds = nullptr;
     if (hasComponent(mExternalComponents, Component::MoveMatchesToEOL)) {
         StreamSet * const MovedMatches = P->CreateStreamSet();
@@ -699,7 +699,7 @@ StreamSet * GrepEngine::matchedLines(ProgBuilderRef P, StreamSet * initialMatche
         }
         MatchedLineEnds = MaxCountLines;
         StreamSet * TruncatedLines =
-            streamutils::Merge(P, {{MaxCountLines, {0}}, {mLineBreakStream, {0}}});
+            streamutils::Merge(*P.get(), {{MaxCountLines, {0}}, {mLineBreakStream, {0}}});
         if (codegen::EnableIllustrator) {
             P->captureBitstream("TruncatedLines", TruncatedLines);
         }
@@ -711,7 +711,7 @@ StreamSet * GrepEngine::matchedLines(ProgBuilderRef P, StreamSet * initialMatche
     return MatchedLineEnds;
 }
 
-StreamSet * GrepEngine::grepPipeline(ProgBuilderRef P, StreamSet * InputStream) {
+StreamSet * GrepEngine::grepPipeline(const std::unique_ptr<PipelineBuilder> & P, StreamSet * InputStream) {
     StreamSet * Matches = initialMatches(P, InputStream);
     return matchedLines(P, Matches);
 }
@@ -737,7 +737,12 @@ void GrepEngine::grepCodeGen() {
     Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
     StreamSet * const ByteStream = P->CreateStreamSet(1, ENCODING_BITS);
     P->CreateKernelCall<FDSourceKernel>(useMMap, fileDescriptor, ByteStream);
-    StreamSet * const Matches = grepPipeline(P, ByteStream);
+
+    // FIXME: ugly workaround for passing unique_ptr referring to an upcast type
+    std::unique_ptr<PipelineBuilder> E(P.get());
+    StreamSet * const Matches = grepPipeline(E, ByteStream);
+    E.release();
+
     P->CreateKernelCall<PopcountKernel>(Matches, P->getOutputScalar("countResult"));
 
     mMainMethod = P->compile();
@@ -892,7 +897,7 @@ protected:
 
         StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
         E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
-        StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
+        StreamSet * const SpreadMask = InsertionSpreadMask(*E.get(), InsertBixNum, InsertPosition::Before);
 
         StreamSet * const Basis = getInputStreamSet(2);
         StreamSet * ColorEscapeBasis = E->CreateRepeatingBixNum(8, colorEscapeBytes);
@@ -920,7 +925,7 @@ protected:
 
 };
 
-void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
+void GrepEngine::applyColorization(const std::unique_ptr<PipelineBuilder> & E,
                                    StreamSet * SourceCoords,
                                    StreamSet * MatchSpans,
                                    StreamSet * Basis) {
@@ -944,7 +949,7 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
 
         StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
         E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, SpanMarks, InsertBixNum);
-        StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
+        StreamSet * const SpreadMask = InsertionSpreadMask(*E.get(), InsertBixNum, InsertPosition::Before);
         if (codegen::EnableIllustrator) {
             E->captureBitstream("SpreadMask", SpreadMask);
         }
@@ -959,11 +964,11 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
         }
 
         StreamSet * ExpandedBasis = E->CreateStreamSet(8);
-        SpreadByMask(E, SpreadMask, Basis, ExpandedBasis);
+        SpreadByMask(*E.get(), SpreadMask, Basis, ExpandedBasis);
 
         // Map the match start/end marks to their positions in the expanded basis.
         StreamSet * ExpandedMarks = E->CreateStreamSet(2);
-        SpreadByMask(E, SpreadMask, SpanMarks, ExpandedMarks);
+        SpreadByMask(*E.get(), SpreadMask, SpanMarks, ExpandedMarks);
         if (codegen::EnableIllustrator) {
             E->captureBixNum("ExpandedMarks", ExpandedMarks);
         }
@@ -995,7 +1000,7 @@ void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
 
 }
 
-void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
+void EmitMatchesEngine::grepPipeline(const std::unique_ptr<PipelineBuilder> & E, StreamSet * ByteStream) {
     StreamSet * Matches = initialMatches(E, ByteStream);
     StreamSet * MatchedLineEnds = matchedLines(E, Matches);
 
@@ -1004,7 +1009,7 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
     StreamSet * MatchesByLine = nullptr;
     if (needsColoring | hasContext) {
         MatchesByLine = E->CreateStreamSet(1, 1);
-        FilterByMask(E, mLineBreakStream, MatchedLineEnds, MatchesByLine);
+        FilterByMask(*E.get(), mLineBreakStream, MatchedLineEnds, MatchesByLine);
         if (codegen::EnableIllustrator) {
             E->captureBitstream("MatchesByLine", MatchesByLine);
         }
@@ -1013,7 +1018,7 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
         StreamSet * ContextByLine = E->CreateStreamSet(1, 1);
         E->CreateKernelCall<ContextSpan>(MatchesByLine, ContextByLine, mBeforeContext, mAfterContext);
         StreamSet * SelectedLines = E->CreateStreamSet(1, 1);
-        SpreadByMask(E, mLineBreakStream, ContextByLine, SelectedLines);
+        SpreadByMask(*E.get(), mLineBreakStream, ContextByLine, SelectedLines);
         MatchedLineEnds = SelectedLines;
         MatchesByLine = ContextByLine;
     }
@@ -1029,7 +1034,7 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
         StreamSet * MatchedLineStarts = E->CreateStreamSet(1, 1);
         StreamSet * lineStarts = E->CreateStreamSet(1, 1);
         E->CreateKernelCall<LineStartsKernel>(mLineBreakStream, lineStarts);
-        SpreadByMask(E, lineStarts, MatchesByLine, MatchedLineStarts);
+        SpreadByMask(*E.get(), lineStarts, MatchesByLine, MatchedLineStarts);
         if (codegen::EnableIllustrator) {
             E->captureBitstream("MatchedLineStarts", MatchedLineStarts);
         }
@@ -1038,7 +1043,7 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
 
         StreamSet * Filtered = E->CreateStreamSet(1, 8);
         if (UseByteFilterByMask) {
-            FilterByMask(E, MatchedLineSpans, ByteStream, Filtered, 0, 64, true);
+            FilterByMask(*E.get(), MatchedLineSpans, ByteStream, Filtered, 0, 64, true);
         } else {
             E->CreateKernelCall<MatchFilterKernel>(MatchedLineStarts, mLineBreakStream, ByteStream, Filtered);
         }
@@ -1055,7 +1060,7 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
             StreamSet * u8index1 = E->CreateStreamSet(1, 1);
             E->CreateKernelCall<AddSentinel>(mU8index, u8index1);
             StreamSet * ExpandedSpans = E->CreateStreamSet(1, 1);
-            SpreadByMask(E, u8index1, MatchSpans, ExpandedSpans);
+            SpreadByMask(*E.get(), u8index1, MatchSpans, ExpandedSpans);
             if (codegen::EnableIllustrator) {
                 E->captureBitstream("ExpandedSpans", ExpandedSpans);
             }
@@ -1068,13 +1073,13 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
         }
 
         StreamSet * FilteredMatchSpans = E->CreateStreamSet(1, 1);
-        FilterByMask(E, MatchedLineSpans, MatchSpans, FilteredMatchSpans);
+        FilterByMask(*E.get(), MatchedLineSpans, MatchSpans, FilteredMatchSpans);
         if (codegen::EnableIllustrator) {
             E->captureBitstream("FilteredMatchSpans", FilteredMatchSpans);
         }
         StreamSet * FilteredBasis = E->CreateStreamSet(8, 1);
         if (codegen::SplitTransposition) {
-            Staged_S2P(E, Filtered, FilteredBasis);
+            Staged_S2P(*E.get(), Filtered, FilteredBasis);
         } else {
             E->CreateKernelCall<S2PKernel>(Filtered, FilteredBasis);
         }
@@ -1103,7 +1108,7 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
 
 
 void EmitMatchesEngine::grepCodeGen() {
-    auto E2 = mGrepDriver.makePipeline(
+    auto P = mGrepDriver.makePipeline(
                     // inputs
                     {Binding{mGrepDriver.getInt8PtrTy(), "buffer"},
                     Binding{mGrepDriver.getSizeTy(), "length"},
@@ -1112,13 +1117,17 @@ void EmitMatchesEngine::grepCodeGen() {
                     ,// output
                     {Binding{mGrepDriver.getInt64Ty(), "countResult"}});
 
-    Scalar * const buffer = E2->getInputScalar("buffer");
-    Scalar * const length = E2->getInputScalar("length");
-    StreamSet * const InternalBytes = E2->CreateStreamSet(1, 8);
-    E2->CreateKernelCall<MemorySourceKernel>(buffer, length, InternalBytes);
-    grepPipeline(E2, InternalBytes);
-    E2->setOutputScalar("countResult", E2->CreateConstant(mGrepDriver.getInt64(0)));
-    mBatchMethod = E2->compile();
+    Scalar * const buffer = P->getInputScalar("buffer");
+    Scalar * const length = P->getInputScalar("length");
+    StreamSet * const InternalBytes = P->CreateStreamSet(1, 8);
+
+    P->CreateKernelCall<MemorySourceKernel>(buffer, length, InternalBytes);
+    // FIXME: ugly workaround for passing unique_ptr referring to an upcast type
+    std::unique_ptr<PipelineBuilder> E(P.get());
+    grepPipeline(E, InternalBytes);
+    E.release();
+    P->setOutputScalar("countResult", P->CreateConstant(mGrepDriver.getInt64(0)));
+    mBatchMethod = P->compile();
 }
 
 bool canMMap(const std::string & fileName) {

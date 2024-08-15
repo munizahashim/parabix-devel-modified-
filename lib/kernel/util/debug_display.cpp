@@ -5,6 +5,7 @@
 
 #include <toolchain/toolchain.h>
 #include <kernel/streamutils/stream_select.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/util/debug_display.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/basis/s2p_kernel.h>
@@ -208,7 +209,7 @@ void ParabixIllustrator::captureBixNum(ProgramBuilderRef P, std::string streamLa
             auto low = (i - 1) * 4;
             auto hi = bixBits;
             std::string lbl = streamLabel + "[" + std::to_string(low) + "-" + std::to_string(hi - 1) + "]";
-            StreamSet * hexBasis = streamutils::Select(P, bixnum, streamutils::Range(low, hi));
+            StreamSet * hexBasis = streamutils::Select(*P.get(), bixnum, streamutils::Range(low, hi));
             captureBixNum(P, lbl, hexBasis, hexBase);
             bixBits = low;
         }

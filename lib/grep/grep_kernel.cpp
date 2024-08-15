@@ -130,7 +130,7 @@ bool ExternalStreamTable::hasReferenceTo(StreamIndexCode c, std::string ssname) 
     return false;
 }
 
-StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, StreamIndexCode c, std::string ssname) {
+StreamSet * ExternalStreamTable::getStreamSet(PipelineBuilder & b, StreamIndexCode c, std::string ssname) {
     const auto & ext = lookup(c, ssname);
     if (!ext->isResolved()) {
         auto paramNames = ext->getParameters();
@@ -168,16 +168,16 @@ StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, StreamIndexCode 
             mExternalMap[base].emplace(ssname, ext);
             StreamSet * baseSet = getStreamSet(b, base, ssname);
             StreamSet * mask = getStreamSet(b, base, mStreamIndices[c].indexStreamName);
-            StreamSet * filtered = b->CreateStreamSet(baseSet->getNumElements());
+            StreamSet * filtered = b.CreateStreamSet(baseSet->getNumElements());
             FilterByMask(b, mask, baseSet, filtered);
             ext->installStreamSet(filtered);
         }
         StreamSet * s = ext->getStreamSet();
         if (codegen::EnableIllustrator) {
             if (s->getNumElements() == 1) {
-                b->captureBitstream(mStreamIndices[c].name + "_" + ssname, s);
+                b.captureBitstream(mStreamIndices[c].name + "_" + ssname, s);
             } else {
-                b->captureBixNum(mStreamIndices[c].name + "_" + ssname, s);
+                b.captureBixNum(mStreamIndices[c].name + "_" + ssname, s);
             }
         }
     }
@@ -192,11 +192,11 @@ void ExternalStreamTable::resetExternals() {
     }
 }
 
-void ExternalStreamTable::resolveExternals(ProgBuilderRef b) {
+void ExternalStreamTable::resolveExternals(const std::unique_ptr<PipelineBuilder> & b) {
     for (unsigned i = 0; i < mExternalMap.size(); i++) {
         for (auto & entry : mExternalMap[i]) {
             if (!entry.second->isResolved()) {
-                getStreamSet(b, i, entry.first);
+                getStreamSet(*b.get(), i, entry.first);
             }
         }
     }
@@ -219,27 +219,27 @@ const std::vector<std::string> LineStartsExternal::getParameters() {
     return mParms;
 }
 
-void LineStartsExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+void LineStartsExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
     StreamSet * linebreaks = inputs[0];
-    StreamSet * linestarts  = b->CreateStreamSet(1);
+    StreamSet * linestarts  = b.CreateStreamSet(1);
     if (mParms.size() == 1) {
-        b->CreateKernelCall<LineStartsKernel>(linebreaks, linestarts);
+        b.CreateKernelCall<LineStartsKernel>(linebreaks, linestarts);
     } else {
         StreamSet * index = inputs[1];
-        b->CreateKernelCall<LineStartsKernel>(linebreaks, linestarts, index);
+        b.CreateKernelCall<LineStartsKernel>(linebreaks, linestarts, index);
     }
     installStreamSet(linestarts);
 }
 
-void U21_External::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSet *> inputs) {
-    StreamSet * U21 = P->CreateStreamSet(21, 1);
-    P->CreateKernelCall<UTF8_Decoder>(inputs[0], U21);
+void U21_External::resolveStreamSet(PipelineBuilder & P, std::vector<StreamSet *> inputs) {
+    StreamSet * U21 = P.CreateStreamSet(21, 1);
+    P.CreateKernelCall<UTF8_Decoder>(inputs[0], U21);
     installStreamSet(U21);
 }
 
-void PropertyExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    StreamSet * pStrm  = b->CreateStreamSet(1);
-    b->CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(mName, inputs[0], pStrm);
+void PropertyExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
+    StreamSet * pStrm  = b.CreateStreamSet(1);
+    b.CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(mName, inputs[0], pStrm);
     installStreamSet(pStrm);
 }
 
@@ -248,23 +248,23 @@ const std::vector<std::string> PropertyBoundaryExternal::getParameters() {
     return std::vector<std::string>{basis_name, "u8index"};
 }
 
-void PropertyBoundaryExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+void PropertyBoundaryExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
     StreamSet * basis = inputs[0];
     StreamSet * index = inputs[1];
-    StreamSet * bStrm  = b->CreateStreamSet(1);
-    b->CreateKernelCall<BoundaryKernel>(basis, index, bStrm);
+    StreamSet * bStrm  = b.CreateStreamSet(1);
+    b.CreateKernelCall<BoundaryKernel>(basis, index, bStrm);
     installStreamSet(bStrm);
 }
 
-void CC_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    StreamSet * ccStrm = b->CreateStreamSet(1);
+void CC_External::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
+    StreamSet * ccStrm = b.CreateStreamSet(1);
     std::vector<re::CC *> ccs = {mCharClass};
-    b->CreateKernelFamilyCall<CharClassesKernel>(ccs, inputs[0], ccStrm);
+    b.CreateKernelFamilyCall<CharClassesKernel>(ccs, inputs[0], ccStrm);
     installStreamSet(ccStrm);
 }
 
-void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    StreamSet * reStrm  = b->CreateStreamSet(1);
+void RE_External::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
+    StreamSet * reStrm  = b.CreateStreamSet(1);
     #ifndef NDEBUG
     const auto offset =
     #endif
@@ -273,14 +273,14 @@ void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> in
     installStreamSet(reStrm);
 }
 
-void PropertyDistanceExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+void PropertyDistanceExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
     StreamSet * propertyBasis = inputs[0];
-    StreamSet * distStrm = b->CreateStreamSet(1);
+    StreamSet * distStrm = b.CreateStreamSet(1);
     UCD::PropertyObject * propObj = UCD::getPropertyObject(mProperty);
     if (isa<UCD::CodePointPropertyObject>(propObj)) {
-        b->CreateKernelCall<CodePointMatchKernel>(mProperty, mDistance, propertyBasis, distStrm);
+        b.CreateKernelCall<CodePointMatchKernel>(mProperty, mDistance, propertyBasis, distStrm);
     } else {
-        b->CreateKernelCall<FixedDistanceMatchesKernel>(mDistance, propertyBasis, distStrm);
+        b.CreateKernelCall<FixedDistanceMatchesKernel>(mDistance, propertyBasis, distStrm);
     }
     installStreamSet(distStrm);
 }
@@ -293,26 +293,26 @@ const std::vector<std::string> PropertyDistanceExternal::getParameters() {
     return {"basis"};
 }
 
-void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+void PropertyBasisExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
     UCD::PropertyObject * propObj = UCD::getPropertyObject(mProperty);
     if (auto * obj = dyn_cast<UCD::EnumeratedPropertyObject>(propObj)) {
         std::vector<UCD::UnicodeSet> & bases = obj->GetEnumerationBasisSets();
         UTF::CC_List ccs;
         for (auto & b : bases) ccs.push_back(makeCC(b, &cc::Unicode));
-        StreamSet * basis = b->CreateStreamSet(ccs.size());
-        b->CreateKernelFamilyCall<CharClassesKernel>(ccs, inputs[0], basis);
+        StreamSet * basis = b.CreateStreamSet(ccs.size());
+        b.CreateKernelFamilyCall<CharClassesKernel>(ccs, inputs[0], basis);
         installStreamSet(basis);
     } else {
-        StreamSet * u21 = b->CreateStreamSet(21);
-        b->CreateKernelCall<UTF8_Decoder>(inputs[0], u21);
+        StreamSet * u21 = b.CreateStreamSet(21);
+        b.CreateKernelCall<UTF8_Decoder>(inputs[0], u21);
         installStreamSet(u21);
     }
 }
 
-void MultiplexedExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+void MultiplexedExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
     auto mpx_basis = mAlphabet->getMultiplexedCCs();
-    StreamSet * const u8CharClasses = b->CreateStreamSet(mpx_basis.size());
-    b->CreateKernelFamilyCall<CharClassesKernel>(mpx_basis, inputs[0], u8CharClasses);
+    StreamSet * const u8CharClasses = b.CreateStreamSet(mpx_basis.size());
+    b.CreateKernelFamilyCall<CharClassesKernel>(mpx_basis, inputs[0], u8CharClasses);
     installStreamSet(u8CharClasses);
 }
 
@@ -320,8 +320,8 @@ const std::vector<std::string> GraphemeClusterBreak::getParameters() {
     return std::vector<std::string>{"UCD:" + getPropertyFullName(UCD::GCB) + "_basis", "Extended_Pictographic"};
 }
 
-void GraphemeClusterBreak::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    StreamSet * GCBstream = b->CreateStreamSet(1);
+void GraphemeClusterBreak::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
+    StreamSet * GCBstream = b.CreateStreamSet(1);
     re::RE * GCB_RE = re::generateGraphemeClusterBoundaryRule();
     GCB_RE = UCD::enumeratedPropertiesToCCs(std::set<UCD::property_t>{UCD::GCB}, GCB_RE);
     GCB_RE = UCD::externalizeProperties(GCB_RE);
@@ -335,16 +335,16 @@ const std::vector<std::string> WordBoundaryExternal::getParameters() {
     return std::vector<std::string>{"basis", "u8index"};
 }
 
-void WordBoundaryExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    StreamSet * wb = b->CreateStreamSet(1);
+void WordBoundaryExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
+    StreamSet * wb = b.CreateStreamSet(1);
     WordBoundaryLogic(b, inputs[0], inputs[1], wb);
     installStreamSet(wb);
 }
 
-void FilterByMaskExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+void FilterByMaskExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
     StreamSet * mask = inputs[0];
     StreamSet * toFilter = inputs[1];
-    StreamSet * filtered = b->CreateStreamSet(toFilter->getNumElements());
+    StreamSet * filtered = b.CreateStreamSet(toFilter->getNumElements());
     FilterByMask(b, mask, toFilter, filtered);
     installStreamSet(filtered);
 }
@@ -353,10 +353,10 @@ const std::vector<std::string> FixedSpanExternal::getParameters() {
     return std::vector<std::string>{mMatchMarks};
 }
 
-void FixedSpanExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+void FixedSpanExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
     StreamSet * matchMarks = inputs[0];
-    StreamSet * spans = b->CreateStreamSet(1, 1);
-    b->CreateKernelFamilyCall<FixedMatchSpansKernel>(mLengthRange.first, mOffset, matchMarks, spans);
+    StreamSet * spans = b.CreateStreamSet(1, 1);
+    b.CreateKernelFamilyCall<FixedMatchSpansKernel>(mLengthRange.first, mOffset, matchMarks, spans);
     installStreamSet(spans);
 }
 
@@ -364,19 +364,19 @@ const std::vector<std::string> MarkedSpanExternal::getParameters() {
     return std::vector<std::string>{mPrefixMarks, mMatchMarks};
 }
 
-void MarkedSpanExternal::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSet *> inputs) {
+void MarkedSpanExternal::resolveStreamSet(PipelineBuilder & P, std::vector<StreamSet *> inputs) {
     //StreamSet * prefixMarks = inputs[0];
     StreamSet * suffixMarks = inputs[1];
-    StreamSet * mask = P->CreateStreamSet(1);
-    P->CreateKernelCall<StreamsMerge>(inputs, mask);
-    StreamSet * filteredSuffix = P->CreateStreamSet(1);
+    StreamSet * mask = P.CreateStreamSet(1);
+    P.CreateKernelCall<StreamsMerge>(inputs, mask);
+    StreamSet * filteredSuffix = P.CreateStreamSet(1);
     FilterByMask(P, mask, suffixMarks, filteredSuffix);
-    StreamSet * filteredSpanMarks = P->CreateStreamSet(2);
-    P->CreateKernelCall<LongestMatchMarks>(filteredSuffix, filteredSpanMarks);
-    StreamSet * spanMarks = P->CreateStreamSet(2);
+    StreamSet * filteredSpanMarks = P.CreateStreamSet(2);
+    P.CreateKernelCall<LongestMatchMarks>(filteredSuffix, filteredSpanMarks);
+    StreamSet * spanMarks = P.CreateStreamSet(2);
     SpreadByMask(P, mask, filteredSpanMarks, spanMarks);
-    StreamSet * spans = P->CreateStreamSet(1);
-    P->CreateKernelCall<InclusiveSpans>(mPrefixLength - 1, mOffset, spanMarks, spans);
+    StreamSet * spans = P.CreateStreamSet(1);
+    P.CreateKernelCall<InclusiveSpans>(mPrefixLength - 1, mOffset, spanMarks, spans);
     installStreamSet(spans);
 }
 
@@ -385,14 +385,14 @@ const std::vector<std::string> CCmask::getParameters() {
     return std::vector<std::string>{"basis"};
 }
 
-void CCmask::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSet *> inputs) {
+void CCmask::resolveStreamSet(PipelineBuilder & P, std::vector<StreamSet *> inputs) {
     StreamSet * basis = inputs[0];
-    StreamSet * mask = P->CreateStreamSet(1);
+    StreamSet * mask = P.CreateStreamSet(1);
     StreamSet * index = nullptr;
     if (mIndexAlphabet != &cc::Unicode) {
         //index = inputs[1];
     }
-    P->CreateKernelCall<MaskCC>(mCC_to_mask, basis, mask, index);
+    P.CreateKernelCall<MaskCC>(mCC_to_mask, basis, mask, index);
     installStreamSet(mask);
 }
 
@@ -400,11 +400,11 @@ const std::vector<std::string> CCselfTransitionMask::getParameters() {
     return std::vector<std::string>{"basis", "index"};
 }
 
-void CCselfTransitionMask::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSet *> inputs) {
+void CCselfTransitionMask::resolveStreamSet(PipelineBuilder & P, std::vector<StreamSet *> inputs) {
     StreamSet * basis = inputs[0];
     StreamSet * index = inputs[1];
-    StreamSet * mask = P->CreateStreamSet(1);
-    P->CreateKernelCall<MaskSelfTransitions>(mTransitionCCs, basis, mask, index);
+    StreamSet * mask = P.CreateStreamSet(1);
+    P.CreateKernelCall<MaskSelfTransitions>(mTransitionCCs, basis, mask, index);
     installStreamSet(mask);
 }
 
@@ -412,17 +412,17 @@ const std::vector<std::string> MaskedFixedSpanExternal::getParameters() {
     return std::vector<std::string>{mMask, mMatches};
 }
 
-void MaskedFixedSpanExternal::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSet *> inputs) {
+void MaskedFixedSpanExternal::resolveStreamSet(PipelineBuilder & P, std::vector<StreamSet *> inputs) {
     StreamSet * positions_mask = inputs[0];
     StreamSet * matches = inputs[1];
-    StreamSet * filteredMatches = P->CreateStreamSet(1);
+    StreamSet * filteredMatches = P.CreateStreamSet(1);
     FilterByMask(P, positions_mask, matches, filteredMatches);
-    StreamSet * filteredMatchStarts = P->CreateStreamSet(1);
-    P->CreateKernelCall<ShiftBack>(filteredMatches, filteredMatchStarts, mLengthRange.first);
-    StreamSet * matchStarts = P->CreateStreamSet(1);
+    StreamSet * filteredMatchStarts = P.CreateStreamSet(1);
+    P.CreateKernelCall<ShiftBack>(filteredMatches, filteredMatchStarts, mLengthRange.first);
+    StreamSet * matchStarts = P.CreateStreamSet(1);
     SpreadByMask(P, positions_mask, filteredMatchStarts, matchStarts);
-    StreamSet * spans = P->CreateStreamSet(1);
-    P->CreateKernelCall<InclusiveSpans>(0, mOffset, streamutils::Select(P, std::vector<StreamSet *>{matchStarts, matches}), spans);
+    StreamSet * spans = P.CreateStreamSet(1);
+    P.CreateKernelCall<InclusiveSpans>(0, mOffset, streamutils::Select(P, std::vector<StreamSet *>{matchStarts, matches}), spans);
     installStreamSet(spans);
 }
 
@@ -1074,35 +1074,31 @@ void ContextSpan::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("contextStream"), pb.getInteger(0)), pb.createInFile(consecutive));
 }
 
-void kernel::GraphemeClusterLogic(ProgBuilderRef P,
-                                  StreamSet * Source, StreamSet * U8index, StreamSet * GCBstream) {
-
+void kernel::GraphemeClusterLogic(PipelineBuilder & P, StreamSet * Source, StreamSet * U8index, StreamSet * GCBstream) {
     re::RE * GCB = re::generateGraphemeClusterBoundaryRule();
     const auto GCB_Sets = re::collectCCs(GCB, cc::Unicode, re::NameProcessingMode::ProcessDefinition);
     auto GCB_mpx = cc::makeMultiplexedAlphabet("GCB_mpx", GCB_Sets);
     GCB = transformCCs(GCB_mpx, GCB, re::NameTransformationMode::TransformDefinition);
     auto GCB_basis = GCB_mpx->getMultiplexedCCs();
-    StreamSet * const GCB_Classes = P->CreateStreamSet(GCB_basis.size());
-    P->CreateKernelFamilyCall<CharClassesKernel>(GCB_basis, Source, GCB_Classes);
+    StreamSet * const GCB_Classes = P.CreateStreamSet(GCB_basis.size());
+    P.CreateKernelFamilyCall<CharClassesKernel>(GCB_basis, Source, GCB_Classes);
     std::unique_ptr<GrepKernelOptions> options = std::make_unique<GrepKernelOptions>();
     options->setIndexing(U8index);
     options->setRE(GCB);
     options->addAlphabet(GCB_mpx, GCB_Classes);
     options->setResults(GCBstream);
     options->addExternal("UTF8_index", U8index);
-    P->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
+    P.CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
 }
 
-void kernel::WordBoundaryLogic(ProgBuilderRef P,
-                                  StreamSet * Source, StreamSet * U8index, StreamSet * wordBoundary_stream) {
-
+void kernel::WordBoundaryLogic(PipelineBuilder & P, StreamSet * Source, StreamSet * U8index, StreamSet * wordBoundary_stream) {
     re::RE * wordProp = re::makePropertyExpression(PropertyExpression::Kind::Codepoint, "word");
     wordProp = UCD::linkAndResolve(wordProp);
     re::Name * word = re::makeName("word");
     word->setDefinition(wordProp);
-    StreamSet * WordStream = P->CreateStreamSet(1);
-    P->CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(word, Source, WordStream);
-    P->CreateKernelCall<BoundaryKernel>(WordStream, U8index, wordBoundary_stream);
+    StreamSet * WordStream = P.CreateStreamSet(1);
+    P.CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(word, Source, WordStream);
+    P.CreateKernelCall<BoundaryKernel>(WordStream, U8index, wordBoundary_stream);
 }
 
 LongestMatchMarks::LongestMatchMarks(LLVMTypeSystemInterface & ts, StreamSet * start_ends, StreamSet * marks)

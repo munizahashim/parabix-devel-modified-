@@ -16,7 +16,7 @@
 #include <pablo/pe_zeroes.h>        // for Zeroes
 #include <grep/grep_kernel.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/run_index.h>
@@ -515,7 +515,7 @@ XfrmFunctionType generateU21_pipeline(CPUDriver & driver,
     P->CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
 
     StreamSet * U21 = P->CreateStreamSet(21, 1);
-    FilterByMask(P, u8index, U21_u8indexed, U21);
+    FilterByMask(*P.get(), u8index, U21_u8indexed, U21);
     SHOW_BIXNUM(U21);
 
     std::vector<re::CC *> xfrm_ccs;
@@ -531,7 +531,7 @@ XfrmFunctionType generateU21_pipeline(CPUDriver & driver,
     SHOW_BIXNUM(u32basis);
 
     StreamSet * const OutputBasis = P->CreateStreamSet(8);
-    U21_to_UTF8(P, u32basis, OutputBasis);
+    U21_to_UTF8(*P.get(), u32basis, OutputBasis);
 
     SHOW_BIXNUM(OutputBasis);
 
@@ -578,11 +578,11 @@ XfrmFunctionType generateUTF8_pipeline(CPUDriver & driver,
         P->CreateKernelCall<AdjustU8bixnum>(BasisBits, InsertBixNum, AdjustedBixNum);
         SHOW_BIXNUM(AdjustedBixNum);
 
-        SpreadMask = InsertionSpreadMask(P, AdjustedBixNum, InsertPosition::Before);
+        SpreadMask = InsertionSpreadMask(*P.get(), AdjustedBixNum, InsertPosition::Before);
         SHOW_STREAM(SpreadMask);
 
         StreamSet * ExpandedBasis = P->CreateStreamSet(8, 1);
-        SpreadByMask(P, SpreadMask, BasisBits, ExpandedBasis);
+        SpreadByMask(*P.get(), SpreadMask, BasisBits, ExpandedBasis);
         SHOW_BIXNUM(ExpandedBasis);
         BasisBits = ExpandedBasis;
     }
@@ -625,7 +625,7 @@ XfrmFunctionType generateUTF8_pipeline(CPUDriver & driver,
 
     if (del_bix_bits > 0) {
         StreamSet * CompressedBasis = P->CreateStreamSet(8);
-        FilterByMask(P, SelectionMask, Translated, CompressedBasis);
+        FilterByMask(*P.get(), SelectionMask, Translated, CompressedBasis);
         SHOW_BIXNUM(CompressedBasis);
         Translated = CompressedBasis;
     }

@@ -31,7 +31,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <iomanip>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 
 using namespace pablo;
 using namespace pablo::parse;
@@ -74,7 +74,7 @@ ztf1FunctionType ztf1_compression_gen (CPUDriver & driver, std::shared_ptr<Pablo
         );
 
     StreamSet * const ztf_basis = P->CreateStreamSet(8);
-    FilterByMask(P, compression_mask, u8basis, ztf_basis);
+    FilterByMask(*P.get(), compression_mask, u8basis, ztf_basis);
     StreamSet * const ZTF_bytes = P->CreateStreamSet(1, 8);
     P->CreateKernelCall<P2SKernel>(ztf_basis, ZTF_bytes);
     P->CreateKernelCall<StdOutKernel>(ZTF_bytes);
@@ -104,9 +104,9 @@ ztf1FunctionType ztf1_decompression_gen (CPUDriver & driver, std::shared_ptr<Pab
                Binding {"insert_marks", insertion_mask}
            }
         );
-    StreamSet * const ztf1_to_utf8_spread_mask = UnitInsertionSpreadMask(P, insertion_mask);
+    StreamSet * const ztf1_to_utf8_spread_mask = UnitInsertionSpreadMask(*P.get(), insertion_mask);
     StreamSet * const ztf1_basis_utf8_indexed = P->CreateStreamSet(8);
-    SpreadByMask(P, ztf1_to_utf8_spread_mask, ztf1basis, ztf1_basis_utf8_indexed);
+    SpreadByMask(*P.get(), ztf1_to_utf8_spread_mask, ztf1basis, ztf1_basis_utf8_indexed);
     StreamSet * const u8basis = P->CreateStreamSet(8);
     P->CreateKernelCall<PabloSourceKernel>(
            parser,

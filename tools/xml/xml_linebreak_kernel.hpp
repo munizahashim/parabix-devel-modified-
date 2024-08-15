@@ -13,7 +13,7 @@
 #include <pablo/pablo_kernel.h>
 #include <pablo/builder.hpp>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 
 using namespace pablo;
 using namespace cc;

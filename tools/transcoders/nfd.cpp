@@ -17,7 +17,7 @@
 #include <pablo/bixnum/bixnum.h>
 #include <grep/grep_kernel.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/run_index.h>
@@ -483,7 +483,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P->CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
 
     StreamSet * U21 = P->CreateStreamSet(21, 1);
-    FilterByMask(P, u8index, U21_u8indexed, U21);
+    FilterByMask(*P.get(), u8index, U21_u8indexed, U21);
     SHOW_BIXNUM(U21);
 
     NFD_BixData NFD_Data;
@@ -493,11 +493,11 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P->CreateKernelCall<CharClassesKernel>(insert_ccs, U21, Insertion_BixNum);
     SHOW_BIXNUM(Insertion_BixNum);
 
-    StreamSet * SpreadMask = InsertionSpreadMask(P, Insertion_BixNum, InsertPosition::After);
+    StreamSet * SpreadMask = InsertionSpreadMask(*P.get(), Insertion_BixNum, InsertPosition::After);
     SHOW_STREAM(SpreadMask);
 
     StreamSet * ExpandedBasis = P->CreateStreamSet(21, 1);
-    SpreadByMask(P, SpreadMask, U21, ExpandedBasis);
+    SpreadByMask(*P.get(), SpreadMask, U21, ExpandedBasis);
     SHOW_BIXNUM(ExpandedBasis);
 
     auto LV_LVT_ccs = NFD_Data.NFD_Hangul_LV_LVT_CCs();
@@ -535,7 +535,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     SHOW_STREAM(CCC_Violation);
 
     StreamSet * const OutputBasis = P->CreateStreamSet(8);
-    U21_to_UTF8(P, NFD_Basis, OutputBasis);
+    U21_to_UTF8(*P.get(), NFD_Basis, OutputBasis);
 
     SHOW_BIXNUM(OutputBasis);
 

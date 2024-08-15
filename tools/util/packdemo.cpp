@@ -16,7 +16,7 @@
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <llvm/ADT/StringRef.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <fcntl.h>
 #include <boost/intrusive/detail/math.hpp>
 

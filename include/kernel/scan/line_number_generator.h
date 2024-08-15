@@ -73,13 +73,13 @@ namespace scan {
  *  linebreaks: .....1...................1......1
  *  output:     0, 1, 1, 1, 2
  */
-inline StreamSet * LineNumbers(const std::unique_ptr<ProgramBuilder> & P, StreamSet * scan, StreamSet * linebreaks) {
+inline StreamSet * LineNumbers(PipelineBuilder & P, StreamSet * scan, StreamSet * linebreaks) {
     assert(scan->getFieldWidth() == 1);
     assert(scan->getNumElements() == 1);
     assert(linebreaks->getFieldWidth() == 1);
     assert(linebreaks->getNumElements() == 1);
-    StreamSet * const out = P->CreateStreamSet(1, 64);
-    P->CreateKernelCall<LineNumberGenerator>(scan, linebreaks, out);
+    StreamSet * const out = P.CreateStreamSet(1, 64);
+    P.CreateKernelCall<LineNumberGenerator>(scan, linebreaks, out);
     return out;
 }
 

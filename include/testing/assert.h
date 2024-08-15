@@ -39,7 +39,7 @@ namespace testing {
  *  - `lhs` and `rhs` must have the same field width
  *  - `lhs` and `rhs` must have the same number of elements
  */
-void AssertEQ(const std::unique_ptr<kernel::ProgramBuilder> & P, kernel::StreamSet * lhs, kernel::StreamSet * rhs);
+void AssertEQ(kernel::PipelineBuilder & P, kernel::StreamSet * lhs, kernel::StreamSet * rhs);
 
 /**
  * Compares two `StreamsSets` to see if they are equal setting the test case's 
@@ -49,7 +49,7 @@ void AssertEQ(const std::unique_ptr<kernel::ProgramBuilder> & P, kernel::StreamS
  *  - `lhs` and `rhs` must have the same field width
  *  - `lhs` and `rhs` must have the same number of elements
  */
-void AssertNE(const std::unique_ptr<kernel::ProgramBuilder> & P, kernel::StreamSet * lhs, kernel::StreamSet * rhs);
+void AssertNE(kernel::PipelineBuilder & P, kernel::StreamSet * lhs, kernel::StreamSet * rhs);
 
 /**
  * Prints both `lhs` and `rhs` `StreamsSets` as a mean of debug within the test scripts.
@@ -59,6 +59,6 @@ void AssertNE(const std::unique_ptr<kernel::ProgramBuilder> & P, kernel::StreamS
  * as this is not meant to be used in actual tests
  *
  */
-void AssertDebug(const std::unique_ptr<kernel::ProgramBuilder> & P, kernel::StreamSet * lhs, kernel::StreamSet * rhs);
+void AssertDebug(kernel::PipelineBuilder & P, kernel::StreamSet * lhs, kernel::StreamSet * rhs);
 
 }

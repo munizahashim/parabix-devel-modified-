@@ -30,6 +30,8 @@ namespace llvm { class PointerType; }
 namespace llvm { class Type; }
 namespace llvm { class Value; }
 
+class BaseDriver;
+
 inline bool is_power_2(const uint64_t n) {
     return ((n & (n - 1)) == 0) && n;
 }
@@ -439,11 +441,11 @@ public:
     llvm::CallInst * CreateSRandCall(llvm::Value * randomSeed);
     llvm::CallInst * CreateRandCall();
 
-    void setDriver(LLVMTypeSystemInterface & ts) {
+    void setDriver(BaseDriver & ts) {
         mDriver = &ts;
     }
 
-    LLVMTypeSystemInterface & getDriver() const {
+    BaseDriver & getDriver() const {
         return *mDriver;
     }
 
@@ -493,7 +495,7 @@ protected:
     unsigned                        mCacheLineAlignment;
     llvm::IntegerType * const       mSizeType;
     llvm::StructType *              mFILEtype;
-    LLVMTypeSystemInterface *        mDriver;
+    BaseDriver *                    mDriver;
     llvm::LLVMContext               mContext;
     const std::string               mTriple;
     #ifdef ENABLE_LIBBACKTRACE

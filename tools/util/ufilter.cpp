@@ -14,7 +14,7 @@
 #include <re/unicode/resolve_properties.h>
 #include <re/cc/cc_kernel.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
@@ -104,10 +104,10 @@ UFiltertFunctionType pipelineGen(CPUDriver & driver, re::Name * CC_name) {
     StreamSet * const FilteredBytes = P->CreateStreamSet(1, 8);
 
     if (UseDefaultFilter) {
-        FilterByMask(P, CCspans, ByteStream, FilteredBytes, 0, 64, true);
+        FilterByMask(*P.get(), CCspans, ByteStream, FilteredBytes, 0, 64, true);
     } else {
         // Replace the following with a custom ByteFilterByMask operation.
-        FilterByMask(P, CCspans, ByteStream, FilteredBytes, 0, 64, true);
+        FilterByMask(*P.get(), CCspans, ByteStream, FilteredBytes, 0, 64, true);
     }
     SHOW_BYTES(FilteredBytes);
 

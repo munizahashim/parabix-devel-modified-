@@ -9,7 +9,7 @@
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/util/radix64.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <llvm/Support/CommandLine.h>
 #include <iostream>
 #include <sys/stat.h>
