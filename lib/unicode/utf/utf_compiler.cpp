@@ -34,6 +34,7 @@ static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", 
 static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(4), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> SuffixOptimization("SuffixOptimization", cl::init(false), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> InitialBit7Test("InitialBit7Test", cl::init(false), cl::cat(codegen::CodeGenOptions));
+static cl::opt<bool> UTF_CompilationTracing("UTF_CompilationTracing", cl::init(false), cl::cat(codegen::CodeGenOptions));
 
 std::string kernelAnnotation() {
     std::string a = "+b" + std::to_string(BinaryLogicCostPerByte);
@@ -876,12 +877,14 @@ void New_UTF_Compiler::subrangePartitioning(CC_List & ccs, Range & range, PabloA
     // the special case if the differing bits value is exactly 2^k.
     unsigned high_differing_bit = ceil_log2(differing_bits + 1) - 1;
     codepoint_t partition_size = (1U << high_differing_bit)/PartitioningFactor;
-    llvm::errs() << "subrangePartitioning(";
-    llvm::errs().write_hex(range.lo);
-    llvm::errs() << ", ";
-    llvm::errs().write_hex(range.hi);
-    llvm::errs() << ")\n";
-    llvm::errs() << "  partition_size = " << partition_size << "\n";
+    if (UTF_CompilationTracing) {
+        llvm::errs() << "subrangePartitioning(";
+        llvm::errs().write_hex(range.lo);
+        llvm::errs() << ", ";
+        llvm::errs().write_hex(range.hi);
+        llvm::errs() << ")\n";
+        llvm::errs() << "  partition_size = " << partition_size << "\n";
+    }    
     if (partition_size < 32) {
         partition_size = 32;
     }
@@ -908,16 +911,18 @@ void New_UTF_Compiler::compileSubrange(CC_List & ccs, Range & enclosingRange, Pa
     //
     // Determine whether compilation of the CCs is below our cost model threshhold.
     unsigned costFactor = costModel(subrangeCCs);
-    llvm::errs() << "compileSubrange(";
-    llvm::errs().write_hex(enclosingRange.lo);
-    llvm::errs() << ", ";
-    llvm::errs().write_hex(enclosingRange.hi);
-    llvm::errs() << ") subrange(";
-    llvm::errs().write_hex(subrange.lo);
-    llvm::errs() << ", ";
-    llvm::errs().write_hex(subrange.hi);
-    llvm::errs() << ")\n";
-    llvm::errs() << "  costFactor = " << costFactor << "\n";
+    if (UTF_CompilationTracing) {
+        llvm::errs() << "compileSubrange(";
+        llvm::errs().write_hex(enclosingRange.lo);
+        llvm::errs() << ", ";
+        llvm::errs().write_hex(enclosingRange.hi);
+        llvm::errs() << ") subrange(";
+        llvm::errs().write_hex(subrange.lo);
+        llvm::errs() << ", ";
+        llvm::errs().write_hex(subrange.hi);
+        llvm::errs() << ")\n";
+        llvm::errs() << "  costFactor = " << costFactor << "\n";
+    }
     if (costFactor < IfEmbeddingCostThreshhold) {
         compileUnguardedSubrange(subrangeCCs, enclosingRange, enclosingTest, enclosingRange, pb);
         return;
@@ -928,8 +933,10 @@ void New_UTF_Compiler::compileSubrange(CC_List & ccs, Range & enclosingRange, Pa
     unsigned code_unit_to_test = mEncoder.common_code_units(enclosingRange.lo, enclosingRange.hi) + 1;
     unsigned lo_unit = mEncoder.nthCodeUnit(actual_subrange.lo, code_unit_to_test);
     unsigned hi_unit = mEncoder.nthCodeUnit(actual_subrange.hi, code_unit_to_test);
-    llvm::errs() << "  code_unit_to_test = " << code_unit_to_test << "\n";
-    llvm::errs() << "  lo_unit = " << lo_unit << "  hi_unit = " << hi_unit << "\n";
+    if (UTF_CompilationTracing) {
+        llvm::errs() << "  code_unit_to_test = " << code_unit_to_test << "\n";
+        llvm::errs() << "  lo_unit = " << lo_unit << "  hi_unit = " << hi_unit << "\n";
+    }
     // Adjust for suffixes by masking off suffix bit 7;
     if (SuffixOptimization && (code_unit_to_test > 1)) {
         lo_unit &= 0x3F;
@@ -1115,25 +1122,44 @@ PabloAST * UTF_Advance_Compiler::compile_code_unit(unsigned lgth, unsigned pos, 
 UTF_Compiler::UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb,
              pablo::PabloAST * mask,
              pablo::BitMovementMode mode) :
-mVar(basisVar), mPB(pb), mMask(mask), mBitMovement(mode) {}
+mVar(basisVar), mPB(pb), mMask(mask), mBitMovement(mode) {
+}
 
 UTF_Compiler::UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb,
              pablo::BitMovementMode mode) :
 mVar(basisVar), mPB(pb), mMask(nullptr), mBitMovement(mode) {}
 
 void UTF_Compiler::compile(Target_List targets, CC_List ccs) {
-    if (mBitMovement == pablo::BitMovementMode::LookAhead) {
-        if (mMask != nullptr) {
-            llvm::report_fatal_error("mask parameter for the UTF lookahead compiler is a future option.");
+    llvm::ArrayType * ty = cast<ArrayType>(mVar->getType());
+    unsigned streamCount = ty->getArrayNumElements();
+    unsigned codeUnitBits;
+    if (streamCount == 1) {
+        VectorType * const vt = cast<VectorType>(ty->getArrayElementType());
+        const auto streamWidth = vt->getElementType()->getIntegerBitWidth();
+        codeUnitBits = streamWidth;
+    } else {
+        codeUnitBits = streamCount;
+    }
+    if (codeUnitBits == 8) {
+        if (mBitMovement == pablo::BitMovementMode::LookAhead) {
+            if (mMask != nullptr) {
+                llvm::report_fatal_error("mask parameter for the UTF lookahead compiler is a future option.");
+            }
+            UTF_Lookahead_Compiler utf_compiler(mVar, mPB);
+            utf_compiler.compile(targets, ccs);
+        } else if (UseComputedUTFHierarchy) {
+            if (mMask != nullptr) {
+                llvm::report_fatal_error("mask parameter for the UTF advance compiler is a future option.");
+            }
+            UTF_Advance_Compiler utf_compiler(mVar, mPB);
+            utf_compiler.compile(targets, ccs);
+        } else {
+            UTF_Legacy_Compiler utf_compiler(mVar, mPB, mMask);
+            for (unsigned i = 0; i < targets.size(); i++) {
+                utf_compiler.addTarget(targets[i], ccs[i]);
+            }
+            utf_compiler.compile();
         }
-        UTF_Lookahead_Compiler utf_compiler(mVar, mPB);
-        utf_compiler.compile(targets, ccs);
-    } else if (UseComputedUTFHierarchy) {
-        if (mMask != nullptr) {
-            llvm::report_fatal_error("mask parameter for the UTF advance compiler is a future option.");
-        }
-        UTF_Advance_Compiler utf_compiler(mVar, mPB);
-        utf_compiler.compile(targets, ccs);
     } else {
         UTF_Legacy_Compiler utf_compiler(mVar, mPB, mMask);
         for (unsigned i = 0; i < targets.size(); i++) {
