@@ -67,7 +67,7 @@ namespace scan {
  *      // -- snip --
  *      extern "C" void callback_fn(const uint8_t * ptr) { ... }
  *      // -- snip --
- *      std::unique_ptr<PipelineBuilder> P = ...;
+ *      PipelineBuilder P = ...;
  *      CPUDriver & Driver = ...;
  *      StreamSet * Source = ...; // <i8>[1]
  *      StreamSet * Scan = ...; // <i1>[1]

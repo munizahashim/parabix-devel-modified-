@@ -47,9 +47,7 @@ PipelineKernel * PipelineBuilder::initializeNestedPipeline(PipelineKernel * cons
     // this gives me a safe workaround for the problem.
     PipelineBuilder nested(mDriver, pk);
     nested.setExternallySynchronized(true);
-    std::unique_ptr<PipelineBuilder> tmp(&nested);
-    pk->instantiateInternalKernels(tmp);
-    tmp.release();
+    pk->instantiateInternalKernels(nested);
     initializeKernel(nested.makeKernel(), flags);
     return pk;
 }

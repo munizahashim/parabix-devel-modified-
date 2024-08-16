@@ -192,11 +192,11 @@ void ExternalStreamTable::resetExternals() {
     }
 }
 
-void ExternalStreamTable::resolveExternals(const std::unique_ptr<PipelineBuilder> & b) {
+void ExternalStreamTable::resolveExternals(PipelineBuilder & b) {
     for (unsigned i = 0; i < mExternalMap.size(); i++) {
         for (auto & entry : mExternalMap[i]) {
             if (!entry.second->isResolved()) {
-                getStreamSet(*b.get(), i, entry.first);
+                getStreamSet(b, i, entry.first);
             }
         }
     }

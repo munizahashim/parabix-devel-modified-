@@ -315,44 +315,44 @@ u8u16FunctionType generatePipeline(CPUDriver & driver, cc::ByteNumbering byteNum
 // ------------------------------------------------------
 
 void makeNonAsciiBranch(LLVMTypeSystemInterface & driver,
-                        const std::unique_ptr<PipelineBuilder> & P,
+                        PipelineBuilder & P,
                         StreamSet * const ByteStream, StreamSet * const u16bytes, cc::ByteNumbering byteNumbering) {
     // Transposed bits from s2p
-    StreamSet * BasisBits = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    StreamSet * BasisBits = P.CreateStreamSet(8);
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
 
     // Calculate UTF-16 data bits through bitwise logic on u8-indexed streams.
-    StreamSet * u8bits = P->CreateStreamSet(16);
-    StreamSet * selectors = P->CreateStreamSet();
-    P->CreateKernelCall<U8U16Kernel>(BasisBits, u8bits, selectors);
+    StreamSet * u8bits = P.CreateStreamSet(16);
+    StreamSet * selectors = P.CreateStreamSet();
+    P.CreateKernelCall<U8U16Kernel>(BasisBits, u8bits, selectors);
 
-    StreamSet * u16bits = P->CreateStreamSet(16);
+    StreamSet * u16bits = P.CreateStreamSet(16);
     if (useAVX2()) {
         // Allocate space for fully compressed swizzled UTF-16 bit streams
         std::vector<StreamSet *> u16Swizzles(4);
-        u16Swizzles[0] = P->CreateStreamSet(4);
-        u16Swizzles[1] = P->CreateStreamSet(4);
-        u16Swizzles[2] = P->CreateStreamSet(4);
-        u16Swizzles[3] = P->CreateStreamSet(4);
+        u16Swizzles[0] = P.CreateStreamSet(4);
+        u16Swizzles[1] = P.CreateStreamSet(4);
+        u16Swizzles[2] = P.CreateStreamSet(4);
+        u16Swizzles[3] = P.CreateStreamSet(4);
         // Apply a deletion algorithm to discard all but the final position of the UTF-8
         // sequences (bit streams) for each UTF-16 code unit. Also compresses and swizzles the result.
-        P->CreateKernelCall<SwizzledDeleteByPEXTkernel>(selectors, u8bits, u16Swizzles);
+        P.CreateKernelCall<SwizzledDeleteByPEXTkernel>(selectors, u8bits, u16Swizzles);
         // Produce unswizzled UTF-16 bit streams
-        P->CreateKernelCall<SwizzleGenerator>(u16Swizzles, std::vector<StreamSet *>{u16bits});
-        P->CreateKernelCall<P2S16Kernel>(u16bits, u16bytes);
+        P.CreateKernelCall<SwizzleGenerator>(u16Swizzles, std::vector<StreamSet *>{u16bits});
+        P.CreateKernelCall<P2S16Kernel>(u16bits, u16bytes);
     } else {
         const auto fieldWidth = driver.getBitBlockWidth() / 16;
-        P->CreateKernelCall<FieldCompressKernel>(Select(selectors, {0}),
+        P.CreateKernelCall<FieldCompressKernel>(Select(selectors, {0}),
                                                  SelectOperationList{Select(u8bits, streamutils::Range(0, 16))},
                                                  u16bits,
                                                  fieldWidth);
-        P->CreateKernelCall<P2S16KernelWithCompressedOutput>(u16bits, selectors, u16bytes, byteNumbering);
+        P.CreateKernelCall<P2S16KernelWithCompressedOutput>(u16bits, selectors, u16bytes, byteNumbering);
     }
 }
 
-void makeAllAsciiBranch(const std::unique_ptr<PipelineBuilder> & P, StreamSet * const ByteStream, StreamSet * const u16bytes, cc::ByteNumbering byteNumbering) {
+void makeAllAsciiBranch(PipelineBuilder & P, StreamSet * const ByteStream, StreamSet * const u16bytes, cc::ByteNumbering byteNumbering) {
     if (byteNumbering == cc::ByteNumbering::BigEndian) {
-        P->CreateKernelCall<ZeroExtend>(ByteStream, u16bytes);
+        P.CreateKernelCall<ZeroExtend>(ByteStream, u16bytes);
     } else {
         llvm::report_fatal_error("Little endian not supported with ASCII optimization yet.");
     }
@@ -376,9 +376,9 @@ u8u16FunctionType generatePipeline2(CPUDriver & driver, cc::ByteNumbering byteNu
         {Binding{"ByteStream", ByteStream}, Binding{"condition", nonAscii}},
         {Binding{"u16bytes", u16bytes, BoundedRate(0, 1)}});
 
-    makeAllAsciiBranch(B->getAllZeroBranch(), ByteStream, u16bytes, byteNumbering);
+    makeAllAsciiBranch(*B->getAllZeroBranch().get(), ByteStream, u16bytes, byteNumbering);
 
-    makeNonAsciiBranch(driver, B->getNonZeroBranch(), ByteStream, u16bytes, byteNumbering);
+    makeNonAsciiBranch(driver, *B->getNonZeroBranch().get(), ByteStream, u16bytes, byteNumbering);
 
     Scalar * outputFileName = P->getInputScalar("outputFileName");
     P->CreateKernelCall<FileSink>(outputFileName, u16bytes);

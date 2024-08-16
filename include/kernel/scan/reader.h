@@ -148,7 +148,7 @@ CallbackPair<U...> make_callback_pair(std::string const & name, void(* func)(U..
  *      extern "C" foo(const uint8_t * ptr, uint64_t lineNum);
  *      // -- snip --
  *      CPUDriver driver = ...;
- *      std::unique_ptr<PipelineBuilder> P = ...;
+ *      PipelineBuilder P = ...;
  *      StreamSet * Source = ...; // <i8>[1]
  *      StreamSet * Indices = ...; // <i64>[1]
  *      StreamSet * LineNums = ...; // <i64>[1]

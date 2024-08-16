@@ -287,16 +287,16 @@ void UnicodeLinesKernelBuilder::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("LB"), pb.getInteger(0)), LineBreak);
 }
 
-void UnicodeLinesLogic(const std::unique_ptr<PipelineBuilder> &P,
+void UnicodeLinesLogic(kernel::PipelineBuilder & P,
                        StreamSet * Basis,
                        StreamSet * UnicodeLB,
                        StreamSet * u8index,
                        UnterminatedLineAtEOF m,
                        NullCharMode nullMode,
                        Scalar * signalNullObject) {
-    StreamSet * const LF = P->CreateStreamSet();
-    P->CreateKernelCall<LineFeedKernelBuilder>(Basis, LF);
-    Kernel * k = P->CreateKernelCall<UnicodeLinesKernelBuilder>
+    StreamSet * const LF = P.CreateStreamSet();
+    P.CreateKernelCall<LineFeedKernelBuilder>(Basis, LF);
+    Kernel * k = P.CreateKernelCall<UnicodeLinesKernelBuilder>
          (Basis, LF, UnicodeLB, u8index, m, nullMode, signalNullObject);
     if (nullMode == NullCharMode::Abort) {
         k->link("signal_dispatcher", kernel::signal_dispatcher);

@@ -53,7 +53,7 @@ protected:
     NullCharMode mNullMode;
 };
 
-void UnicodeLinesLogic(const std::unique_ptr<kernel::PipelineBuilder> & P,
+void UnicodeLinesLogic(kernel::PipelineBuilder & P,
                        kernel::StreamSet * Basis,
                        kernel::StreamSet * LineEnds,
                        kernel::StreamSet * u8index,

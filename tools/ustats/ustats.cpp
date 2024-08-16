@@ -81,10 +81,9 @@ namespace ustats
 
         UStatsPropertyType generatePipeline(CPUDriver & driver, std::string property)
         {
-            auto & b = driver.getBuilder();
-            std::unique_ptr<kernel::ProgramBuilder> program = driver.makePipeline(
+            auto program = driver.makePipeline(
                 {
-                    kernel::Binding{ b.getInt32Ty(), "inputFileDescriptor" },
+                    kernel::Binding{ driver.getInt32Ty(), "inputFileDescriptor" },
                 },
                 {}
             );

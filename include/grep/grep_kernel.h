@@ -46,7 +46,7 @@ public:
     bool hasReferenceTo(StreamIndexCode c, std::string externalName);
     StreamSet * getStreamSet(PipelineBuilder & b, StreamIndexCode c, std::string externalName);
     void resetExternals();  // Reset all externals to unresolved.
-    void resolveExternals(const std::unique_ptr<PipelineBuilder> & b);
+    void resolveExternals(PipelineBuilder &b);
     void setIllustrator(ParabixIllustrator * illustrator) {mIllustrator = illustrator;}
     ~ExternalStreamTable();
 private:

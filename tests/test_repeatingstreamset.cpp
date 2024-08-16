@@ -649,24 +649,24 @@ public:
 
 protected:
 
-    void instantiateInternalKernels(const std::unique_ptr<PipelineBuilder> & E) final {
+    void instantiateInternalKernels(PipelineBuilder & E) final {
 
-        StreamSet * Output = E->getInputStreamSet(0);
+        StreamSet * Output = E.getInputStreamSet(0);
 
         RepeatingStreamSet * RepeatingStream = nullptr;
         if (mAllowUnaligned) {
-            RepeatingStream = E->CreateUnalignedRepeatingStreamSet(Output->getFieldWidth(), mPattern);
+            RepeatingStream = E.CreateUnalignedRepeatingStreamSet(Output->getFieldWidth(), mPattern);
         } else {
-            RepeatingStream = E->CreateRepeatingStreamSet(Output->getFieldWidth(), mPattern);
+            RepeatingStream = E.CreateRepeatingStreamSet(Output->getFieldWidth(), mPattern);
         }
 
         assert (mInternallyGeneratedStreamSets.size() == 1);
 
-        Scalar * invalid = E->getInputScalar(0);
+        Scalar * invalid = E.getInputScalar(0);
 
-        E->CreateKernelCall<StreamEq>(RepeatingStream, mAllowUnaligned, Output, false, invalid);
+        E.CreateKernelCall<StreamEq>(RepeatingStream, mAllowUnaligned, Output, false, invalid);
 
-        E->CreateKernelCall<StreamEq>(Output, false, RepeatingStream, mAllowUnaligned, invalid);
+        E.CreateKernelCall<StreamEq>(Output, false, RepeatingStream, mAllowUnaligned, invalid);
 
     }
 
@@ -727,16 +727,16 @@ public:
 
 protected:
 
-    void instantiateInternalKernels(const std::unique_ptr<PipelineBuilder> & E) final {
+    void instantiateInternalKernels(PipelineBuilder & E) final {
 
-        StreamSet * Output = E->getInputStreamSet(0);
+        StreamSet * Output = E.getInputStreamSet(0);
 
-        Scalar * invalid = E->getInputScalar(0);
+        Scalar * invalid = E.getInputScalar(0);
 
         if (mFamilyCall) {
-            E->CreateNestedPipelineFamilyCall<NestedRepeatingStreamSetTest>(mPattern, mAllowUnaligned, Output, invalid);
+            E.CreateNestedPipelineFamilyCall<NestedRepeatingStreamSetTest>(mPattern, mAllowUnaligned, Output, invalid);
         } else {
-            E->CreateNestedPipelineCall<NestedRepeatingStreamSetTest>(mPattern, mAllowUnaligned, Output, invalid);
+            E.CreateNestedPipelineCall<NestedRepeatingStreamSetTest>(mPattern, mAllowUnaligned, Output, invalid);
         }
 
     }

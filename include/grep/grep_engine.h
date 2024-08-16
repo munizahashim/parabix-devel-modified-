@@ -125,22 +125,22 @@ protected:
     bool matchesToEOLrequired();
 
     // Transpose to basis bit streams, if required otherwise return the source byte stream.
-    kernel::StreamSet * getBasis(const std::unique_ptr<kernel::PipelineBuilder> & P, kernel::StreamSet * ByteStream);
+    kernel::StreamSet * getBasis(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
 
     // Initial grep set-up.
     // Implement any required checking/processing of null characters, determine the
     // line break stream and the U8 index stream (if required).
-    void grepPrologue(const std::unique_ptr<kernel::PipelineBuilder> & P, kernel::StreamSet * SourceStream);
+    void grepPrologue(kernel::PipelineBuilder & P, kernel::StreamSet * SourceStream);
     // Prepare external property and GCB streams, if required.
-    void prepareExternalStreams(const std::unique_ptr<kernel::PipelineBuilder> & P, kernel::StreamSet * SourceStream);
-    kernel::StreamSet * getMatchSpan(const std::unique_ptr<kernel::PipelineBuilder> & P, re::RE * r, kernel::StreamSet * MatchResults);
+    void prepareExternalStreams(kernel::PipelineBuilder & P, kernel::StreamSet * SourceStream);
+    kernel::StreamSet * getMatchSpan(kernel::PipelineBuilder & P, re::RE * r, kernel::StreamSet * MatchResults);
     void addExternalStreams(kernel::PipelineBuilder & P, const cc::Alphabet * a, std::unique_ptr<kernel::GrepKernelOptions> & options, re::RE * regexp, kernel::StreamSet * indexMask = nullptr);
-    kernel::StreamSet * initialMatches(const std::unique_ptr<kernel::PipelineBuilder> & P, kernel::StreamSet * ByteStream);
-    kernel::StreamSet * matchedLines(const std::unique_ptr<kernel::PipelineBuilder> & P, kernel::StreamSet * ByteStream);
-    kernel::StreamSet * grepPipeline(const std::unique_ptr<kernel::PipelineBuilder> & P, kernel::StreamSet * ByteStream);
+    kernel::StreamSet * initialMatches(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
+    kernel::StreamSet * matchedLines(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
+    kernel::StreamSet * grepPipeline(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
     virtual uint64_t doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm);
     int32_t openFile(const std::string & fileName, std::ostringstream & msgstrm);
-    void applyColorization(const std::unique_ptr<kernel::PipelineBuilder> & E,
+    void applyColorization(kernel::PipelineBuilder & E,
                                               kernel::StreamSet * SourceCoords,
                                               kernel::StreamSet * MatchSpans,
                                               kernel::StreamSet * Basis);
@@ -242,7 +242,7 @@ protected:
 class EmitMatchesEngine final : public GrepEngine {
 public:
     EmitMatchesEngine(BaseDriver & driver);
-    void grepPipeline(const std::unique_ptr<kernel::PipelineBuilder> & P, kernel::StreamSet * ByteStream);
+    void grepPipeline(kernel::PipelineBuilder & P, kernel::StreamSet * ByteStream);
     void grepCodeGen() override;
 private:
     uint64_t doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm) override;

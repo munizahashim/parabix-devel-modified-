@@ -130,7 +130,7 @@ inline StreamSet * LineSpans(PipelineBuilder & P, StreamSet * linebreaks) {
  *      // -- snip --
  *      using namespace kernel;
  *      // -- snip -- 
- *      std::unique_ptr<PipelineBuilder> P = ...;
+ *      PipelineBuilder P = ...;
  *      CPUDriver driver = ...;
  *      StreamSet * Source = ...; // <i8>[1]
  *      StreamSet * Linebreaks = ...; // <i1>[1]

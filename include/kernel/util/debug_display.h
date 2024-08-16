@@ -45,12 +45,12 @@ namespace util {
  * 
  *      using namespace kernel;
  *      // -- snip --
- *      std::unique_ptr<ProgramBuilder> P = ...;
+ *      PipelineBuilder P = ...;
  *      StreamSet * SomeStream = ...;
  *      util::DebugDisplay(P, "some_stream", SomeStream);
  */
-inline void DebugDisplay(const std::unique_ptr<ProgramBuilder> & P, llvm::StringRef name, StreamSet * s) {
-    P->CreateKernelCall<DebugDisplayKernel>(name, s);
+inline void DebugDisplay(PipelineBuilder & P, llvm::StringRef name, StreamSet * s) {
+    P.CreateKernelCall<DebugDisplayKernel>(name, s);
 }
 
 } // namespace kernel::util
@@ -97,7 +97,7 @@ inline void DebugDisplay(const std::unique_ptr<ProgramBuilder> & P, llvm::String
  */
 
 class ParabixIllustrator {
-    using ProgramBuilderRef = const std::unique_ptr<kernel::ProgramBuilder> &;
+    using ProgramBuilderRef = kernel::PipelineBuilder &;
 public:
     ParabixIllustrator(unsigned displayWidth) :  mDisplayWidth(displayWidth), mMaxStreamNameSize(0) {}
 

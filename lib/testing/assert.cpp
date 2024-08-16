@@ -69,7 +69,7 @@ void StreamEquivalenceKernel::generateMultiBlockLogic(KernelBuilder & b, Value *
     PHINode * const accumPhi = b.CreatePHI(b.getInt1Ty(), 2);
     accumPhi->addIncoming(initialAccum, entryBlock);
     Value * nextAccum = accumPhi;
-    for (uint32_t i = 0; i < COUNT; ++i) {
+    for (unsigned i = 0; i < COUNT; ++i) {
         Value * lhs;
         Value * rhs;
         if (FW == 1) {
@@ -84,11 +84,18 @@ void StreamEquivalenceKernel::generateMultiBlockLogic(KernelBuilder & b, Value *
         // Perform vector comparison lhs != rhs.
         // Result will be a vector of all zeros if lhs == rhs
         Value * const vComp = b.CreateICmpNE(lhs, rhs);
-        Value * const vCompAsInt = b.CreateBitCast(vComp, b.getIntNTy(cast<IDISA::FixedVectorType>(vComp->getType())->getNumElements()));
-        // `comp` will be `true` iff lhs == rhs (i.e., `vComp` is a vector of all zeros)
-        Value * const comp = b.CreateICmpEQ(vCompAsInt, Constant::getNullValue(vCompAsInt->getType()));
-        // `and` `comp` into `accum` so that `accum` will be `true` iff lhs == rhs for all blocks in the two streams
-        nextAccum = b.CreateAnd(nextAccum, comp);
+        Value * const vCompAsInt = b.CreateBitCast(vComp, b.getIntNTy(cast<FixedVectorType>(vComp->getType())->getNumElements()));
+        Constant * const ZERO = Constant::getNullValue(vCompAsInt->getType());
+        if (mMode == Mode::EQ) {
+            // `and` `comp` into `accum` so that `accum` will be `true` iff lhs == rhs for all blocks in the two streams
+            // `comp` will be `true` iff lhs == rhs (i.e., `vComp` is a vector of all zeros)
+            Value * const comp = b.CreateICmpEQ(vCompAsInt, ZERO);
+            nextAccum = b.CreateAnd(nextAccum, comp);
+        } else if (mMode == Mode::NE) {
+            // `comp` will be `true` iff lhs == rhs (i.e., `vComp` is a vector of all zeros)
+            Value * const comp = b.CreateICmpNE(vCompAsInt, ZERO);
+            nextAccum = b.CreateOr(nextAccum, comp);
+        }
     }
 
     Value * const nextStrideNo = b.CreateAdd(strideNo, b.getSize(1));
@@ -106,9 +113,6 @@ void StreamEquivalenceKernel::generateMultiBlockLogic(KernelBuilder & b, Value *
 void StreamEquivalenceKernel::generateFinalizeMethod(KernelBuilder & b) {
     // a `result` value of `true` means the assertion passed
     Value * result = b.getScalarField("accum");
-    if (mMode == Mode::NE) {
-        result = b.CreateNot(result);
-    }
 
     // A `ptrVal` value of `0` means that the test is currently passing and a
     // value of `1` means the test is failing. If the test is already failing,

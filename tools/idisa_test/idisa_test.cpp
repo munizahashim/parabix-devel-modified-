@@ -395,19 +395,19 @@ int32_t openFile(const std::string & fileName, llvm::raw_ostream & msgstrm) {
 
 typedef size_t (*IDISAtestFunctionType)(int32_t fd1, int32_t fd2);
 
-StreamSet * readHexToBinary(std::unique_ptr<ProgramBuilder> & P, const std::string & fd) {
-    StreamSet * const hexStream = P->CreateStreamSet(1, 8);
-    Scalar * const fileDecriptor = P->getInputScalar(fd);
-    P->CreateKernelCall<ReadSourceKernel>(fileDecriptor, hexStream);
-    StreamSet * const bitStream = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<HexToBinary>(hexStream, bitStream);
+inline StreamSet * readHexToBinary(PipelineBuilder & P, const std::string & fd) {
+    StreamSet * const hexStream = P.CreateStreamSet(1, 8);
+    Scalar * const fileDecriptor = P.getInputScalar(fd);
+    P.CreateKernelCall<ReadSourceKernel>(fileDecriptor, hexStream);
+    StreamSet * const bitStream = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<HexToBinary>(hexStream, bitStream);
     return bitStream;
 }
 
-inline StreamSet * applyShiftMask(std::unique_ptr<ProgramBuilder> & P, StreamSet * input) {
+inline StreamSet * applyShiftMask(kernel::PipelineBuilder & P, StreamSet * input) {
     if (ShiftMask > 0) {
-        StreamSet * output = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<ShiftMaskKernel>(TestFieldWidth, ShiftMask, input, output);
+        StreamSet * output = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<ShiftMaskKernel>(TestFieldWidth, ShiftMask, input, output);
         return output;
     }
     return input;
@@ -428,8 +428,8 @@ IDISAtestFunctionType pipelineGen(CPUDriver & driver) {
     auto P = driver.makePipeline(std::move(inputs), {Binding{sizeTy, "totalFailures"}});
 
 
-    StreamSet * Operand1BitStream = readHexToBinary(P, "operand1FileDecriptor");
-    StreamSet * Operand2BitStream = applyShiftMask(P, readHexToBinary(P, "operand2FileDecriptor"));
+    StreamSet * Operand1BitStream = readHexToBinary(*P.get(), "operand1FileDecriptor");
+    StreamSet * Operand2BitStream = applyShiftMask(*P.get(), readHexToBinary(*P.get(), "operand2FileDecriptor"));
 
     StreamSet * ResultBitStream = P->CreateStreamSet(1, 1);
 

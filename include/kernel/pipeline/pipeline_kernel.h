@@ -141,7 +141,7 @@ protected:
                    Bindings && stream_inputs, Bindings && stream_outputs,
                    Bindings && scalar_inputs, Bindings && scalar_outputs);
 
-    virtual void instantiateInternalKernels(const std::unique_ptr<PipelineBuilder> &) {}
+    virtual void instantiateInternalKernels(PipelineBuilder &) {}
 
     static std::string annotateSignatureWithPipelineFlags(std::string && name);
 

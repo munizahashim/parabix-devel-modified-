@@ -473,15 +473,15 @@ void GrepEngine::initRE(re::RE * re) {
     }
 }
 
-StreamSet * GrepEngine::getBasis(const std::unique_ptr<PipelineBuilder> & P, StreamSet * ByteStream) {
+StreamSet * GrepEngine::getBasis(kernel::PipelineBuilder & P, StreamSet * ByteStream) {
     StreamSet * Source = ByteStream;
-    if (codegen::EnableIllustrator) {
-        P->captureByteData("Source", ByteStream);
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        P.captureByteData("Source", ByteStream);
     }
     auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
     if (hasComponent(mExternalComponents, Component::S2P)) {
-        StreamSet * BasisBits = P->CreateStreamSet(ENCODING_BITS, 1);
-        Selected_S2P(*P.get(), ByteStream, BasisBits);
+        StreamSet * BasisBits = P.CreateStreamSet(ENCODING_BITS, 1);
+        Selected_S2P(P, ByteStream, BasisBits);
         Source = BasisBits;
         mExternalTable.declareExternal(u8, "basis", new PreDefined(BasisBits));
     } else {
@@ -490,11 +490,11 @@ StreamSet * GrepEngine::getBasis(const std::unique_ptr<PipelineBuilder> & P, Str
     return Source;
 }
 
-void GrepEngine::grepPrologue(const std::unique_ptr<PipelineBuilder> &P, StreamSet * SourceStream) {
+void GrepEngine::grepPrologue(kernel::PipelineBuilder & P, StreamSet * SourceStream) {
     mLineBreakStream = nullptr;
     mU8index = nullptr;
 
-    Scalar * const callbackObject = P->getInputScalar("callbackObject");
+    Scalar * const callbackObject = P.getInputScalar("callbackObject");
     if (mBinaryFilesMode == argv::Text) {
         mNullMode = NullCharMode::Data;
     } else if (mBinaryFilesMode == argv::WithoutMatch) {
@@ -502,38 +502,38 @@ void GrepEngine::grepPrologue(const std::unique_ptr<PipelineBuilder> &P, StreamS
     } else {
         mNullMode = NullCharMode::Break;
     }
-    mLineBreakStream = P->CreateStreamSet(1, 1);
-    if (codegen::EnableIllustrator && hasComponent(mExternalComponents, Component::S2P)) {
-        P->captureBixNum("basis", SourceStream);
+    mLineBreakStream = P.CreateStreamSet(1, 1);
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator && hasComponent(mExternalComponents, Component::S2P))) {
+        P.captureBixNum("basis", SourceStream);
     }
     if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) {
-        mU8index = P->CreateStreamSet(1, 1);
+        mU8index = P.CreateStreamSet(1, 1);
         UnicodeLinesLogic(P, SourceStream, mLineBreakStream, mU8index, UnterminatedLineAtEOF::Add1, mNullMode, callbackObject);
     }
     else {
         if (mGrepRecordBreak == GrepRecordBreakKind::LF) {
-            Kernel * k = P->CreateKernelCall<UnixLinesKernelBuilder>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1, mNullMode, callbackObject);
+            Kernel * k = P.CreateKernelCall<UnixLinesKernelBuilder>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1, mNullMode, callbackObject);
             if (mNullMode == NullCharMode::Abort) {
                 k->link("signal_dispatcher", signal_dispatcher);
             }
         } else { // if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
-            P->CreateKernelCall<NullDelimiterKernel>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1);
+            P.CreateKernelCall<NullDelimiterKernel>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1);
         }
         if (hasComponent(mExternalComponents, Component::UTF8index)) {
-            mU8index = P->CreateStreamSet(1, 1);
-            P->CreateKernelCall<UTF8_index>(SourceStream, mU8index, mLineBreakStream);
+            mU8index = P.CreateStreamSet(1, 1);
+            P.CreateKernelCall<UTF8_index>(SourceStream, mU8index, mLineBreakStream);
         }
     }
     auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
     if (mU8index) {
-        if (codegen::EnableIllustrator) {
-            P->captureBitstream("mU8index", mU8index);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("mU8index", mU8index);
         }
         auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
         mExternalTable.declareExternal(u8, "u8index", new PreDefined(mU8index));
     }
-    if (codegen::EnableIllustrator) {
-        P->captureBitstream("mLineBreakStream", mLineBreakStream);
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        P.captureBitstream("mLineBreakStream", mLineBreakStream);
     }
     auto u8_LB = new PreDefined(mLineBreakStream);//, std::make_pair(0, 0), 1);
     mExternalTable.declareExternal(u8, "$", u8_LB);
@@ -543,7 +543,7 @@ void GrepEngine::grepPrologue(const std::unique_ptr<PipelineBuilder> &P, StreamS
     }
 }
 
-void GrepEngine::prepareExternalStreams(const std::unique_ptr<PipelineBuilder> & P, StreamSet * SourceStream) {
+void GrepEngine::prepareExternalStreams(PipelineBuilder & P, StreamSet * SourceStream) {
     mExternalTable.resolveExternals(P);
 }
 
@@ -587,16 +587,16 @@ void GrepEngine::addExternalStreams(PipelineBuilder & P, const cc::Alphabet * in
     }
 }
 
-StreamSet * GrepEngine::getMatchSpan(const std::unique_ptr<PipelineBuilder> & P, re::RE * r, StreamSet * MatchResults) {
+StreamSet * GrepEngine::getMatchSpan(kernel::PipelineBuilder & P, re::RE * r, StreamSet * MatchResults) {
     auto indexing = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
     if (mSpanNames.empty() == false) {
         std::vector<StreamSet *> allSpans;
         for (unsigned i = 0; i < mSpanNames.size(); i++) {
-            allSpans.push_back(mExternalTable.getStreamSet(*P.get(), indexing, mSpanNames[i]));
+            allSpans.push_back(mExternalTable.getStreamSet(P, indexing, mSpanNames[i]));
         }
         if (allSpans.size() == 1) return allSpans[0];
-        StreamSet * mergedSpans = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<StreamsMerge>(allSpans, mergedSpans);
+        StreamSet * mergedSpans = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<StreamsMerge>(allSpans, mergedSpans);
         return mergedSpans;
     }
     if (re::Alt * alt = dyn_cast<re::Alt>(r)) {
@@ -606,19 +606,19 @@ StreamSet * GrepEngine::getMatchSpan(const std::unique_ptr<PipelineBuilder> & P,
         for (auto & e : *alt) {
             auto a = getMatchSpan(P, e, MatchResults);
             std::string ct = std::to_string(i);
-            if (codegen::EnableIllustrator) {
-                P->captureBitstream(ct, a);
+            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+                P.captureBitstream(ct, a);
             }
             allSpans.push_back(a);
             i++;
         }
-        StreamSet * mergedSpans = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<StreamsMerge>(allSpans, mergedSpans);
+        StreamSet * mergedSpans = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<StreamsMerge>(allSpans, mergedSpans);
         return mergedSpans;
     } else {
         int spanLgth = re::getLengthRange(r, mIndexAlphabet).first;
-        StreamSet * spans = P->CreateStreamSet(1, 1);
-        P->CreateKernelFamilyCall<FixedMatchSpansKernel>(spanLgth, grepOffset(r), MatchResults, spans);
+        StreamSet * spans = P.CreateStreamSet(1, 1);
+        P.CreateKernelFamilyCall<FixedMatchSpansKernel>(spanLgth, grepOffset(r), MatchResults, spans);
         return spans;
     }
 }
@@ -644,74 +644,73 @@ unsigned GrepEngine::RunGrep(kernel::PipelineBuilder & P, const cc::Alphabet * i
     return reinterpret_cast<ICGrepKernel *>(k)->getOffset();
 }
 
-StreamSet * GrepEngine::initialMatches(const std::unique_ptr<PipelineBuilder> & P, StreamSet * InputStream) {
+StreamSet * GrepEngine::initialMatches(kernel::PipelineBuilder & P, StreamSet * InputStream) {
     mExternalTable.resetExternals();
     StreamSet * SourceStream = getBasis(P, InputStream);
     grepPrologue(P, SourceStream);
     prepareExternalStreams(P, SourceStream);
-    StreamSet * Matches = P->CreateStreamSet();
-    RunGrep(*P.get(), mIndexAlphabet, mRE, Matches);
+    StreamSet * Matches = P.CreateStreamSet();
+    RunGrep(P, mIndexAlphabet, mRE, Matches);
     if (mIndexAlphabet == &cc::Unicode) {
-        StreamSet * u8index1 = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<AddSentinel>(mU8index, u8index1);
-        StreamSet * Results = P->CreateStreamSet(1, 1);
-        SpreadByMask(*P.get(), u8index1, Matches, Results);
+        StreamSet * u8index1 = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<AddSentinel>(mU8index, u8index1);
+        StreamSet * Results = P.CreateStreamSet(1, 1);
+        SpreadByMask(P, u8index1, Matches, Results);
         Matches = Results;
     }
-    if (codegen::EnableIllustrator) {
-        P->captureBitstream("ICgrep kernel matches", Matches);
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        P.captureBitstream("ICgrep kernel matches", Matches);
     }
     return Matches;
 }
 
-StreamSet * GrepEngine::matchedLines(const std::unique_ptr<PipelineBuilder> & P, StreamSet * initialMatches) {
+StreamSet * GrepEngine::matchedLines(kernel::PipelineBuilder & P, StreamSet * initialMatches) {
     StreamSet * MatchedLineEnds = nullptr;
     if (hasComponent(mExternalComponents, Component::MoveMatchesToEOL)) {
-        StreamSet * const MovedMatches = P->CreateStreamSet();
-        P->CreateKernelCall<MatchedLinesKernel>(initialMatches, mLineBreakStream, MovedMatches);
-        if (codegen::EnableIllustrator) {
-            P->captureBitstream("MovedMatches", MovedMatches);
+        StreamSet * const MovedMatches = P.CreateStreamSet();
+        P.CreateKernelCall<MatchedLinesKernel>(initialMatches, mLineBreakStream, MovedMatches);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("MovedMatches", MovedMatches);
         }
         MatchedLineEnds = MovedMatches;
     } else {
         MatchedLineEnds = initialMatches;
     }
     if (mInvertMatches) {
-        StreamSet * const InvertedMatches = P->CreateStreamSet();
-        P->CreateKernelCall<InvertMatchesKernel>(MatchedLineEnds, mLineBreakStream, InvertedMatches);
-        if (codegen::EnableIllustrator) {
-            P->captureBitstream("InvertedMatches", InvertedMatches);
+        StreamSet * const InvertedMatches = P.CreateStreamSet();
+        P.CreateKernelCall<InvertMatchesKernel>(MatchedLineEnds, mLineBreakStream, InvertedMatches);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("InvertedMatches", InvertedMatches);
         }
         MatchedLineEnds = InvertedMatches;
     }
     if (mMaxCount > 0) {
         StreamSet * MaxCountLines = nullptr;
-        Scalar * const maxCount = P->getInputScalar("maxCount");
+        Scalar * const maxCount = P.getInputScalar("maxCount");
         const UntilNMode m = MaxLimitTerminationMode;
         if (m == UntilNMode::ReportAcceptedLengthAtAndBeforeN) {
-            MaxCountLines = P->CreateTruncatedStreamSet(MatchedLineEnds);
+            MaxCountLines = P.CreateTruncatedStreamSet(MatchedLineEnds);
         } else {
-            MaxCountLines = P->CreateStreamSet();
+            MaxCountLines = P.CreateStreamSet();
         }
-        P->CreateKernelCall<UntilNkernel>(maxCount, MatchedLineEnds, MaxCountLines, m);
-        if (codegen::EnableIllustrator) {
-            P->captureBitstream("MaxCountLines", MaxCountLines);
+        P.CreateKernelCall<UntilNkernel>(maxCount, MatchedLineEnds, MaxCountLines, m);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("MaxCountLines", MaxCountLines);
         }
         MatchedLineEnds = MaxCountLines;
-        StreamSet * TruncatedLines =
-            streamutils::Merge(*P.get(), {{MaxCountLines, {0}}, {mLineBreakStream, {0}}});
-        if (codegen::EnableIllustrator) {
-            P->captureBitstream("TruncatedLines", TruncatedLines);
+        StreamSet * TruncatedLines = streamutils::Merge(P, {{MaxCountLines, {0}}, {mLineBreakStream, {0}}});
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("TruncatedLines", TruncatedLines);
         }
         mLineBreakStream = TruncatedLines;
     }
-    if (codegen::EnableIllustrator) {
-        P->captureBitstream("MatchedLineEnds", MatchedLineEnds);
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        P.captureBitstream("MatchedLineEnds", MatchedLineEnds);
     }
     return MatchedLineEnds;
 }
 
-StreamSet * GrepEngine::grepPipeline(const std::unique_ptr<PipelineBuilder> & P, StreamSet * InputStream) {
+StreamSet * GrepEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * InputStream) {
     StreamSet * Matches = initialMatches(P, InputStream);
     return matchedLines(P, Matches);
 }
@@ -737,14 +736,8 @@ void GrepEngine::grepCodeGen() {
     Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
     StreamSet * const ByteStream = P->CreateStreamSet(1, ENCODING_BITS);
     P->CreateKernelCall<FDSourceKernel>(useMMap, fileDescriptor, ByteStream);
-
-    // FIXME: ugly workaround for passing unique_ptr referring to an upcast type
-    std::unique_ptr<PipelineBuilder> E(P.get());
-    StreamSet * const Matches = grepPipeline(E, ByteStream);
-    E.release();
-
+    StreamSet * const Matches = grepPipeline(*P.get(), ByteStream);
     P->CreateKernelCall<PopcountKernel>(Matches, P->getOutputScalar("countResult"));
-
     mMainMethod = P->compile();
 }
 
@@ -878,7 +871,7 @@ public:
 
 protected:
 
-    void instantiateInternalKernels(const std::unique_ptr<PipelineBuilder> & E) final {
+    void instantiateInternalKernels(PipelineBuilder & E) final {
         const std::string ESC = "\x1B";
         const std::vector<std::string> colorEscapes = {ESC + "[01;31m" + ESC + "[K", ESC + "[m"};
         std::vector<uint64_t> colorEscapeBytes;
@@ -892,48 +885,48 @@ protected:
         }
 
         StreamSet * const MatchSpans = getInputStreamSet(1);
-        StreamSet * const InsertMarks = E->CreateStreamSet(2, 1);
-        E->CreateKernelCall<SpansToMarksKernel>(MatchSpans, InsertMarks);
+        StreamSet * const InsertMarks = E.CreateStreamSet(2, 1);
+        E.CreateKernelCall<SpansToMarksKernel>(MatchSpans, InsertMarks);
 
-        StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
-        E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
-        StreamSet * const SpreadMask = InsertionSpreadMask(*E.get(), InsertBixNum, InsertPosition::Before);
+        StreamSet * const InsertBixNum = E.CreateStreamSet(insertLengthBits, 1);
+        E.CreateKernelCall<ZeroInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
+        StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
 
         StreamSet * const Basis = getInputStreamSet(2);
-        StreamSet * ColorEscapeBasis = E->CreateRepeatingBixNum(8, colorEscapeBytes);
-        StreamSet * ColorizedBasis = E->CreateStreamSet(8);
+        StreamSet * ColorEscapeBasis = E.CreateRepeatingBixNum(8, colorEscapeBytes);
+        StreamSet * ColorizedBasis = E.CreateStreamSet(8);
         MergeByMask(E, SpreadMask, Basis, ColorEscapeBasis, ColorizedBasis);
 
-        StreamSet * const ColorizedBytes  = E->CreateStreamSet(1, 8);
-        E->CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);
+        StreamSet * const ColorizedBytes  = E.CreateStreamSet(1, 8);
+        E.CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);
 
-        StreamSet * ColorizedBreaks = E->CreateStreamSet(1);
-        E->CreateKernelCall<UnixLinesKernelBuilder>(ColorizedBasis, ColorizedBreaks, UnterminatedLineAtEOF::Add1);
+        StreamSet * ColorizedBreaks = E.CreateStreamSet(1);
+        E.CreateKernelCall<UnixLinesKernelBuilder>(ColorizedBasis, ColorizedBreaks, UnterminatedLineAtEOF::Add1);
 
-        StreamSet * const ColorizedCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
-        E->CreateKernelCall<MatchCoordinatesKernel>(ColorizedBreaks, ColorizedBreaks, ColorizedCoords, 1);
+        StreamSet * const ColorizedCoords = E.CreateStreamSet(3, sizeof(size_t) * 8);
+        E.CreateKernelCall<MatchCoordinatesKernel>(ColorizedBreaks, ColorizedBreaks, ColorizedCoords, 1);
 
         // TODO: source coords >= colorized coords until the final stride?
         // E->AssertEqualLength(SourceCoords, ColorizedCoords);
 
         StreamSet * const SourceCoords = getInputStreamSet(0);
         Scalar * const callbackObject = getInputScalarAt(0);
-        Kernel * const matchK = E->CreateKernelCall<ColorizedReporter>(ColorizedBytes, SourceCoords, ColorizedCoords, callbackObject);
+        Kernel * const matchK = E.CreateKernelCall<ColorizedReporter>(ColorizedBytes, SourceCoords, ColorizedCoords, callbackObject);
         matchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
         matchK->link("finalize_match_wrapper", finalize_match_wrapper);
     }
 
 };
 
-void GrepEngine::applyColorization(const std::unique_ptr<PipelineBuilder> & E,
+void GrepEngine::applyColorization(PipelineBuilder & E,
                                    StreamSet * SourceCoords,
                                    StreamSet * MatchSpans,
                                    StreamSet * Basis) {
 
-    Scalar * const callbackObject = E->getInputScalar("callbackObject");
+    Scalar * const callbackObject = E.getInputScalar("callbackObject");
 
     if (UseNestedColourizationPipeline) {
-        E->CreateNestedPipelineCall<GrepColourizationPipeline>(SourceCoords, MatchSpans, Basis, callbackObject);
+        E.CreateNestedPipelineCall<GrepColourizationPipeline>(SourceCoords, MatchSpans, Basis, callbackObject);
     } else {
         std::string ESC = "\x1B";
         std::vector<std::string> colorEscapes = {ESC + "[01;31m" + ESC + "[K", ESC + "[m"};
@@ -941,66 +934,66 @@ void GrepEngine::applyColorization(const std::unique_ptr<PipelineBuilder> & E,
         std::vector<unsigned> insertAmts;
         for (auto & s : colorEscapes) {insertAmts.push_back(s.size());}
 
-        StreamSet * const SpanMarks = E->CreateStreamSet(2, 1);
-        E->CreateKernelCall<SpansToMarksKernel>(MatchSpans, SpanMarks);
-        if (codegen::EnableIllustrator) {
-            E->captureBixNum("SpanMarks", SpanMarks);
+        StreamSet * const SpanMarks = E.CreateStreamSet(2, 1);
+        E.CreateKernelCall<SpansToMarksKernel>(MatchSpans, SpanMarks);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBixNum("SpanMarks", SpanMarks);
         }
 
-        StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
-        E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, SpanMarks, InsertBixNum);
-        StreamSet * const SpreadMask = InsertionSpreadMask(*E.get(), InsertBixNum, InsertPosition::Before);
-        if (codegen::EnableIllustrator) {
-            E->captureBitstream("SpreadMask", SpreadMask);
+        StreamSet * const InsertBixNum = E.CreateStreamSet(insertLengthBits, 1);
+        E.CreateKernelCall<ZeroInsertBixNum>(insertAmts, SpanMarks, InsertBixNum);
+        StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBitstream("SpreadMask", SpreadMask);
         }
 
         // For each run of 0s marking insert positions, create a parallel
         // bixnum sequentially numbering the string insert positions.
-        StreamSet * const InsertIndex = E->CreateStreamSet(insertLengthBits);
-        E->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
+        StreamSet * const InsertIndex = E.CreateStreamSet(insertLengthBits);
+        E.CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
         // Basis bit streams expanded with 0 bits for each string to be inserted.
-        if (codegen::EnableIllustrator) {
-            E->captureBixNum("InsertIndex", InsertIndex);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBixNum("InsertIndex", InsertIndex);
         }
 
-        StreamSet * ExpandedBasis = E->CreateStreamSet(8);
-        SpreadByMask(*E.get(), SpreadMask, Basis, ExpandedBasis);
+        StreamSet * ExpandedBasis = E.CreateStreamSet(8);
+        SpreadByMask(E, SpreadMask, Basis, ExpandedBasis);
 
         // Map the match start/end marks to their positions in the expanded basis.
-        StreamSet * ExpandedMarks = E->CreateStreamSet(2);
-        SpreadByMask(*E.get(), SpreadMask, SpanMarks, ExpandedMarks);
-        if (codegen::EnableIllustrator) {
-            E->captureBixNum("ExpandedMarks", ExpandedMarks);
+        StreamSet * ExpandedMarks = E.CreateStreamSet(2);
+        SpreadByMask(E, SpreadMask, SpanMarks, ExpandedMarks);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBixNum("ExpandedMarks", ExpandedMarks);
         }
 
-        StreamSet * ColorizedBasis = E->CreateStreamSet(8);
-        E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
-        if (codegen::EnableIllustrator) {
-            E->captureBixNum("ColorizedBasis", ColorizedBasis);
+        StreamSet * ColorizedBasis = E.CreateStreamSet(8);
+        E.CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBixNum("ColorizedBasis", ColorizedBasis);
         }
-        StreamSet * const ColorizedBytes  = E->CreateStreamSet(1, 8);
-        E->CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);
+        StreamSet * const ColorizedBytes  = E.CreateStreamSet(1, 8);
+        E.CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);
 
-        StreamSet * ColorizedBreaks = E->CreateStreamSet(1);
-        E->CreateKernelCall<UnixLinesKernelBuilder>(ColorizedBasis, ColorizedBreaks, UnterminatedLineAtEOF::Add1);
+        StreamSet * ColorizedBreaks = E.CreateStreamSet(1);
+        E.CreateKernelCall<UnixLinesKernelBuilder>(ColorizedBasis, ColorizedBreaks, UnterminatedLineAtEOF::Add1);
 
-        StreamSet * const ColorizedCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
-        E->CreateKernelCall<MatchCoordinatesKernel>(ColorizedBreaks, ColorizedBreaks, ColorizedCoords, 1);
-        if (codegen::EnableIllustrator) {
-            E->captureBitstream("ColorizedBreaks", ColorizedBreaks);
+        StreamSet * const ColorizedCoords = E.CreateStreamSet(3, sizeof(size_t) * 8);
+        E.CreateKernelCall<MatchCoordinatesKernel>(ColorizedBreaks, ColorizedBreaks, ColorizedCoords, 1);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBitstream("ColorizedBreaks", ColorizedBreaks);
         }
 
         // TODO: source coords >= colorized coords until the final stride?
-        // E->AssertEqualLength(SourceCoords, ColorizedCoords);
+        // E.AssertEqualLength(SourceCoords, ColorizedCoords);
 
-        Kernel * const matchK = E->CreateKernelCall<ColorizedReporter>(ColorizedBytes, SourceCoords, ColorizedCoords, callbackObject);
+        Kernel * const matchK = E.CreateKernelCall<ColorizedReporter>(ColorizedBytes, SourceCoords, ColorizedCoords, callbackObject);
         matchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
         matchK->link("finalize_match_wrapper", finalize_match_wrapper);
     }
 
 }
 
-void EmitMatchesEngine::grepPipeline(const std::unique_ptr<PipelineBuilder> & E, StreamSet * ByteStream) {
+void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & E, StreamSet * ByteStream) {
     StreamSet * Matches = initialMatches(E, ByteStream);
     StreamSet * MatchedLineEnds = matchedLines(E, Matches);
 
@@ -1008,95 +1001,95 @@ void EmitMatchesEngine::grepPipeline(const std::unique_ptr<PipelineBuilder> & E,
     bool needsColoring = mColoring && !mInvertMatches;
     StreamSet * MatchesByLine = nullptr;
     if (needsColoring | hasContext) {
-        MatchesByLine = E->CreateStreamSet(1, 1);
-        FilterByMask(*E.get(), mLineBreakStream, MatchedLineEnds, MatchesByLine);
-        if (codegen::EnableIllustrator) {
-            E->captureBitstream("MatchesByLine", MatchesByLine);
+        MatchesByLine = E.CreateStreamSet(1, 1);
+        FilterByMask(E, mLineBreakStream, MatchedLineEnds, MatchesByLine);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBitstream("MatchesByLine", MatchesByLine);
         }
     }
     if (hasContext) {
-        StreamSet * ContextByLine = E->CreateStreamSet(1, 1);
-        E->CreateKernelCall<ContextSpan>(MatchesByLine, ContextByLine, mBeforeContext, mAfterContext);
-        StreamSet * SelectedLines = E->CreateStreamSet(1, 1);
-        SpreadByMask(*E.get(), mLineBreakStream, ContextByLine, SelectedLines);
+        StreamSet * ContextByLine = E.CreateStreamSet(1, 1);
+        E.CreateKernelCall<ContextSpan>(MatchesByLine, ContextByLine, mBeforeContext, mAfterContext);
+        StreamSet * SelectedLines = E.CreateStreamSet(1, 1);
+        SpreadByMask(E, mLineBreakStream, ContextByLine, SelectedLines);
         MatchedLineEnds = SelectedLines;
         MatchesByLine = ContextByLine;
     }
 
     if (needsColoring) {
-        StreamSet * SourceCoords = E->CreateStreamSet(1, sizeof(size_t) * 8);
-        Scalar * const callbackObject = E->getInputScalar("callbackObject");
-        Kernel * const batchK = E->CreateKernelCall<BatchCoordinatesKernel>(MatchedLineEnds, mLineBreakStream, SourceCoords, callbackObject);
+        StreamSet * SourceCoords = E.CreateStreamSet(1, sizeof(size_t) * 8);
+        Scalar * const callbackObject = E.getInputScalar("callbackObject");
+        Kernel * const batchK = E.CreateKernelCall<BatchCoordinatesKernel>(MatchedLineEnds, mLineBreakStream, SourceCoords, callbackObject);
         batchK->link("get_file_count_wrapper", get_file_count_wrapper);
         batchK->link("get_file_start_pos_wrapper", get_file_start_pos_wrapper);
         batchK->link("set_batch_line_number_wrapper", set_batch_line_number_wrapper);
 
-        StreamSet * MatchedLineStarts = E->CreateStreamSet(1, 1);
-        StreamSet * lineStarts = E->CreateStreamSet(1, 1);
-        E->CreateKernelCall<LineStartsKernel>(mLineBreakStream, lineStarts);
-        SpreadByMask(*E.get(), lineStarts, MatchesByLine, MatchedLineStarts);
-        if (codegen::EnableIllustrator) {
-            E->captureBitstream("MatchedLineStarts", MatchedLineStarts);
+        StreamSet * MatchedLineStarts = E.CreateStreamSet(1, 1);
+        StreamSet * lineStarts = E.CreateStreamSet(1, 1);
+        E.CreateKernelCall<LineStartsKernel>(mLineBreakStream, lineStarts);
+        SpreadByMask(E, lineStarts, MatchesByLine, MatchedLineStarts);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBitstream("MatchedLineStarts", MatchedLineStarts);
         }
-        StreamSet * MatchedLineSpans = E->CreateStreamSet(1, 1);
-        E->CreateKernelCall<LineSpansKernel>(MatchedLineStarts, MatchedLineEnds, MatchedLineSpans);
+        StreamSet * MatchedLineSpans = E.CreateStreamSet(1, 1);
+        E.CreateKernelCall<LineSpansKernel>(MatchedLineStarts, MatchedLineEnds, MatchedLineSpans);
 
-        StreamSet * Filtered = E->CreateStreamSet(1, 8);
+        StreamSet * Filtered = E.CreateStreamSet(1, 8);
         if (UseByteFilterByMask) {
-            FilterByMask(*E.get(), MatchedLineSpans, ByteStream, Filtered, 0, 64, true);
+            FilterByMask(E, MatchedLineSpans, ByteStream, Filtered, 0, 64, true);
         } else {
-            E->CreateKernelCall<MatchFilterKernel>(MatchedLineStarts, mLineBreakStream, ByteStream, Filtered);
+            E.CreateKernelCall<MatchFilterKernel>(MatchedLineStarts, mLineBreakStream, ByteStream, Filtered);
         }
-        if (codegen::EnableIllustrator) {
-            E->captureBixNum("Filtered", Filtered);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBixNum("Filtered", Filtered);
         }
         StreamSet * MatchSpans;
         MatchSpans = getMatchSpan(E, mRE, Matches);
-        if (codegen::EnableIllustrator) {
-            E->captureBitstream("Matches", Matches);
-            E->captureBitstream("MatchSpans", MatchSpans);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBitstream("Matches", Matches);
+            E.captureBitstream("MatchSpans", MatchSpans);
         }
         if (UnicodeIndexing) {
-            StreamSet * u8index1 = E->CreateStreamSet(1, 1);
-            E->CreateKernelCall<AddSentinel>(mU8index, u8index1);
-            StreamSet * ExpandedSpans = E->CreateStreamSet(1, 1);
-            SpreadByMask(*E.get(), u8index1, MatchSpans, ExpandedSpans);
-            if (codegen::EnableIllustrator) {
-                E->captureBitstream("ExpandedSpans", ExpandedSpans);
+            StreamSet * u8index1 = E.CreateStreamSet(1, 1);
+            E.CreateKernelCall<AddSentinel>(mU8index, u8index1);
+            StreamSet * ExpandedSpans = E.CreateStreamSet(1, 1);
+            SpreadByMask(E, u8index1, MatchSpans, ExpandedSpans);
+            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+                E.captureBitstream("ExpandedSpans", ExpandedSpans);
             }
-            StreamSet * FilledSpans = E->CreateStreamSet(1, 1);
-            E->CreateKernelCall<U8Spans>(ExpandedSpans, u8index1, FilledSpans);
-            if (codegen::EnableIllustrator) {
-                E->captureBitstream("FilledSpans", FilledSpans);
+            StreamSet * FilledSpans = E.CreateStreamSet(1, 1);
+            E.CreateKernelCall<U8Spans>(ExpandedSpans, u8index1, FilledSpans);
+            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+                E.captureBitstream("FilledSpans", FilledSpans);
             }
             MatchSpans = FilledSpans;
         }
 
-        StreamSet * FilteredMatchSpans = E->CreateStreamSet(1, 1);
-        FilterByMask(*E.get(), MatchedLineSpans, MatchSpans, FilteredMatchSpans);
-        if (codegen::EnableIllustrator) {
-            E->captureBitstream("FilteredMatchSpans", FilteredMatchSpans);
+        StreamSet * FilteredMatchSpans = E.CreateStreamSet(1, 1);
+        FilterByMask(E, MatchedLineSpans, MatchSpans, FilteredMatchSpans);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBitstream("FilteredMatchSpans", FilteredMatchSpans);
         }
-        StreamSet * FilteredBasis = E->CreateStreamSet(8, 1);
+        StreamSet * FilteredBasis = E.CreateStreamSet(8, 1);
         if (codegen::SplitTransposition) {
-            Staged_S2P(*E.get(), Filtered, FilteredBasis);
+            Staged_S2P(E, Filtered, FilteredBasis);
         } else {
-            E->CreateKernelCall<S2PKernel>(Filtered, FilteredBasis);
+            E.CreateKernelCall<S2PKernel>(Filtered, FilteredBasis);
         }
 
         applyColorization(E, SourceCoords, FilteredMatchSpans, FilteredBasis);
 
     } else { // Non colorized output
         if (MatchCoordinateBlocks > 0) {
-            StreamSet * MatchCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
-            E->CreateKernelCall<MatchCoordinatesKernel>(MatchedLineEnds, mLineBreakStream, MatchCoords, MatchCoordinateBlocks);
-            Scalar * const callbackObject = E->getInputScalar("callbackObject");
-            Kernel * const matchK = E->CreateKernelCall<MatchReporter>(ByteStream, MatchCoords, callbackObject);
+            StreamSet * MatchCoords = E.CreateStreamSet(3, sizeof(size_t) * 8);
+            E.CreateKernelCall<MatchCoordinatesKernel>(MatchedLineEnds, mLineBreakStream, MatchCoords, MatchCoordinateBlocks);
+            Scalar * const callbackObject = E.getInputScalar("callbackObject");
+            Kernel * const matchK = E.CreateKernelCall<MatchReporter>(ByteStream, MatchCoords, callbackObject);
             matchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
             matchK->link("finalize_match_wrapper", finalize_match_wrapper);
         } else {
-            Scalar * const callbackObject = E->getInputScalar("callbackObject");
-            Kernel * const scanBatchK = E->CreateKernelCall<ScanBatchKernel>(MatchedLineEnds, mLineBreakStream, ByteStream, callbackObject, ScanMatchBlocks);
+            Scalar * const callbackObject = E.getInputScalar("callbackObject");
+            Kernel * const scanBatchK = E.CreateKernelCall<ScanBatchKernel>(MatchedLineEnds, mLineBreakStream, ByteStream, callbackObject, ScanMatchBlocks);
             scanBatchK->link("get_file_count_wrapper", get_file_count_wrapper);
             scanBatchK->link("get_file_start_pos_wrapper", get_file_start_pos_wrapper);
             scanBatchK->link("set_batch_line_number_wrapper", set_batch_line_number_wrapper);
@@ -1122,10 +1115,7 @@ void EmitMatchesEngine::grepCodeGen() {
     StreamSet * const InternalBytes = P->CreateStreamSet(1, 8);
 
     P->CreateKernelCall<MemorySourceKernel>(buffer, length, InternalBytes);
-    // FIXME: ugly workaround for passing unique_ptr referring to an upcast type
-    std::unique_ptr<PipelineBuilder> E(P.get());
-    grepPipeline(E, InternalBytes);
-    E.release();
+    grepPipeline(*P.get(), InternalBytes);
     P->setOutputScalar("countResult", P->CreateConstant(mGrepDriver.getInt64(0)));
     mBatchMethod = P->compile();
 }
