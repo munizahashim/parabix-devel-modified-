@@ -293,7 +293,9 @@ if __name__ == '__main__':
         sys.exit(1)
     random.seed(options.random_seed)
     grep_program_under_test = args[0]
-    print("grep_program: %s" % grep_program_under_test, file=sys.stderr)
+    if not os.path.isfile(grep_program_under_test):
+        print("Expecting a grep program executable, but found: %s" % grep_program_under_test, file=sys.stderr)
+        sys.exit(1)
     grep_test_file = open(os.path.join(QA_dir,options.testcases), 'r')
     grep_test_spec = grep_test_file.read()
     grep_test_file.close()
