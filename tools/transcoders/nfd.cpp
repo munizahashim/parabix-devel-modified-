@@ -379,7 +379,6 @@ Hangul_NFD::Hangul_NFD (KernelBuilder & b,
 
 void Hangul_NFD::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
-    UTF::UTF_Compiler unicodeCompiler(getInput(0), pb);
     std::vector<PabloAST *> basis = getInputStreamSet("basis");
     std::vector<PabloAST *> LV_LVT = getInputStreamSet("LV_LVT");
     std::vector<PabloAST *> L_index = getInputStreamSet("L_index");
