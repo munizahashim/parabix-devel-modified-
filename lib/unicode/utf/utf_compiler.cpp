@@ -1087,6 +1087,7 @@ PabloAST * U21_Compiler::compile_code_unit(unsigned lgth, unsigned pos, re::CC *
 
 
 void U21_Compiler::createInitialHierarchy(CC_List & ccs) {
+    llvm::errs() << "U21_Compiler\n";
     if (InitialNonASCIITest) {
         Range ASCII_Range{0, 0x7F};
         CC_List ASCII_ccs;
@@ -1106,7 +1107,7 @@ void U21_Compiler::createInitialHierarchy(CC_List & ccs) {
         extract_CCs_by_range(nonASCII_Range, ccs, nonASCII_ccs);
         subrangePartitioning(nonASCII_ccs, nonASCII_Range, nonASCII, nested);
     } else {
-        Range UnicodeRange{0, 0x10FFF};
+        Range UnicodeRange{0, 0x10FFFF};
         subrangePartitioning(ccs, UnicodeRange, mPB.createOnes(), mPB);
     }
 }
@@ -1305,13 +1306,15 @@ void UTF_Compiler::compile(Target_List targets, CC_List ccs) {
             utf_compiler.compile();
         }
     } else {
-        UTF_Legacy_Compiler utf_compiler(mVar, mPB, mMask);
+        /*
+         * UTF_Legacy_Compiler utf_compiler(mVar, mPB, mMask);
         for (unsigned i = 0; i < targets.size(); i++) {
             utf_compiler.addTarget(targets[i], ccs[i]);
         }
         utf_compiler.compile();
-        /* U21_Compiler u21_compiler(mVar, mPB);
-        u21_compiler.compile(targets, ccs); */
+        */
+        U21_Compiler u21_compiler(mVar, mPB);
+        u21_compiler.compile(targets, ccs);
     }
 }
 
