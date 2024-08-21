@@ -129,7 +129,7 @@ static cl::opt<std::string> ObjectCacheDirOption("object-cache-dir", cl::init(""
                                                  cl::desc("Path to the object cache diretory"), cl::cat(CodeGenOptions));
 
 bool EnableDynamicMultithreading;
-static cl::opt<bool, true> EnableDynamicMultithreadingOption("dynamic-multithreading", cl::location(EnableDynamicMultithreading), cl::init(true),
+static cl::opt<bool, true> EnableDynamicMultithreadingOption("dynamic-multithreading", cl::location(EnableDynamicMultithreading), cl::init(false),
                                                    cl::desc("Dynamic multithreading."), cl::cat(CodeGenOptions));
 
 float DynamicMultithreadingAddThreshold;
@@ -146,7 +146,7 @@ static cl::opt<size_t, true> DynamicMultithreadingPeriodOption("dynamic-multithr
 
 
 bool EnableJumpGuidedSynchronizationVariables;
-static cl::opt<bool, true> EnableJumpGuidedSynchronizationVariablesOption("partition-guided-synchronization", cl::location(EnableJumpGuidedSynchronizationVariables), cl::init(true),
+static cl::opt<bool, true> EnableJumpGuidedSynchronizationVariablesOption("partition-guided-synchronization", cl::location(EnableJumpGuidedSynchronizationVariables), cl::init(false),
                                                    cl::desc("Enable partition jump guided synchronization variables."), cl::cat(CodeGenOptions));
 
 
