@@ -47,9 +47,9 @@ public:
 
 }
 
-inline kernel::StreamSet * XmlLineBreaks(const std::unique_ptr<kernel::ProgramBuilder> & P, kernel::StreamSet * basis) {
+inline kernel::StreamSet * XmlLineBreaks(kernel::PipelineBuilder & P, kernel::StreamSet * basis) {
     assert(basis->getFieldWidth() == 8 && basis->getNumElements() == 1);
-    auto out = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<kernel::XmlLineBreakKernel>(basis, out);
+    auto out = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<kernel::XmlLineBreakKernel>(basis, out);
     return out;
 }

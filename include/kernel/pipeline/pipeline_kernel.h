@@ -31,6 +31,8 @@ class PipelineKernel : public Kernel {
     friend class PipelineAnalysis;
     friend class PipelineBuilder;
     friend class ProgramBuilder;
+    template<typename ... Args>
+    friend class TypedProgramBuilder;
     friend class ::BaseDriver;
 public:
 

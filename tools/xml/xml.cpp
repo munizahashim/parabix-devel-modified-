@@ -246,7 +246,7 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & driver, std::shared_ptr<PabloP
     // Use a custom linebreak kernel which always places a bit at EOF even if
     // the file ends in a linebreak. This is done to simplify the LineSpan
     // logic while maintaining the ability to find errors which occur at EOF.
-    StreamSet * const LineBreakStream = XmlLineBreaks(P, ByteStream);
+    StreamSet * const LineBreakStream = XmlLineBreaks(*P.get(), ByteStream);
     StreamSet * const LineSpans = scan::LineSpans(*P.get(), LineBreakStream);
 
 

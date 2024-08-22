@@ -330,6 +330,8 @@ void PipelineCompiler::resetInternalBufferHandles() {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::constructStreamSetBuffers(KernelBuilder & /* b */) {
 
+
+
     mStreamSetInputBuffers.clear();
     const auto numOfInputStreams = out_degree(PipelineInput, mBufferGraph);
     mStreamSetInputBuffers.resize(numOfInputStreams);
@@ -341,7 +343,7 @@ void PipelineCompiler::constructStreamSetBuffers(KernelBuilder & /* b */) {
         const auto j = streamSet - FirstStreamSet;
         StreamSetBuffer * const buffer = mInternalBuffers[j].release();
         assert (buffer == mBufferGraph[streamSet].Buffer);
-        mStreamSetInputBuffers[i].reset(buffer);
+        mStreamSetInputBuffers[i].reset(buffer); assert (buffer);
     }
 
     mStreamSetOutputBuffers.clear();
@@ -355,7 +357,7 @@ void PipelineCompiler::constructStreamSetBuffers(KernelBuilder & /* b */) {
         const auto j = streamSet - FirstStreamSet;
         StreamSetBuffer * const buffer = mInternalBuffers[j].release();
         assert (buffer == mBufferGraph[streamSet].Buffer);
-        mStreamSetOutputBuffers[i].reset(buffer);
+        mStreamSetOutputBuffers[i].reset(buffer); assert (buffer);
     }
 
 }

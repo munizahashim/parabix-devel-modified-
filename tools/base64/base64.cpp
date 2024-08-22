@@ -32,20 +32,19 @@ using namespace kernel;
 
 typedef void (*base64FunctionType)(const uint32_t fd);
 
-base64FunctionType base64PipelineGen(CPUDriver & driver) {
-    Type * const int32Ty = driver.getInt32Ty();
-    auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
-    Scalar * const fileDescriptor = P->getInputScalar("fd");
-    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
-    StreamSet * const Expanded3_4Out = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<expand3_4Kernel>(ByteStream, Expanded3_4Out);
-    StreamSet * const Radix64out = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<radix64Kernel>(Expanded3_4Out, Radix64out);
-    StreamSet * const base64 = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<base64Kernel>(Radix64out, base64);
-    P->CreateKernelCall<StdOutKernel>(base64);
-    return reinterpret_cast<base64FunctionType>(P->compile());
+auto base64PipelineGen(CPUDriver & driver) {
+    auto P = CreatePipeline(driver, Input<uint32_t>("fd"));
+    Scalar * const fileDescriptor = P.getInputScalar("fd");
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    StreamSet * const Expanded3_4Out = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<expand3_4Kernel>(ByteStream, Expanded3_4Out);
+    StreamSet * const Radix64out = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<radix64Kernel>(Expanded3_4Out, Radix64out);
+    StreamSet * const base64 = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<base64Kernel>(Radix64out, base64);
+    P.CreateKernelCall<StdOutKernel>(base64);
+    return P.compile();
 }
 
 size_t file_size(const int fd) {

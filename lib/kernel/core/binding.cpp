@@ -15,9 +15,8 @@ const auto NOT_STREAM_SET = "binding relationship does not refer to a stream set
 namespace kernel {
 
 Binding::Binding(std::string name, Relationship * const value, ProcessingRate r)
-: AttributeSet()
+: AnnotatedProcessingRate(std::move(r))
 , mName(std::move(name))
-, mRate(std::move(r))
 , mType(value->getType())
 , mRelationship(value)
 , mDistribution(UniformDistribution()) {
@@ -25,9 +24,8 @@ Binding::Binding(std::string name, Relationship * const value, ProcessingRate r)
 }
 
 Binding::Binding(std::string name, Relationship * const value, ProcessingRate r, Attribute && attribute)
-: AttributeSet(std::move(attribute))
+: AnnotatedProcessingRate(std::move(r), std::move(attribute))
 , mName(std::move(name))
-, mRate(std::move(r))
 , mType(value->getType())
 , mRelationship(value)
 , mDistribution(UniformDistribution()) {
@@ -35,9 +33,18 @@ Binding::Binding(std::string name, Relationship * const value, ProcessingRate r,
 }
 
 Binding::Binding(std::string name, Relationship * const value, ProcessingRate r, std::initializer_list<Attribute> attributes)
-: AttributeSet(attributes)
+: AnnotatedProcessingRate(std::move(r), attributes)
 , mName(std::move(name))
-, mRate(std::move(r))
+, mType(value->getType())
+, mRelationship(value)
+, mDistribution(UniformDistribution()) {
+
+}
+
+
+Binding::Binding(std::string && name, Relationship * const value, detail::AnnotatedProcessingRate && apr)
+: AnnotatedProcessingRate(std::move(apr))
+, mName(std::move(name))
 , mType(value->getType())
 , mRelationship(value)
 , mDistribution(UniformDistribution()) {
@@ -45,9 +52,8 @@ Binding::Binding(std::string name, Relationship * const value, ProcessingRate r,
 }
 
 Binding::Binding(llvm::Type * const scalarType, std::string name, ProcessingRate r)
-: AttributeSet()
+: AnnotatedProcessingRate(std::move(r))
 , mName(std::move(name))
-, mRate(std::move(r))
 , mType(scalarType)
 , mRelationship(nullptr)
 , mDistribution(UniformDistribution()) {
@@ -55,9 +61,8 @@ Binding::Binding(llvm::Type * const scalarType, std::string name, ProcessingRate
 }
 
 Binding::Binding(llvm::Type * const scalarType, std::string name, ProcessingRate r, Attribute && attribute)
-: AttributeSet(std::move(attribute))
+: AnnotatedProcessingRate(std::move(r), std::move(attribute))
 , mName(std::move(name))
-, mRate(std::move(r))
 , mType(scalarType)
 , mRelationship(nullptr)
 , mDistribution(UniformDistribution()) {
@@ -65,9 +70,17 @@ Binding::Binding(llvm::Type * const scalarType, std::string name, ProcessingRate
 }
 
 Binding::Binding(llvm::Type * const scalarType, std::string name, ProcessingRate r, std::initializer_list<Attribute> attributes)
-: AttributeSet(attributes)
+: AnnotatedProcessingRate(std::move(r), attributes)
 , mName(std::move(name))
-, mRate(std::move(r))
+, mType(scalarType)
+, mRelationship(nullptr)
+, mDistribution(UniformDistribution()) {
+
+}
+
+Binding::Binding(llvm::Type * const scalarType, std::string && name, detail::AnnotatedProcessingRate && apr)
+: AnnotatedProcessingRate(std::move(apr))
+, mName(std::move(name))
 , mType(scalarType)
 , mRelationship(nullptr)
 , mDistribution(UniformDistribution()) {
@@ -75,9 +88,8 @@ Binding::Binding(llvm::Type * const scalarType, std::string name, ProcessingRate
 }
 
 Binding::Binding(llvm::Type * const type, std::string name, Relationship * const value, ProcessingRate r)
-: AttributeSet()
+: AnnotatedProcessingRate(std::move(r))
 , mName(std::move(name))
-, mRate(std::move(r))
 , mType(type)
 , mRelationship(value)
 , mDistribution(UniformDistribution()) {
@@ -90,9 +102,8 @@ Binding::Binding(llvm::Type * const type, std::string name, Relationship * const
 }
 
 Binding::Binding(llvm::Type * const type, std::string name, Relationship * const value, ProcessingRate r, Attribute && attribute)
-: AttributeSet(std::move(attribute))
+: AnnotatedProcessingRate(std::move(r), std::move(attribute))
 , mName(std::move(name))
-, mRate(std::move(r))
 , mType(type)
 , mRelationship(value)
 , mDistribution(UniformDistribution()) {
@@ -105,9 +116,22 @@ Binding::Binding(llvm::Type * const type, std::string name, Relationship * const
 }
 
 Binding::Binding(llvm::Type * const type, std::string name, Relationship * const value, ProcessingRate r, std::initializer_list<Attribute> attributes)
-: AttributeSet(attributes)
+: AnnotatedProcessingRate(std::move(r), attributes)
 , mName(std::move(name))
-, mRate(std::move(r))
+, mType(type)
+, mRelationship(value)
+, mDistribution(UniformDistribution()) {
+    if (LLVM_UNLIKELY(value == nullptr && type == nullptr)) {
+        llvm::report_fatal_error(NULL_RELATIONSHIP_ERROR);
+    }
+    if (LLVM_UNLIKELY(type && value && value->getType() != type)) {
+        llvm::report_fatal_error(NON_MATCHING_TYPE_ERROR);
+    }
+}
+
+Binding::Binding(llvm::Type * const type, std::string && name, Relationship * const value, AnnotatedProcessingRate && apr)
+: AnnotatedProcessingRate(std::move(apr))
+, mName(std::move(name))
 , mType(type)
 , mRelationship(value)
 , mDistribution(UniformDistribution()) {
@@ -120,9 +144,8 @@ Binding::Binding(llvm::Type * const type, std::string name, Relationship * const
 }
 
 Binding::Binding(const Binding & original, ProcessingRate r)
-: AttributeSet(original.getAttributes())
+: AnnotatedProcessingRate(std::move(r), original.getAttributes())
 , mName(original.getName())
-, mRate(std::move(r))
 , mType(original.getType())
 , mRelationship(original.getRelationship())
 , mDistribution(original.getDistribution()) {

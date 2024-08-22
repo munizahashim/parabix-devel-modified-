@@ -65,12 +65,7 @@ inline void SpreadByMask(const std::unique_ptr<PipelineBuilder> & P,
 }
 #endif
 
-void MergeByMask(PipelineBuilder & P,
-                  StreamSet * mask, StreamSet * a, StreamSet *b, StreamSet * merged);
-inline void MergeByMask(const std::unique_ptr<PipelineBuilder> & P,
-                         StreamSet * mask, StreamSet * a, StreamSet *b, StreamSet * merged){
-    return MergeByMask(*P.get(), mask, a, b, merged);
-}
+void MergeByMask(PipelineBuilder & P, StreamSet * mask, StreamSet * a, StreamSet *b, StreamSet * merged);
 
 /*  Create a spread mask for inserting a single item into a stream for each position
     in the given insertion mask that is nonzero.   The insertion mask may be

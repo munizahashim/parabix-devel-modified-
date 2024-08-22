@@ -23,14 +23,8 @@ void * ProgramBuilder::compile() {
     if (LLVM_UNLIKELY(kernel == nullptr)) {
         report_fatal_error("Main pipeline contains no kernels nor function calls.");
     }
-    void * finalObj;
-    {
-        NamedRegionTimer T(kernel->getSignature(), kernel->getName(),
-                           "pipeline", "Pipeline Compilation",
-                           codegen::TimeKernelsIsEnabled);
-        finalObj = compileKernel(kernel);
-    }
-    return finalObj;
+    NamedRegionTimer T(kernel->getSignature(), kernel->getName(), "pipeline", "Pipeline Compilation", codegen::TimeKernelsIsEnabled);
+    return compileKernel(kernel);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -46,7 +40,6 @@ void * ProgramBuilder::compileKernel(Kernel * const kernel) {
  * @brief makeKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 Kernel * ProgramBuilder::makeKernel() {
-
     if (codegen::EnableDynamicMultithreading) {
         ADD_CL_SCALAR(MINIMUM_NUM_OF_THREADS, MinThreadCount);
         ADD_CL_SCALAR(MAXIMUM_NUM_OF_THREADS, MaxThreadCount);

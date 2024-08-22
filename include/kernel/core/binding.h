@@ -13,7 +13,74 @@ namespace llvm { class raw_ostream; }
 
 namespace kernel {
 
-struct Binding : public AttributeSet {
+namespace detail {
+
+struct AnnotatedProcessingRate : public AttributeSet {
+
+    AnnotatedProcessingRate() = default;
+
+    AnnotatedProcessingRate(ProcessingRate && rate)
+    : mRate(std::move(rate)) {
+
+    }
+
+    AnnotatedProcessingRate(ProcessingRate && rate, AttributeSet && attributeSet)
+    : AttributeSet(std::move(attributeSet))
+    , mRate(std::move(rate)) {
+
+    }
+
+    AnnotatedProcessingRate(ProcessingRate && rate, const AttributeSet & attributeSet)
+    : AttributeSet(attributeSet)
+    , mRate(std::move(rate)) {
+
+    }
+
+    template <typename ParamType>
+    static void __set_apr_param(AnnotatedProcessingRate &, ParamType && value);
+
+    template <typename... ParamTypes>
+    friend AnnotatedProcessingRate annotateProcessingRate(ParamTypes &&... params);
+
+public:
+    ProcessingRate mRate;
+};
+
+template <>
+BOOST_FORCEINLINE void AnnotatedProcessingRate::__set_apr_param<ProcessingRate>(AnnotatedProcessingRate & apr, ProcessingRate && rate) {
+    apr.mRate = rate;
+}
+
+template <>
+BOOST_FORCEINLINE void AnnotatedProcessingRate::__set_apr_param<Attribute>(AnnotatedProcessingRate & apr, Attribute && attr) {
+    apr.addAttribute(attr);
+}
+
+template<unsigned I, typename... ParamTypes>
+BOOST_FORCEINLINE static typename std::enable_if<I < sizeof...(ParamTypes), void>::type
+__set_apr_params(AnnotatedProcessingRate & apr, std::tuple<ParamTypes...> && params) {
+    using HeadType = typename std::tuple_element<I, std::tuple<ParamTypes...>>::type;
+    AnnotatedProcessingRate::__set_apr_param<HeadType>(apr, std::move(std::get<I>(params)));
+    __set_apr_params<I + 1U, ParamTypes...>(apr, std::move(params));
+}
+
+template<unsigned I, typename... ParamTypes>
+BOOST_FORCEINLINE typename std::enable_if<I == sizeof...(ParamTypes), void>::type
+__set_apr_params(AnnotatedProcessingRate &, std::tuple<ParamTypes...> &&) { }
+
+template <typename... ParamTypes>
+inline AnnotatedProcessingRate annotateProcessingRate(ParamTypes &&... params) {
+    AnnotatedProcessingRate binding;
+    // Because the ParamTypes will likely be struct objects, I'm worried here we'll
+    // end up recursively calling their copy constructors each time. By passing a
+    // tuple, this should lessen the chance of that happening.
+    __set_apr_params<0U, ParamTypes...>(binding, std::make_tuple(params...));
+    return binding;
+}
+
+} /* end of detail */
+
+struct Binding : public detail::AnnotatedProcessingRate {
 
     friend class Kernel;
     friend class PipelineBuilder;
@@ -24,24 +91,28 @@ struct Binding : public AttributeSet {
     static void __set_binding_param(Binding &, ParamType value);
 
     template <typename... ParamTypes>
-    friend Binding Bind(std::string name, StreamSet * streamSet, ParamTypes... params);
+    friend Binding Bind(std::string name, StreamSet * streamSet, ParamTypes &&... params);
 
     template <typename... ParamTypes>
-    friend Binding Bind(llvm::Type * const scalarType, std::string name, ParamTypes... params);
+    friend Binding Bind(llvm::Type * const scalarType, std::string name, ParamTypes &&... params);
 
     // TODO: use templatized var-args to simplify the constructors? would need to default in the processing rate and verify only one was added.
 
     Binding(std::string name, Relationship * const value, ProcessingRate r = FixedRate(1));
     Binding(std::string name, Relationship * const value, ProcessingRate r, Attribute && attribute);
     Binding(std::string name, Relationship * const value, ProcessingRate r, std::initializer_list<Attribute> attributes);
+    Binding(std::string && name, Relationship * const value, detail::AnnotatedProcessingRate && bindingRate);
 
     Binding(llvm::Type * const scalarType, std::string name, ProcessingRate r = FixedRate(1));
     Binding(llvm::Type * const scalarType, std::string name, ProcessingRate r, Attribute && attribute);
-    Binding(llvm::Type * const scalarType, std::string name, ProcessingRate r, std::initializer_list<Attribute> attributes);
+    Binding(llvm::Type * const scalarType, std::string name, ProcessingRate r, std::initializer_list<Attribute> attribute);
+    Binding(llvm::Type * const scalarType, std::string && name, detail::AnnotatedProcessingRate && bindingRate);
 
     Binding(llvm::Type * const scalarType, std::string name, Relationship * const value, ProcessingRate r = FixedRate(1));
     Binding(llvm::Type * const scalarType, std::string name, Relationship * const value, ProcessingRate r, Attribute && attribute);
     Binding(llvm::Type * const scalarType, std::string name, Relationship * const value, ProcessingRate r, std::initializer_list<Attribute> attributes);
+
+    Binding(llvm::Type * const scalarType, std::string && name, Relationship * const value, detail::AnnotatedProcessingRate && bindingRate);
 
     Binding(const Binding & original, ProcessingRate r);
 
@@ -91,7 +162,6 @@ struct Binding : public AttributeSet {
 
 private:
     const std::string                     mName;
-    ProcessingRate                        mRate;
     llvm::Type *                          mType;
     Relationship *                        mRelationship;
     ProcessingRateProbabilityDistribution mDistribution;
@@ -218,7 +288,6 @@ inline Binding Bind(llvm::Type * const scalarType, std::string name, ParamTypes.
     assert (binding.getType());
     return binding;
 }
-
 
 }
 

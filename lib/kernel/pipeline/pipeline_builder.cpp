@@ -575,24 +575,31 @@ Kernel * OptimizationBranchBuilder::makeKernel() {
 #endif
 }
 
-Scalar * PipelineBuilder::getInputScalar(const StringRef name) {
-    for (Binding & input : mTarget->mInputScalars) {
+StreamSet * PipelineBuilder::getInputStreamSet(const StringRef name) {
+    for (Binding & input : mTarget->mInputStreamSets) {
+        assert (input.getRelationship());
         if (name.equals(input.getName())) {
-            if (input.getRelationship() == nullptr) {
-                input.setRelationship(mDriver.CreateScalar(input.getType()));
-            }
-            return cast<Scalar>(input.getRelationship());
+            return cast<StreamSet>(input.getRelationship());
         }
     }
     report_fatal_error(StringRef("no scalar named ") + name);
 }
 
-void PipelineBuilder::setInputScalar(const StringRef name, Scalar * value) {
-    errs() << "setInputScalar " << name << " ["; errs().write_hex((uintptr_t)value) << "] " << (unsigned)value->getClassTypeId() << "\n";
+StreamSet * PipelineBuilder::getOutputStreamSet(const StringRef name) {
+    for (Binding & output : mTarget->mOutputStreamSets) {
+        assert (output.getRelationship());
+        if (name.equals(output.getName())) {
+            return cast<StreamSet>(output.getRelationship());
+        }
+    }
+    report_fatal_error(StringRef("no scalar named ") + name);
+}
+
+Scalar * PipelineBuilder::getInputScalar(const StringRef name) {
     for (Binding & input : mTarget->mInputScalars) {
+        assert (input.getRelationship());
         if (name.equals(input.getName())) {
-            input.setRelationship(value);
-            return;
+            return cast<Scalar>(input.getRelationship());
         }
     }
     report_fatal_error(StringRef("no scalar named ") + name);
@@ -600,10 +607,8 @@ void PipelineBuilder::setInputScalar(const StringRef name, Scalar * value) {
 
 Scalar * PipelineBuilder::getOutputScalar(const StringRef name) {
     for (Binding & output : mTarget->mOutputScalars) {
+        assert (output.getRelationship());
         if (name.equals(output.getName())) {
-            if (output.getRelationship() == nullptr) {
-                output.setRelationship(mDriver.CreateScalar(output.getType()));
-            }
             return cast<Scalar>(output.getRelationship());
         }
     }

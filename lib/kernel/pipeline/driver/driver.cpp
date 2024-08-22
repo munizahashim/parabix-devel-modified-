@@ -12,6 +12,7 @@ using namespace llvm;
 
 using RelationshipAllocator = Relationship::Allocator;
 
+#if 0
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief makePipelineWithIO
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -22,6 +23,7 @@ std::unique_ptr<ProgramBuilder> BaseDriver::makePipelineWithIO(Bindings stream_i
                            std::move(scalar_inputs), std::move(scalar_outputs));
     return std::make_unique<ProgramBuilder>(*this, pipeline);
 }
+#endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief makePipeline
@@ -122,8 +124,8 @@ void BaseDriver::addKernel(not_null<Kernel *> kernel) {
     // Verify the I/O relationships were properly set / defaulted in.
 
     for (Binding & input : kernel->getInputScalarBindings()) {
-        if (input.getRelationship() == nullptr) {
-            input.setRelationship(CreateScalar(input.getType()));
+        if (LLVM_UNLIKELY(input.getRelationship() == nullptr)) {
+            report_fatal_error(StringRef(kernel->getName()) + "." + input.getName() + " must be set upon construction");
         }
     }
 

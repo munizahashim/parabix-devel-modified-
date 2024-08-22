@@ -87,9 +87,9 @@ StreamExpandKernel::StreamExpandKernel(LLVMTypeSystemInterface & ts,
 , mOptimization(opt) {
     setStride(StreamExpandStrideSize * ts.getBitBlockWidth());
     if (zeroExtend) {
-        mInputStreamSets.push_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, ZeroExtended(), BlockSize(ts.getBitBlockWidth())));
+        mInputStreamSets.emplace_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, ZeroExtended(), BlockSize(ts.getBitBlockWidth())));
     } else {
-        mInputStreamSets.push_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, BlockSize(ts.getBitBlockWidth())));
+        mInputStreamSets.emplace_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, BlockSize(ts.getBitBlockWidth())));
     }
 }
 

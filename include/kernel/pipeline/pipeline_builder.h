@@ -124,17 +124,19 @@ public:
         return static_cast<StreamSet *>(mTarget->mInputStreamSets[i].getRelationship());
     }
 
+    StreamSet * getInputStreamSet(const llvm::StringRef name);
+
     StreamSet * getOutputStreamSet(const unsigned i) {
         return static_cast<StreamSet *>(mTarget->mOutputStreamSets[i].getRelationship());
     }
+
+    StreamSet * getOutputStreamSet(const llvm::StringRef name);
 
     Scalar * getInputScalar(const unsigned i) {
         return static_cast<Scalar *>(mTarget->mInputScalars[i].getRelationship());
     }
 
     Scalar * getInputScalar(const llvm::StringRef name);
-
-    void setInputScalar(const llvm::StringRef name, Scalar * value);
 
     Scalar * getOutputScalar(const unsigned i) {
         return static_cast<Scalar *>(mTarget->mOutputScalars[i].getRelationship());

@@ -1400,7 +1400,7 @@ void PipelineCompiler::readDoSegmentState(KernelBuilder & b, StructType * const 
     revert(mAvailableInputItems, numOfInputs);
     for (unsigned j = 0; j < numOfInputs; ++j) {
         Value * handle = nullptr;
-        revertOne(handle, true);
+        revertOne(handle, true); assert (handle);
         getInputStreamSetBuffer(j)->setHandle(handle);
     }
 
@@ -1413,7 +1413,7 @@ void PipelineCompiler::readDoSegmentState(KernelBuilder & b, StructType * const 
 
     for (unsigned j = 0; j < numOfOutputs; ++j) {
         Value * handle = nullptr;
-        revertOne(handle, true);
+        revertOne(handle, true); assert (handle);
         getOutputStreamSetBuffer(j)->setHandle(handle);
     }
 
@@ -1453,7 +1453,7 @@ void PipelineCompiler::restoreDoSegmentState(const std::vector<Value *> & S) {
     revert(mAvailableInputItems, numOfInputs);
     for (unsigned i = 0; i < numOfInputs; ++i) {
         Value * handle = nullptr;
-        revertOne(handle, true);
+        revertOne(handle, true); assert (handle);
         getInputStreamSetBuffer(i)->setHandle(handle);
     }
 
@@ -1466,7 +1466,7 @@ void PipelineCompiler::restoreDoSegmentState(const std::vector<Value *> & S) {
 
     for (unsigned i = 0; i < numOfOutputs; ++i) {
         Value * handle = nullptr;
-        revertOne(handle, true);
+        revertOne(handle, true); assert (handle);
         getOutputStreamSetBuffer(i)->setHandle(handle);
     }
 

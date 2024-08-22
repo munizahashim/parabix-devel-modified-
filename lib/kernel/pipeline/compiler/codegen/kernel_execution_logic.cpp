@@ -719,7 +719,7 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(KernelBuilder & b) {
                 const auto port = getOutput(mKernelId, outputPort);
                 const auto streamSet = target(port, mBufferGraph);
                 const BufferNode & bn = mBufferGraph[streamSet];
-                if (LLVM_LIKELY(bn.isInternal() && bn.isOwned() && bn.isNonThreadLocal())) {
+                if (LLVM_LIKELY((bn.isInternal() || bn.isReturned()) && bn.isOwned() && bn.isNonThreadLocal())) {
                     Value * const writable = getWritableOutputItems(b, mBufferGraph[port]);
                     Value * const delta = b.CreateSub(produced, mCurrentProducedItemCountPhi[outputPort]);
                     Value * const withinCapacity = b.CreateICmpULE(delta, writable);

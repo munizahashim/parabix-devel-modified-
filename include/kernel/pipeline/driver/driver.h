@@ -20,50 +20,6 @@ namespace kernel { class ProgramBuilder; }
 class CBuilder;
 class ParabixObjectCache;
 
-struct InputScalar {
-    explicit InputScalar(llvm::StringRef name, kernel::Scalar * value)
-    : Name(name)
-    , Value(value) {
-
-    }
-private:
-    const  llvm::StringRef Name;
-    kernel::Scalar * const Value;
-};
-
-struct OutputScalar {
-    explicit OutputScalar(llvm::StringRef name, kernel::Scalar * value)
-    : Name(name)
-    , Value(value) {
-
-    }
-private:
-    const  llvm::StringRef Name;
-    kernel::Scalar * const Value;
-};
-
-struct InputStreamSet {
-    explicit InputStreamSet(llvm::StringRef name, kernel::StreamSet * value)
-    : Name(name)
-    , Value(value) {
-
-    }
-private:
-    const  llvm::StringRef Name;
-    kernel::StreamSet * const Value;
-};
-
-struct OutputStreamSet {
-    explicit OutputStreamSet(llvm::StringRef name, kernel::StreamSet * value)
-    : Name(name)
-    , Value(value) {
-
-    }
-private:
-    const  llvm::StringRef Name;
-    kernel::StreamSet * const Value;
-};
-
 class BaseDriver : public LLVMTypeSystemInterface {
     friend class CBuilder;
     friend class kernel::PipelineBuilder;
@@ -77,10 +33,7 @@ public:
     using KernelSet = std::vector<std::unique_ptr<Kernel>>;
     using KernelMap = llvm::StringMap<std::unique_ptr<Kernel>>;
 
-//    template<typename ... Args>
-//    TypedProgramBuilder CreatePipeline(Args...);
-
-    std::unique_ptr<kernel::ProgramBuilder> makePipelineWithIO(Bindings stream_inputs = {}, Bindings stream_outputs = {}, Bindings scalar_inputs = {}, Bindings scalar_outputs = {});
+//    std::unique_ptr<kernel::ProgramBuilder> makePipelineWithIO(Bindings stream_inputs = {}, Bindings stream_outputs = {}, Bindings scalar_inputs = {}, Bindings scalar_outputs = {});
 
     std::unique_ptr<kernel::ProgramBuilder> makePipeline(Bindings scalar_inputs = {}, Bindings scalar_outputs = {});
 

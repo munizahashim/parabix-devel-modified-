@@ -23,13 +23,15 @@ struct StreamSetPtr {
         return __length;
     }
 
-    StreamSetPtr() : __base(nullptr), __length(0) {}
+    constexpr StreamSetPtr() : __base(nullptr), __length(0) {}
 
-    StreamSetPtr(void * base, uint64_t length) : __base(base), __length(length) {}
+    constexpr StreamSetPtr(void * base, uint64_t length) : __base(base), __length(length) {}
+
+    ~StreamSetPtr() = default;
 
 private:
-    void * __base;
-    uint64_t __length;
+    void * const __base;
+    uint64_t  const __length;
 };
 
 
