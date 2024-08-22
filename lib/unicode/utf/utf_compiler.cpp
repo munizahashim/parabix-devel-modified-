@@ -44,7 +44,7 @@ std::string kernelAnnotation() {
     a += "i" + std::to_string(IfEmbeddingCostThreshhold);
     a += "p" + std::to_string(PartitioningFactor);
     if (SuffixOptimization) {
-        a += "sfx";
+        a += "+sfx";
     }
     if (InitialNonASCIITest) {
         a += "+nA";
@@ -1194,10 +1194,12 @@ void U8_Lookahead_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
 }
 
 void U8_Lookahead_Compiler::prepareUnifiedBasis(Basis_Set & UnifiedBasis) {
-    unsigned max_suffix = UnifiedBasis.size()/6;
+    unsigned bits_per_unit = 6;
+    if (UnifiedBasis.size() == 7) bits_per_unit = 7;
+    unsigned max_suffix = (UnifiedBasis.size() - 1)/bits_per_unit;
     for (unsigned i = 0; i < UnifiedBasis.size(); i++) {
-        unsigned suffix_pos = max_suffix - i/6;
-        unsigned scope_bit = i % 6;
+        unsigned suffix_pos = max_suffix - i/bits_per_unit;
+        unsigned scope_bit = i % bits_per_unit;
         UnifiedBasis[i] = mScopeBasis[suffix_pos][scope_bit];
     }
 }
@@ -1236,9 +1238,11 @@ void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
 }
 
 void U8_Advance_Compiler::prepareUnifiedBasis(Basis_Set & UnifiedBasis) {
+    unsigned bits_per_unit = 6;
+    if (UnifiedBasis.size() == 7) bits_per_unit = 7;
     for (unsigned i = 0; i < UnifiedBasis.size(); i++) {
-        unsigned suffix_pos = i/6;
-        unsigned scope_bit = i % 6;
+        unsigned suffix_pos = i/bits_per_unit;
+        unsigned scope_bit = i % bits_per_unit;
         UnifiedBasis[i] = mScopeBasis[suffix_pos][scope_bit];
     }
 }
