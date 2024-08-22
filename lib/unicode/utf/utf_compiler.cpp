@@ -8,6 +8,7 @@
 #include <pablo/pe_zeroes.h>
 #include <pablo/pe_ones.h>
 #include <pablo/printer_pablos.h>
+#include <pablo/bixnum/bixnum.h>
 #include <re/alphabet/alphabet.h>
 #include <re/cc/cc_compiler_target.h>
 #include <re/cc/cc_compiler.h>
@@ -741,6 +742,163 @@ void extract_CCs_by_range(Range r, CC_List & ccs, CC_List & in_range) {
     }
 }
 
+class Unicode_Range_Compiler {
+public:
+    Unicode_Range_Compiler(Basis_Set & basis, Target_List & targets, PabloBuilder & pb) :
+        mBasis (basis), mTargets(targets), mPB(pb) {}
+    void compile(CC_List & ccs, Range & rg, PabloAST * test);
+protected:
+    Basis_Set   &           mBasis;
+    Target_List  &          mTargets;
+    PabloBuilder &          mPB;
+    unsigned costModel(CC_List & ccs);
+    void subrangePartitioning(CC_List & ccs, Range & range, PabloAST * rangeTest, PabloBuilder & pb);
+    void compileSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb);
+    void compileUnguardedSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb);
+    PabloAST * compileCodeRange(Range & codepointRange, Range & enclosingRange, PabloAST * enclosing, PabloBuilder & pb);
+};
+
+void Unicode_Range_Compiler::compile(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest) {
+    subrangePartitioning(ccs, enclosingRange, enclosingTest, mPB);
+}
+
+unsigned Unicode_Range_Compiler::costModel(CC_List & ccs) {
+    UCD::UnicodeSet endpoints = computeEndpoints(ccs);
+    Range cc_span = CC_Set_Range(ccs);
+    if (cc_span.is_empty()) return 0;
+    unsigned bits_to_test = ceil_log2(cc_span.hi - cc_span.lo + 1);
+    unsigned total_codepoints = endpoints.count();
+    return total_codepoints * bits_to_test * BinaryLogicCostPerByte / 8;
+}
+
+
+void Unicode_Range_Compiler::subrangePartitioning(CC_List & ccs, Range & range, PabloAST * rangeTest, PabloBuilder & pb) {
+    auto differing_bits = range.lo ^ range.hi;
+    // Calculate the index of the high differing bit, noting that
+    // the special case if the differing bits value is exactly 2^k.
+    unsigned high_differing_bit = ceil_log2(differing_bits + 1) - 1;
+    codepoint_t partition_size = (1U << high_differing_bit)/PartitioningFactor;
+    if (UTF_CompilationTracing) {
+        llvm::errs() << "URC::subrangePartitioning(";
+        llvm::errs().write_hex(range.lo);
+        llvm::errs() << ", ";
+        llvm::errs().write_hex(range.hi);
+        llvm::errs() << ")\n";
+        llvm::errs() << "  partition_size = " << partition_size << "\n";
+    }
+    if (partition_size < 32) {
+        partition_size = 32;
+    }
+    if (range.hi-range.lo <= partition_size) {
+        compileUnguardedSubrange(ccs, range, rangeTest, range, pb);
+        return;
+    }
+    codepoint_t mask = partition_size - 1;
+    codepoint_t base = range.lo & ~mask;
+    for (unsigned partition_lo = base; partition_lo < range.hi; partition_lo += partition_size) {
+        unsigned partition_hi = std::min(partition_lo + partition_size - 1, range.hi);
+        Range partition{partition_lo, partition_hi};
+        compileSubrange(ccs, range, rangeTest, partition, pb);
+    }
+}
+
+void Unicode_Range_Compiler::compileSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb) {
+    CC_List subrangeCCs(ccs.size());
+    extract_CCs_by_range(subrange, ccs, subrangeCCs);
+    //  If there are no CCs that intersect the subrange, no code
+    //  generation is required.
+    Range actual_subrange = CC_Set_Range(subrangeCCs);
+    if (actual_subrange.is_empty()) return;
+    //
+    // Determine whether compilation of the CCs is below our cost model threshhold.
+    unsigned costFactor = costModel(subrangeCCs);
+    if (UTF_CompilationTracing) {
+        llvm::errs() << "URC::compileSubrange(";
+        llvm::errs().write_hex(enclosingRange.lo);
+        llvm::errs() << ", ";
+        llvm::errs().write_hex(enclosingRange.hi);
+        llvm::errs() << ") subrange(";
+        llvm::errs().write_hex(subrange.lo);
+        llvm::errs() << ", ";
+        llvm::errs().write_hex(subrange.hi);
+        llvm::errs() << ")\n";
+        llvm::errs() << "  costFactor = " << costFactor << "\n";
+    }
+    if (costFactor < IfEmbeddingCostThreshhold) {
+        compileUnguardedSubrange(subrangeCCs, enclosingRange, enclosingTest, enclosingRange, pb);
+        return;
+    }
+    // The subrange logic cost exceeds our cost model threshhold.
+    // Construct a guarded if-block and partition into further subranges.
+    // TODO: Consider optimizing this test to take advantage of any bits
+    // the current unit that have been determined by enclosingTest.
+    PabloAST * unit_test = compileCodeRange(actual_subrange, enclosingRange, enclosingTest, pb);
+    PabloAST * subrange_test = pb.createAnd(enclosingTest, unit_test);
+
+    // Construct an if-block.
+    auto nested = pb.createScope();
+    pb.createIf(subrange_test, nested);
+    //codepoint_t test_lo = mEncoder.minCodePointWithCommonCodeUnits(actual_subrange.lo, code_unit_to_test);
+    //codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(actual_subrange.hi, code_unit_to_test);
+    //Range testRange{test_lo, test_hi};
+    subrangePartitioning(subrangeCCs, subrange, subrange_test, nested);
+}
+
+void Unicode_Range_Compiler::compileUnguardedSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb) {
+    CC_List subrangeCCs(ccs.size());
+    extract_CCs_by_range(subrange, ccs, subrangeCCs);
+    //  If there are no CCs that intersect the subrange, no code
+    //  generation is required.
+    Range actual_subrange = CC_Set_Range(subrangeCCs);
+    if (actual_subrange.is_empty()) return;
+    if (UTF_CompilationTracing) {
+        llvm::errs() << "URC::compileUnguardedSubrange(";
+        llvm::errs().write_hex(enclosingRange.lo);
+        llvm::errs() << ", ";
+        llvm::errs().write_hex(enclosingRange.hi);
+        llvm::errs() << ") subrange(";
+        llvm::errs().write_hex(subrange.lo);
+        llvm::errs() << ", ";
+        llvm::errs().write_hex(subrange.hi);
+        llvm::errs() << ")\n";
+    }
+    for (unsigned i = 0; i < subrangeCCs.size(); i++) {
+        for (const auto range : *subrangeCCs[i]) {
+            Range r{re::lo_codepoint(range), re::hi_codepoint(range)};
+            PabloAST * compiled = compileCodeRange(r, enclosingRange, enclosingTest, pb);
+            pb.createAssign(mTargets[i], pb.createOr(mTargets[i], compiled));
+        }
+    }
+}
+
+PabloAST * Unicode_Range_Compiler::compileCodeRange(Range & codepointRange, Range & enclosingRange, PabloAST * enclosing, PabloBuilder & pb) {
+    pablo::BixNumCompiler bnc(pb);
+    auto differing_bits = enclosingRange.lo ^ enclosingRange.hi;
+    // Calculate the number of significant bits, noting that
+    // the special case if the differing bits value is exactly 2^k.
+    unsigned significant_bits = ceil_log2(differing_bits + 1);
+    //unsigned high_differing_bit = ceil_log2(differing_bits + 1) - 1;
+    codepoint_t mask = (1 << significant_bits) - 1;
+    if (UTF_CompilationTracing) {
+        llvm::errs() << "compileCodeRange(";
+        llvm::errs().write_hex(codepointRange.lo);
+        llvm::errs() << ", ";
+        llvm::errs().write_hex(codepointRange.hi);
+        llvm::errs() << ")\n";
+        llvm::errs() << "  significant_bits = " << significant_bits << "\n";
+    }
+    BixNum truncated = bnc.Truncate(mBasis, significant_bits);
+    codepoint_t lo = codepointRange.lo & mask;
+    codepoint_t hi = codepointRange.hi & mask;
+    if (lo == hi) {
+        return pb.createAnd(enclosing, bnc.EQ(truncated, lo, "EQ_" + std::to_string(lo)));
+    } else {
+        PabloAST * lo_test = bnc.UGE(truncated, lo, "UGE_" + std::to_string(lo));
+        PabloAST * hi_test = bnc.ULE(truncated, hi, "ULE_" + std::to_string(hi));
+        return pb.createAnd3(enclosing, lo_test, hi_test);
+    }
+}
+
 struct SeqData {
     CC_List                 seqCCs;
     Range                   actualRange;
@@ -766,15 +924,11 @@ protected:
     Basis_Set               mScopeBasis[4];
     std::unique_ptr<cc::CC_Compiler> mCodeUnitCompilers[4];
     virtual void createInitialHierarchy(CC_List & ccs) = 0;
-    void subrangePartitioning(CC_List & ccs, Range & range, PabloAST * rangeTest, PabloBuilder & pb);
-    void compileSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb);
-    void compileUnguardedSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb);
-    PabloAST * compileCodeRange(Range & codepointRange, Range & enclosingRange, PabloAST * enclosing, PabloBuilder & pb);
     re::CC * initialCC(CC_List & ccs);
     re::CC * codeUnitCC(re::CC * cc, unsigned codeunit);
     unsigned costModel(CC_List & ccs);
     virtual void prepareScope(unsigned scope, PabloBuilder & pb) = 0;
-    virtual PabloAST * compile_code_unit(unsigned lgth, unsigned position, re::CC * unitCC, PabloBuilder & pb) = 0;
+    virtual void prepareUnifiedBasis(Basis_Set & UnifiedBasis) = 0;
 };
 
 New_UTF_Compiler::New_UTF_Compiler(Var * basis_var, pablo::PabloBuilder & pb) :
@@ -803,228 +957,6 @@ PabloAST * combine(PabloAST * e1, PabloAST * e2, PabloBuilder & pb) {
     if (e1 == nullptr) return e2;
     if (e2 == nullptr) return e1;
     return pb.createOr(e1, e2);
-}
-
-void New_UTF_Compiler::subrangePartitioning(CC_List & ccs, Range & range, PabloAST * rangeTest, PabloBuilder & pb) {
-    auto differing_bits = range.lo ^ range.hi;
-    // Calculate the index of the high differing bit, noting that
-    // the special case if the differing bits value is exactly 2^k.
-    unsigned high_differing_bit = ceil_log2(differing_bits + 1) - 1;
-    codepoint_t partition_size = (1U << high_differing_bit)/PartitioningFactor;
-    if (UTF_CompilationTracing) {
-        llvm::errs() << "subrangePartitioning(";
-        llvm::errs().write_hex(range.lo);
-        llvm::errs() << ", ";
-        llvm::errs().write_hex(range.hi);
-        llvm::errs() << ")\n";
-        llvm::errs() << "  partition_size = " << partition_size << "\n";
-    }    
-    if (partition_size < 32) {
-        partition_size = 32;
-    }
-    if (range.hi-range.lo <= partition_size) {
-        compileUnguardedSubrange(ccs, range, rangeTest, range, pb);
-        return;
-    }
-    codepoint_t mask = partition_size - 1;
-    codepoint_t base = range.lo & ~mask;
-    for (unsigned partition_lo = base; partition_lo < range.hi; partition_lo += partition_size) {
-        unsigned partition_hi = std::min(partition_lo + partition_size - 1, range.hi);
-        Range partition{partition_lo, partition_hi};
-        compileSubrange(ccs, range, rangeTest, partition, pb);
-    }
-}
-
-void New_UTF_Compiler::compileSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb) {
-    CC_List subrangeCCs(ccs.size());
-    extract_CCs_by_range(subrange, ccs, subrangeCCs);
-    //  If there are no CCs that intersect the subrange, no code
-    //  generation is required.
-    Range actual_subrange = CC_Set_Range(subrangeCCs);
-    if (actual_subrange.is_empty()) return;
-    //
-    // Determine whether compilation of the CCs is below our cost model threshhold.
-    unsigned costFactor = costModel(subrangeCCs);
-    if (UTF_CompilationTracing) {
-        llvm::errs() << "compileSubrange(";
-        llvm::errs().write_hex(enclosingRange.lo);
-        llvm::errs() << ", ";
-        llvm::errs().write_hex(enclosingRange.hi);
-        llvm::errs() << ") subrange(";
-        llvm::errs().write_hex(subrange.lo);
-        llvm::errs() << ", ";
-        llvm::errs().write_hex(subrange.hi);
-        llvm::errs() << ")\n";
-        llvm::errs() << "  costFactor = " << costFactor << "\n";
-    }
-    if (costFactor < IfEmbeddingCostThreshhold) {
-        compileUnguardedSubrange(subrangeCCs, enclosingRange, enclosingTest, enclosingRange, pb);
-        return;
-    }
-    // The subrange logic cost exceeds our cost model threshhold.
-    // Construct a guarded if-block and partition into further subranges.
-    unsigned encoded_length = mEncoder.encoded_length(enclosingRange.lo);
-    unsigned code_unit_to_test = mEncoder.common_code_units(enclosingRange.lo, enclosingRange.hi) + 1;
-    unsigned lo_unit = mEncoder.nthCodeUnit(actual_subrange.lo, code_unit_to_test);
-    unsigned hi_unit = mEncoder.nthCodeUnit(actual_subrange.hi, code_unit_to_test);
-    if (UTF_CompilationTracing) {
-        llvm::errs() << "  code_unit_to_test = " << code_unit_to_test << "\n";
-        llvm::errs() << "  lo_unit = " << lo_unit << "  hi_unit = " << hi_unit << "\n";
-    }
-    // Adjust for suffixes by masking off suffix bit 7;
-    if (SuffixOptimization && (code_unit_to_test > 1)) {
-        lo_unit &= 0x3F;
-        hi_unit &= 0x3F;
-    }
-    CC * unitCC = re::makeByte(lo_unit, hi_unit);
-    //
-
-    // TODO: Consider optimizing this test to take advantage of any bits
-    // the current unit that have been determined by enclosingTest.
-
-    PabloAST * unit_test = compile_code_unit(encoded_length, code_unit_to_test, unitCC, pb);
-    PabloAST * subrange_test = pb.createAnd(enclosingTest, unit_test);
-
-    // Construct an if-block.
-    auto nested = pb.createScope();
-    pb.createIf(subrange_test, nested);
-    //codepoint_t test_lo = mEncoder.minCodePointWithCommonCodeUnits(actual_subrange.lo, code_unit_to_test);
-    //codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(actual_subrange.hi, code_unit_to_test);
-    //Range testRange{test_lo, test_hi};
-    subrangePartitioning(subrangeCCs, subrange, subrange_test, nested);
-}
-
-void New_UTF_Compiler::compileUnguardedSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb) {
-    CC_List subrangeCCs(ccs.size());
-    extract_CCs_by_range(subrange, ccs, subrangeCCs);
-    //  If there are no CCs that intersect the subrange, no code
-    //  generation is required.
-    Range actual_subrange = CC_Set_Range(subrangeCCs);
-    if (actual_subrange.is_empty()) return;
-    if (UTF_CompilationTracing) {
-        llvm::errs() << "compileUnguardedSubrange(";
-        llvm::errs().write_hex(enclosingRange.lo);
-        llvm::errs() << ", ";
-        llvm::errs().write_hex(enclosingRange.hi);
-        llvm::errs() << ") subrange(";
-        llvm::errs().write_hex(subrange.lo);
-        llvm::errs() << ", ";
-        llvm::errs().write_hex(subrange.hi);
-        llvm::errs() << ")\n";
-    }
-    for (unsigned i = 0; i < subrangeCCs.size(); i++) {
-        for (const auto range : *subrangeCCs[i]) {
-            Range r{re::lo_codepoint(range), re::hi_codepoint(range)};
-            PabloAST * compiled = compileCodeRange(r, enclosingRange, enclosingTest, pb);
-            pb.createAssign(mTargets[i], pb.createOr(mTargets[i], compiled));
-        }
-    }
-}
-
-//
-// Generate logic for compiling a range of codepoints, all of 
-// which are included in the character class being considered.
-// Preconditions: all candidate codepoints in the given enclosing
-// range are identified by the already generated enclosing PabloAST.
-//
-PabloAST * New_UTF_Compiler::compileCodeRange(Range & codepointRange, Range & enclosingRange, PabloAST * enclosing, PabloBuilder & pb) {
-    const auto lgth_min = mEncoder.encoded_length(codepointRange.lo);
-    const auto lgth_max = mEncoder.encoded_length(codepointRange.hi);
-    if (UTF_CompilationTracing) {
-        llvm::errs() << "compileCodeRange(";
-        llvm::errs().write_hex(enclosingRange.lo);
-        llvm::errs() << ", ";
-        llvm::errs().write_hex(enclosingRange.hi);
-        llvm::errs() << ") codepointRange(";
-        llvm::errs().write_hex(codepointRange.lo);
-        llvm::errs() << ", ";
-        llvm::errs().write_hex(codepointRange.hi);
-        llvm::errs() << ")\n";
-    }
-    // In case the encoded lengths of the code point range are not
-    // all the same, split into equilength subranges and compile
-    // separately.
-    if (lgth_min != lgth_max) {
-        const auto mid = mEncoder.max_codepoint_of_length(lgth_min);
-        Range lo_subrange{codepointRange.lo, mid};
-        Range hi_subrange{mid + 1, codepointRange.hi};
-        PabloAST * lo_subset = compileCodeRange(lo_subrange, enclosingRange, enclosing, pb);
-        PabloAST * hi_subset = compileCodeRange(hi_subrange, enclosingRange, enclosing, pb);
-        return pb.createOr(lo_subset, hi_subset);
-    }
-    //  Now, we have an equilength codepoint range, lgth_min == lgth_max
-    //  Noting that the common code units of the enclosing range are already
-    //  fully identified by the enclosing PabloAST, determine the index of the
-    //  next code unit to test.
-    unsigned unit_idx = mEncoder.common_code_units(enclosingRange.lo, enclosingRange.hi) + 1;
-    auto lo_unit = mEncoder.nthCodeUnit(codepointRange.lo, unit_idx);
-    auto hi_unit = mEncoder.nthCodeUnit(codepointRange.hi, unit_idx);
-    if (UTF_CompilationTracing) {
-        llvm::errs() << "unit_idx = " << unit_idx << ", lo_unit = ";
-        llvm::errs().write_hex(lo_unit);
-        llvm::errs() << ", hi_unit = ";
-        llvm::errs().write_hex(hi_unit);
-        llvm::errs() << ")\n";
-    }
-    // If the next code unit to test is the final code unit, then
-    // a single code unit CC for this range provides the basis
-    // for completing the compilation process.
-    if (unit_idx == lgth_min) {
-        re::CC * unitCC = makeByte(lo_unit, hi_unit);
-        PabloAST * unit_test = compile_code_unit(lgth_min, unit_idx, unitCC, pb);
-        PabloAST * test = pb.createAnd(enclosing, unit_test);
-        return test;
-    }
-    // More than one code unit remains, indicating that we have a
-    // a substantial range of code points.  To minimize the logic
-    // cost, determine the range of possible code units at this
-    // level for which all codepoints are within the desired codepoint
-    // range.
-    if (lo_unit != hi_unit) {
-        if (!mEncoder.isLowCodePointAfterNthCodeUnit(codepointRange.lo, unit_idx)) {
-            codepoint_t mid = mEncoder.maxCodePointWithCommonCodeUnits(codepointRange.lo, unit_idx);
-            if (UTF_CompilationTracing) {
-                llvm::errs() << "mid = " ;
-                llvm::errs().write_hex(mid);
-                llvm::errs() << "\n";
-            }
-            Range lo_subrange{codepointRange.lo, mid};
-            Range hi_subrange{mid + 1, codepointRange.hi};
-            PabloAST * lo_subset = compileCodeRange(lo_subrange, enclosingRange, enclosing, pb);
-            PabloAST * hi_subset = compileCodeRange(hi_subrange, enclosingRange, enclosing, pb);
-            return pb.createOr(lo_subset, hi_subset);
-        } else if (!mEncoder.isHighCodePointAfterNthCodeUnit(codepointRange.hi, unit_idx)) {
-            codepoint_t mid = mEncoder.minCodePointWithCommonCodeUnits(codepointRange.hi, unit_idx);
-            if (UTF_CompilationTracing) {
-                llvm::errs() << "mid = " ;
-                llvm::errs().write_hex(mid);
-                llvm::errs() << "\n";
-            }
-            Range lo_subrange{codepointRange.lo, mid - 1};
-            Range hi_subrange{mid, codepointRange.hi};
-            PabloAST * lo_subset = compileCodeRange(lo_subrange, enclosingRange, enclosing, pb);
-            PabloAST * hi_subset = compileCodeRange(hi_subrange, enclosingRange, enclosing, pb);
-            return pb.createOr(lo_subset, hi_subset);
-        } else { // we have a prefix group covering a full range
-            re::CC * unitCC = makeByte(lo_unit, hi_unit);
-            PabloAST * unit_test = compile_code_unit(lgth_min, unit_idx, unitCC, pb);
-            PabloAST * test = pb.createAnd(enclosing, unit_test);
-            for (unsigned i = unit_idx + 1; i <= lgth_min; i++) {
-                re::CC * suffixCC = makeByte(0x80, 0xBF);
-                PabloAST * suffix_test = compile_code_unit(lgth_min, i, suffixCC, pb);
-                test = pb.createAnd(test, suffix_test);
-            }
-            return test;
-        }
-    } 
-    // else lo_unit == hi_unit
-    re::CC * unitCC = makeByte(lo_unit, hi_unit);
-    PabloAST * unit_test = compile_code_unit(lgth_min, unit_idx, unitCC, pb);
-    PabloAST * test = pb.createAnd(enclosing, unit_test);
-    codepoint_t min_cp = mEncoder.minCodePointWithCommonCodeUnits(codepointRange.lo, unit_idx);
-    codepoint_t max_cp = mEncoder.maxCodePointWithCommonCodeUnits(codepointRange.hi, unit_idx);
-    Range tested{min_cp, max_cp};
-    return compileCodeRange(codepointRange, tested, test, pb);
 }
 
 re::CC * New_UTF_Compiler::codeUnitCC(re::CC * cc, unsigned codeunit) {
@@ -1072,7 +1004,7 @@ public:
     }
 protected:
     void prepareScope(unsigned scope, PabloBuilder & pb) override;
-    PabloAST * compile_code_unit(unsigned lgth, unsigned position, re::CC * unitCC, PabloBuilder & pb) override;
+    void prepareUnifiedBasis(Basis_Set & UnifiedBasis) override;
     void createInitialHierarchy(CC_List & ccs) override;
 };
 
@@ -1081,18 +1013,25 @@ void U21_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
     //  of 21 Unicode bit streams is provided.
 }
 
-PabloAST * U21_Compiler::compile_code_unit(unsigned lgth, unsigned pos, re::CC * unitCC, PabloBuilder & pb) {
-    return mCodeUnitCompilers[0]->compileCC(unitCC, pb);
+void U21_Compiler::prepareUnifiedBasis(Basis_Set & UnifiedBasis) {
+    for (unsigned i = 0; i < UnifiedBasis.size(); i++) {
+        UnifiedBasis[i] = mScopeBasis[0][i];
+    }
 }
 
-
 void U21_Compiler::createInitialHierarchy(CC_List & ccs) {
-    llvm::errs() << "U21_Compiler\n";
+    if (UTF_CompilationTracing) {
+        llvm::errs() << "U21_Compiler\n";
+    }
     if (InitialNonASCIITest) {
         Range ASCII_Range{0, 0x7F};
         CC_List ASCII_ccs;
         extract_CCs_by_range(ASCII_Range, ccs, ASCII_ccs);
-        compileSubrange(ASCII_ccs, ASCII_Range, mPB.createOnes(), ASCII_Range, mPB);
+        //compileSubrange(ASCII_ccs, ASCII_Range, mPB.createOnes(), ASCII_Range, mPB);
+        Basis_Set ASCIIBasis;
+        ASCIIBasis.resize(7);
+        prepareUnifiedBasis(ASCIIBasis);
+        Unicode_Range_Compiler ASCII_compiler(ASCIIBasis, mTargets, mPB);
         PabloAST * e1 = mPB.createOr3(mScopeBasis[0][7], mScopeBasis[0][8], mScopeBasis[0][9]);
         PabloAST * e2 = mPB.createOr3(mScopeBasis[0][10], mScopeBasis[0][11], mScopeBasis[0][12]);
         PabloAST * e3 = mPB.createOr3(mScopeBasis[0][13], mScopeBasis[0][14], mScopeBasis[0][15]);
@@ -1100,15 +1039,26 @@ void U21_Compiler::createInitialHierarchy(CC_List & ccs) {
         PabloAST * e5 = mPB.createOr3(mScopeBasis[0][19], mScopeBasis[0][20], e1);
         PabloAST * e6 = mPB.createOr3(e2, e3, e4);
         PabloAST * nonASCII = mPB.createOr(e5, e6);
+        ASCII_compiler.compile(ccs, ASCII_Range, mPB.createNot(nonASCII));
         auto nested = mPB.createScope();
         mPB.createIf(nonASCII, nested);
         Range nonASCII_Range{0x80, 0x10FFFF};
         CC_List nonASCII_ccs;
         extract_CCs_by_range(nonASCII_Range, ccs, nonASCII_ccs);
-        subrangePartitioning(nonASCII_ccs, nonASCII_Range, nonASCII, nested);
+        //subrangePartitioning(nonASCII_ccs, nonASCII_Range, nonASCII, nested);
+        Basis_Set UnifiedBasis;
+        UnifiedBasis.resize(21);
+        prepareUnifiedBasis(UnifiedBasis);
+        Unicode_Range_Compiler range_compiler(UnifiedBasis, mTargets, mPB);
+        range_compiler.compile(nonASCII_ccs, nonASCII_Range, nonASCII);
     } else {
         Range UnicodeRange{0, 0x10FFFF};
-        subrangePartitioning(ccs, UnicodeRange, mPB.createOnes(), mPB);
+        //subrangePartitioning(ccs, UnicodeRange, mPB.createOnes(), mPB);
+        Basis_Set UnifiedBasis;
+        UnifiedBasis.resize(21);
+        prepareUnifiedBasis(UnifiedBasis);
+        Unicode_Range_Compiler range_compiler(UnifiedBasis, mTargets, mPB);
+        range_compiler.compile(ccs, UnicodeRange, mPB.createOnes());
     }
 }
 
@@ -1125,6 +1075,7 @@ protected:
     void lengthAnalysis(CC_List & ccs);
     void createInitialHierarchy(CC_List & ccs) override;
     void extendLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb);
+    PabloAST * compilePrefix(re::CC * prefixCC, PabloBuilder & pb);
 };
 
 void U8_Compiler::lengthAnalysis(CC_List & ccs) {
@@ -1141,16 +1092,25 @@ void U8_Compiler::lengthAnalysis(CC_List & ccs) {
     }
 }
 
+PabloAST * U8_Compiler::compilePrefix(re::CC * prefixCC, PabloBuilder & pb) {
+    return mCodeUnitCompilers[0]->compileCC(prefixCC, pb);
+}
+
 void U8_Compiler::createInitialHierarchy(CC_List & ccs) {
     lengthAnalysis(ccs);
     if (!mSeqData[ASCII].actualRange.is_empty()) {
-        compileSubrange(mSeqData[ASCII].seqCCs, UTF8_Range[ASCII], mPB.createOnes(), UTF8_Range[ASCII], mPB);
+        Basis_Set ASCIIBasis;
+        ASCIIBasis.resize(7);
+        prepareUnifiedBasis(ASCIIBasis);
+        Unicode_Range_Compiler ASCII_compiler(ASCIIBasis, mTargets, mPB);
+        ASCII_compiler.compile(ccs, UTF8_Range[ASCII], mPB.createNot(mScopeBasis[0][7]));
+        //compileSubrange(mSeqData[ASCII].seqCCs, UTF8_Range[ASCII], mPB.createOnes(), UTF8_Range[ASCII], mPB);
     }
     for (unsigned k = TwoByte; k <= FourByte; k++) {
         if (mSeqData[k].actualRange.is_empty()) {
             mSeqData[k].test = nullptr;
         } else {
-            mSeqData[k].test = compile_code_unit(1, 1, mSeqData[k].byte1CC, mPB);
+            mSeqData[k].test = compilePrefix(mSeqData[k].byte1CC, mPB);
         }
     }
     mSeqData[FourByte].combinedTest = mSeqData[FourByte].test;
@@ -1176,7 +1136,12 @@ void U8_Compiler::extendLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb) {
             codepoint_t test_lo = mEncoder.minCodePointWithCommonCodeUnits(mSeqData[k].actualRange.lo, 1);
             codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(mSeqData[k].actualRange.hi, 1);
             Range testRange{test_lo, test_hi};
-            subrangePartitioning(mSeqData[k].seqCCs, testRange, mSeqData[k].test, nested);
+            //subrangePartitioning(mSeqData[k].seqCCs, testRange, mSeqData[k].test, nested);
+            Basis_Set UnifiedBasis;
+            UnifiedBasis.resize(ceil_log2(UTF8_Range[k].hi));
+            prepareUnifiedBasis(UnifiedBasis);
+            Unicode_Range_Compiler range_compiler(UnifiedBasis, mTargets, nested);
+            range_compiler.compile(mSeqData[k].seqCCs, testRange, mSeqData[k].test);
         }
         if (k == TwoByte) extendLengthHierarchy(ThreeByte, nested);
         else if (k == ThreeByte) extendLengthHierarchy(FourByte, nested);
@@ -1191,7 +1156,7 @@ public:
     U8_Lookahead_Compiler(pablo::Var * Var, PabloBuilder & pb);
 protected:
     void prepareScope(unsigned scope, PabloBuilder & pb) override;
-    PabloAST * compile_code_unit(unsigned lgth, unsigned position, re::CC * unitCC, PabloBuilder & pb) override;
+    void prepareUnifiedBasis(Basis_Set & UnifiedBasis) override;
 };
 
 class U8_Advance_Compiler : public U8_Compiler {
@@ -1199,16 +1164,23 @@ public:
     U8_Advance_Compiler(pablo::Var * Var, PabloBuilder & pb);
 protected:
     void prepareScope(unsigned scope, PabloBuilder & pb) override;
-    PabloAST * compile_code_unit(unsigned lgth, unsigned position, re::CC * unitCC, PabloBuilder & pb) override;
+    void prepareUnifiedBasis(Basis_Set & UnifiedBasis) override;
 };
 
 U8_Lookahead_Compiler::U8_Lookahead_Compiler(pablo::Var * v, PabloBuilder & pb) :
 U8_Compiler(v, pb) {}
 
 void U8_Lookahead_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
-    mScopeBasis[scope].resize(mScopeBasis[0].size());
-    for (unsigned i = 0; i < mScopeBasis[0].size(); i++) {
-        mScopeBasis[scope][i] = pb.createLookahead(mScopeBasis[0][i], scope);
+    for (unsigned sfx = 1; sfx <= scope; sfx++) {
+        bool basis_needed = mScopeBasis[sfx].size() == 0;
+        if (basis_needed) {
+            mScopeBasis[sfx].resize(mScopeBasis[0].size());
+            for (unsigned i = 0; i < mScopeBasis[0].size(); i++) {
+                mScopeBasis[sfx][i] = pb.createLookahead(mScopeBasis[0][i], sfx);
+            }
+            mCodeUnitCompilers[sfx] =
+            std::make_unique<cc::Parabix_CC_Compiler_Builder>(mScopeBasis[sfx]);
+        }
     }
 #if 0
     // Combine the suffix bits into the current test and discard them.
@@ -1219,12 +1191,15 @@ void U8_Lookahead_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
         mScopeBasis[scope].resize(6);
     }
 #endif
-    mCodeUnitCompilers[scope] =
-    std::make_unique<cc::Parabix_CC_Compiler_Builder>(mScopeBasis[scope]);
 }
 
-PabloAST * U8_Lookahead_Compiler::compile_code_unit(unsigned lgth, unsigned pos, re::CC * unitCC, PabloBuilder & pb) {
-    return mCodeUnitCompilers[pos - 1]->compileCC(unitCC, pb);
+void U8_Lookahead_Compiler::prepareUnifiedBasis(Basis_Set & UnifiedBasis) {
+    unsigned max_suffix = UnifiedBasis.size()/6;
+    for (unsigned i = 0; i < UnifiedBasis.size(); i++) {
+        unsigned suffix_pos = max_suffix - i/6;
+        unsigned scope_bit = i % 6;
+        UnifiedBasis[i] = mScopeBasis[suffix_pos][scope_bit];
+    }
 }
 
 U8_Advance_Compiler::U8_Advance_Compiler(pablo::Var * v, PabloBuilder & pb) :
@@ -1234,7 +1209,7 @@ void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
     if (mSeqData[scope].byte1CC->empty()) return;
     for (unsigned sfx = 1; sfx <= scope; sfx++) {
         bool basis_needed = (sfx < scope) && (mScopeBasis[sfx].size() == 0);
-        basis_needed |= (sfx == scope) && (mSeqData[scope].byte1CC->count() > 1);
+        basis_needed |= (sfx == scope) && (mSeqData[scope].byte1CC->count() >= 1);
         if (basis_needed) {
             mScopeBasis[sfx].resize(mScopeBasis[0].size());
             for (unsigned i = 0; i < mScopeBasis[0].size(); i++) {
@@ -1260,8 +1235,12 @@ void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
 #endif
 }
 
-PabloAST * U8_Advance_Compiler::compile_code_unit(unsigned lgth, unsigned pos, re::CC * unitCC, PabloBuilder & pb) {
-    return mCodeUnitCompilers[lgth - pos]->compileCC(unitCC, pb);
+void U8_Advance_Compiler::prepareUnifiedBasis(Basis_Set & UnifiedBasis) {
+    for (unsigned i = 0; i < UnifiedBasis.size(); i++) {
+        unsigned suffix_pos = i/6;
+        unsigned scope_bit = i % 6;
+        UnifiedBasis[i] = mScopeBasis[suffix_pos][scope_bit];
+    }
 }
 
 UTF_Compiler::UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb,

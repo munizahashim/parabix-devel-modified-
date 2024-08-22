@@ -41,12 +41,12 @@ PabloAST * BixNumCompiler::UGT(BixNum value, unsigned floor, const llvm::StringR
     return mPB.createOr(value[i_max], UGT_so_far, Name);
 }
 
-PabloAST * BixNumCompiler::ULE(BixNum value, unsigned floor, const llvm::StringRef &Name) {
-    return mPB.createNot(UGT(value, floor), Name);
+PabloAST * BixNumCompiler::ULE(BixNum value, unsigned ceil, const llvm::StringRef &Name) {
+    return mPB.createNot(UGT(value, ceil), Name);
 }
 
-PabloAST * BixNumCompiler::ULT(BixNum value, unsigned floor, const llvm::StringRef &Name) {
-    return mPB.createNot(UGE(value, floor), Name);
+PabloAST * BixNumCompiler::ULT(BixNum value, unsigned ceil, const llvm::StringRef &Name) {
+    return mPB.createNot(UGE(value, ceil), Name);
 }
 
 PabloAST * BixNumCompiler::UGT(BixNum value, BixNum floor, const llvm::StringRef &Name) {
@@ -80,12 +80,12 @@ PabloAST * BixNumCompiler::UGT(BixNum value, BixNum floor, const llvm::StringRef
     }
 }
 
-PabloAST * BixNumCompiler::ULE(BixNum value, BixNum floor, const llvm::StringRef &Name) {
-    return mPB.createNot(UGT(value, floor), Name);
+PabloAST * BixNumCompiler::ULE(BixNum value, BixNum ceil, const llvm::StringRef &Name) {
+    return mPB.createNot(UGT(value, ceil), Name);
 }
 
-PabloAST * BixNumCompiler::ULT(BixNum value, BixNum floor, const llvm::StringRef &Name) {
-    return UGT(floor, value, Name);
+PabloAST * BixNumCompiler::ULT(BixNum value, BixNum ceil, const llvm::StringRef &Name) {
+    return UGT(ceil, value, Name);
 }
 
 PabloAST * BixNumCompiler::UGE(BixNum value, BixNum floor, const llvm::StringRef &Name) {
@@ -93,7 +93,7 @@ PabloAST * BixNumCompiler::UGE(BixNum value, BixNum floor, const llvm::StringRef
 }
 
 PabloAST * BixNumCompiler::EQ(BixNum value, unsigned floor, const llvm::StringRef &Name) {
-    if (floor >> value.size() != 0) return mPB.createZeroes();
+    if ((floor >> value.size()) != 0) return mPB.createZeroes();
     PabloAST * EQ_1 = mPB.createOnes();
     PabloAST * EQ_0 = mPB.createZeroes();
     for (unsigned i = 0; i < value.size(); i++) {
