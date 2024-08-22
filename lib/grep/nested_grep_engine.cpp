@@ -260,37 +260,35 @@ void NestedInternalSearchEngine::grepCodeGen() {
     const auto preserve = mGrepDriver.getPreservesKernels();
     mGrepDriver.setPreserveKernels(true);
 
-    Scalar * const buffer = mGrepDriver.CreateScalar(mGrepDriver.getInt8PtrTy());
-    Scalar * const length = mGrepDriver.CreateScalar(mGrepDriver.getSizeTy());
-    Scalar * const accumulator = mGrepDriver.CreateScalar(mGrepDriver.getIntAddrTy());
+    auto E = CreatePipeline(mGrepDriver, Input<uint8_t*>{"buffer"}, Input<size_t>{"length"}, Input<uintptr_t>{"accumulator"} );
 
-    auto E = mGrepDriver.makePipeline({Binding{"buffer", buffer},
-        Binding{"length", length},
-        Binding{"accumulator", accumulator}});
+    Scalar * const buffer = E.getInputScalar("buffer");
+    Scalar * const length = E.getInputScalar("length");
+    Scalar * const accumulator = E.getInputScalar("accumulator");
 
-    StreamSet * const ByteStream = E->CreateStreamSet(1, 8);
-    E->CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
+    StreamSet * const ByteStream = E.CreateStreamSet(1, 8);
+    E.CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
 
-    E->CreateKernelCall<S2PKernel>(ByteStream, mBasisBits);
-    E->CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{mBreakCC}, mBasisBits, mBreaks);
-    E->CreateKernelCall<UTF8_index>(mBasisBits, mU8index);
+    E.CreateKernelCall<S2PKernel>(ByteStream, mBasisBits);
+    E.CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{mBreakCC}, mBasisBits, mBreaks);
+    E.CreateKernelCall<UTF8_index>(mBasisBits, mU8index);
 
     assert (mNested.size() > 1 && mNested.back());
     Kernel * const outer = mNested.back();
-    E->AddKernelCall(outer, PipelineKernel::KernelBindingFlag::Family);
+    E.AddKernelCall(outer, PipelineKernel::KernelBindingFlag::Family);
     if (MatchCoordinateBlocks > 0) {
-        StreamSet * const MatchCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
-        E->CreateKernelCall<MatchCoordinatesKernel>(mMatches, mBreaks, MatchCoords, MatchCoordinateBlocks);
-        Kernel * const matchK = E->CreateKernelCall<MatchReporter>(ByteStream, MatchCoords, accumulator);
+        StreamSet * const MatchCoords = E.CreateStreamSet(3, sizeof(size_t) * 8);
+        E.CreateKernelCall<MatchCoordinatesKernel>(mMatches, mBreaks, MatchCoords, MatchCoordinateBlocks);
+        Kernel * const matchK = E.CreateKernelCall<MatchReporter>(ByteStream, MatchCoords, accumulator);
         matchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
         matchK->link("finalize_match_wrapper", finalize_match_wrapper);
     } else {
-        Kernel * const scanMatchK = E->CreateKernelCall<ScanMatchKernel>(mMatches, mBreaks, ByteStream, accumulator, ScanMatchBlocks);
+        Kernel * const scanMatchK = E.CreateKernelCall<ScanMatchKernel>(mMatches, mBreaks, ByteStream, accumulator, ScanMatchBlocks);
         scanMatchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
         scanMatchK->link("finalize_match_wrapper", finalize_match_wrapper);
     }
 
-    mMainMethod.push_back(E->compile());
+    mMainMethod.push_back((void*)E.compile());
     assert (mMainMethod.size() + 1 == mNested.size());
     mGrepDriver.setPreserveKernels(preserve);
 }
@@ -300,11 +298,6 @@ void NestedInternalSearchEngine::doGrep(const char * search_buffer, size_t buffe
     auto f = reinterpret_cast<GrepFunctionType>(mMainMethod.back());
     f(search_buffer, bufferLength, &accum);
 }
-
-//NestedInternalSearchEngine::NestedInternalSearchEngine(const std::unique_ptr<grep::GrepEngine> & engine)
-//: NestedInternalSearchEngine(engine->mGrepDriver) {
-
-//}
 
 NestedInternalSearchEngine::~NestedInternalSearchEngine() { }
 

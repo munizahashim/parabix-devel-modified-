@@ -52,9 +52,9 @@
 #include <iomanip>
 #include <kernel/pipeline/program_builder.h>
 
-#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
-#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
-#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
 using namespace pablo;
 using namespace parse;
@@ -226,56 +226,55 @@ extern "C" void callback(const char * L6end_ptr, uint8_t hashval) {
 
 HashDemoFunctionType hashdemo_gen (CPUDriver & driver) {
 
-    auto P = driver.makePipeline({Binding{driver.getInt32Ty(), "inputFileDecriptor"}}, {});
+    auto P = CreatePipeline(driver, Input<uint32_t>{"inputFileDecriptor"});
 
-    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
 
     // Source data
-    StreamSet * const codeUnitStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
+    StreamSet * const codeUnitStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
 
-    StreamSet * const u8basis = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(codeUnitStream, u8basis);
+    StreamSet * const u8basis = P.CreateStreamSet(8);
+    P.CreateKernelCall<S2PKernel>(codeUnitStream, u8basis);
     SHOW_BYTES(codeUnitStream);
     SHOW_BIXNUM(u8basis);
 
-    StreamSet * WordChars = P->CreateStreamSet(1);
-    P->CreateKernelCall<WordMarkKernel>(u8basis, WordChars);
+    StreamSet * WordChars = P.CreateStreamSet(1);
+    P.CreateKernelCall<WordMarkKernel>(u8basis, WordChars);
     SHOW_STREAM(WordChars);
     
-    StreamSet * const SymbolRuns = P->CreateStreamSet(1);
-    P->CreateKernelCall<ParseSymbols>(u8basis, WordChars, SymbolRuns);
+    StreamSet * const SymbolRuns = P.CreateStreamSet(1);
+    P.CreateKernelCall<ParseSymbols>(u8basis, WordChars, SymbolRuns);
     SHOW_STREAM(SymbolRuns);
     
-    StreamSet * const runIndex = P->CreateStreamSet(4);
-    StreamSet * const overflow = P->CreateStreamSet(1);
-    P->CreateKernelCall<RunIndex>(SymbolRuns, runIndex, overflow);
+    StreamSet * const runIndex = P.CreateStreamSet(4);
+    StreamSet * const overflow = P.CreateStreamSet(1);
+    P.CreateKernelCall<RunIndex>(SymbolRuns, runIndex, overflow);
     SHOW_BIXNUM(runIndex);
     SHOW_STREAM(overflow);
     
-    
-    StreamSet * const BixHashes = P->CreateStreamSet(hash_bits);
-    P->CreateKernelCall<BixHash>(u8basis, SymbolRuns, BixHashes, 3);
+    StreamSet * const BixHashes = P.CreateStreamSet(hash_bits);
+    P.CreateKernelCall<BixHash>(u8basis, SymbolRuns, BixHashes, 3);
     SHOW_BIXNUM(BixHashes);
 
 
-    StreamSet * Lgth6symEnds = P->CreateStreamSet(1);
-    P->CreateKernelCall<RunLengthSelector>(6, 6, SymbolRuns, runIndex, overflow, Lgth6symEnds);
+    StreamSet * Lgth6symEnds = P.CreateStreamSet(1);
+    P.CreateKernelCall<RunLengthSelector>(6, 6, SymbolRuns, runIndex, overflow, Lgth6symEnds);
     SHOW_STREAM(Lgth6symEnds);
     
-    StreamSet * const L6_Hashes = P->CreateStreamSet(hash_bits);
-    FilterByMask(*P.get(), Lgth6symEnds, BixHashes, L6_Hashes);
+    StreamSet * const L6_Hashes = P.CreateStreamSet(hash_bits);
+    FilterByMask(P, Lgth6symEnds, BixHashes, L6_Hashes);
     SHOW_BIXNUM(L6_Hashes);
     
-    StreamSet * const hashValues = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(L6_Hashes, hashValues);
+    StreamSet * const hashValues = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(L6_Hashes, hashValues);
 
-    StreamSet * const scanIndices = P->CreateStreamSet(1, 64);
-    P->CreateKernelCall<ScanIndexGenerator>(Lgth6symEnds, scanIndices);
+    StreamSet * const scanIndices = P.CreateStreamSet(1, 64);
+    P.CreateKernelCall<ScanIndexGenerator>(Lgth6symEnds, scanIndices);
     
-    scan::Reader(*P.get(), driver, SCAN_CALLBACK(callback), codeUnitStream, scanIndices, { hashValues });
+    scan::Reader(P, driver, SCAN_CALLBACK(callback), codeUnitStream, scanIndices, { hashValues });
     
-    return reinterpret_cast<HashDemoFunctionType>(P->compile());
+    return P.compile();
 }
 
 int main(int argc, char *argv[]) {

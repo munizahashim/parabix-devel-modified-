@@ -63,6 +63,10 @@ public:
         return mDriver.CreateConstant(value);
     }
 
+    Scalar * CreateScalar(llvm::Type * type) {
+        return mDriver.CreateScalar(type);
+    }
+
     using pattern_t = std::vector<uint64_t>;
 
     #define RETURN_REPSTREAMSET(...) \

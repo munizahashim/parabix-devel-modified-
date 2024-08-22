@@ -56,20 +56,19 @@ typedef void(*XMLProcessFunctionType)(uint32_t fd);
 XMLProcessFunctionType xmlPipelineGen(CPUDriver & driver, std::shared_ptr<PabloParser> parser, std::shared_ptr<SourceFile> xmlPabloSrc) {
     const size_t ERROR_STREAM_COUNT = 9;
 
-    Type * const i32Ty = driver.getInt32Ty();
-    auto P = driver.makePipeline({Binding{i32Ty, "fd"}});
-    Scalar * const fileDescriptor = P->getInputScalar("fd");
+    auto P = CreatePipeline(driver, Input<uint32_t>{"fd"});
+    Scalar * const fileDescriptor = P.getInputScalar("fd");
 
-    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
-    StreamSet * const BasisBits = P->CreateStreamSet(8, 1);
-    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    StreamSet * const BasisBits = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
 
-    StreamSet * const Lex = P->CreateStreamSet(27, 1);
-    StreamSet * const U8 = P->CreateStreamSet(1, 1);
-    StreamSet * const LexError = P->CreateStreamSet(ERROR_STREAM_COUNT, 1);
-    P->CreateKernelCall<PabloSourceKernel>(
+    StreamSet * const Lex = P.CreateStreamSet(27, 1);
+    StreamSet * const U8 = P.CreateStreamSet(1, 1);
+    StreamSet * const LexError = P.CreateStreamSet(ERROR_STREAM_COUNT, 1);
+    P.CreateKernelCall<PabloSourceKernel>(
         parser,
         xmlPabloSrc,
         "ClassifyBytesValidateUtf8",
@@ -83,10 +82,10 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & driver, std::shared_ptr<PabloP
         }
     );
 
-    StreamSet * const Marker = P->CreateStreamSet(5, 1);
-    StreamSet * const CCPCallouts = P->CreateStreamSet(9, 1);
-    StreamSet * const CCPError = P->CreateStreamSet(ERROR_STREAM_COUNT, 1);
-    P->CreateKernelCall<PabloSourceKernel>(
+    StreamSet * const Marker = P.CreateStreamSet(5, 1);
+    StreamSet * const CCPCallouts = P.CreateStreamSet(9, 1);
+    StreamSet * const CCPError = P.CreateStreamSet(ERROR_STREAM_COUNT, 1);
+    P.CreateKernelCall<PabloSourceKernel>(
         parser,
         xmlPabloSrc,
         "Preprocess",
@@ -100,10 +99,10 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & driver, std::shared_ptr<PabloP
         }
     );
 
-    StreamSet * const TagError = P->CreateStreamSet(ERROR_STREAM_COUNT, 1);
-    StreamSet * const TagCallouts = P->CreateStreamSet(10, 1);
-    StreamSet * const PostProcessTagMatchingStreams = P->CreateStreamSet(5, 1);
-    P->CreateKernelCall<PabloSourceKernel>(
+    StreamSet * const TagError = P.CreateStreamSet(ERROR_STREAM_COUNT, 1);
+    StreamSet * const TagCallouts = P.CreateStreamSet(10, 1);
+    StreamSet * const PostProcessTagMatchingStreams = P.CreateStreamSet(5, 1);
+    P.CreateKernelCall<PabloSourceKernel>(
         parser,
         xmlPabloSrc,
         "ParseTags",
@@ -118,9 +117,9 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & driver, std::shared_ptr<PabloP
         }
     );
 
-    StreamSet * const RefError = P->CreateStreamSet(ERROR_STREAM_COUNT, 1);
-    StreamSet * const RefCallouts = P->CreateStreamSet(6, 1);
-    P->CreateKernelCall<PabloSourceKernel>(
+    StreamSet * const RefError = P.CreateStreamSet(ERROR_STREAM_COUNT, 1);
+    StreamSet * const RefCallouts = P.CreateStreamSet(6, 1);
+    P.CreateKernelCall<PabloSourceKernel>(
         parser,
         xmlPabloSrc,
         "ParseRef",
@@ -134,9 +133,9 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & driver, std::shared_ptr<PabloP
         }
     );
 
-    StreamSet * const CheckStreams = P->CreateStreamSet(3 ,1);
-    StreamSet * const NameError = P->CreateStreamSet(ERROR_STREAM_COUNT, 1);
-    P->CreateKernelCall<PabloSourceKernel>(
+    StreamSet * const CheckStreams = P.CreateStreamSet(3 ,1);
+    StreamSet * const NameError = P.CreateStreamSet(ERROR_STREAM_COUNT, 1);
+    P.CreateKernelCall<PabloSourceKernel>(
         parser,
         xmlPabloSrc,
         "ValidateXmlNames",
@@ -154,8 +153,8 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & driver, std::shared_ptr<PabloP
         }
     );
 
-    StreamSet * const Errors = P->CreateStreamSet(ERROR_STREAM_COUNT, 1);
-    P->CreateKernelCall<StreamsMerge>(
+    StreamSet * const Errors = P.CreateStreamSet(ERROR_STREAM_COUNT, 1);
+    P.CreateKernelCall<StreamsMerge>(
         std::vector<StreamSet *>{LexError, CCPError, TagError, RefError, NameError}, 
         Errors
     );
@@ -175,11 +174,11 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & driver, std::shared_ptr<PabloP
         the top name (which will be the name of the empty tag) off the stack.
      */
     { // Tag Matching Scope
-        StreamSet * const StartIndices = scan::ToIndices(*P.get(), su::Select(*P.get(), PostProcessTagMatchingStreams, 0));
-        StreamSet * const EndIndices = scan::ToIndices(*P.get(), su::Select(*P.get(), PostProcessTagMatchingStreams, 1));
-        StreamSet * const BasisStreams = su::Select(*P.get(), PostProcessTagMatchingStreams, su::Range(2, 5));
-        StreamSet * const Codes = su::Multiplex(*P.get(), BasisStreams);
-        scan::Reader(*P.get(), driver,
+        StreamSet * const StartIndices = scan::ToIndices(P, su::Select(P, PostProcessTagMatchingStreams, 0));
+        StreamSet * const EndIndices = scan::ToIndices(P, su::Select(P, PostProcessTagMatchingStreams, 1));
+        StreamSet * const BasisStreams = su::Select(P, PostProcessTagMatchingStreams, su::Range(2, 5));
+        StreamSet * const Codes = su::Multiplex(P, BasisStreams);
+        scan::Reader(P, driver,
             SCAN_CALLBACK(postproc_tagMatcher),
             ByteStream,
             { StartIndices, EndIndices },
@@ -208,7 +207,7 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & driver, std::shared_ptr<PabloP
                   x      x     0x2: list end
      */
     { // Duplicate Attribute Detection Scope
-        StreamSet * const BasisStreams = su::Select(*P.get(), TagCallouts, {2, 9});
+        StreamSet * const BasisStreams = su::Select(P, TagCallouts, {2, 9});
 
         // `StartIndices` are the primary scanning indices.
         //
@@ -219,8 +218,8 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & driver, std::shared_ptr<PabloP
         // `attrListStarts` always has a bit at the start of the first attribute
         // name meaning we don't need to include it in this merge. The start of
         // a new list is determined by the multiplexed code.
-        StreamSet * const StartIndices = P->CreateStreamSet(1, 64);
-        P->CreateKernelCall<ScanIndexGenerator>(su::Merge(*P.get(), TagCallouts, {2, 9}), StartIndices);
+        StreamSet * const StartIndices = P.CreateStreamSet(1, 64);
+        P.CreateKernelCall<ScanIndexGenerator>(su::Merge(P, TagCallouts, {2, 9}), StartIndices);
 
         // `EndIndices` are an additional stream which denotes the ends of
         // attribute names or values.
@@ -231,11 +230,11 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & driver, std::shared_ptr<PabloP
         //
         // `attrListEnds` is present in both start and end index streams as there
         // needs to be a one-to-one correspondence between the two streams.
-        StreamSet * const EndIndices = P->CreateStreamSet(1, 64);
-        P->CreateKernelCall<ScanIndexGenerator>(su::Merge(*P.get(), TagCallouts, {3, 9}), EndIndices);
+        StreamSet * const EndIndices = P.CreateStreamSet(1, 64);
+        P.CreateKernelCall<ScanIndexGenerator>(su::Merge(P, TagCallouts, {3, 9}), EndIndices);
 
-        StreamSet * const Codes = su::Multiplex(*P.get(), BasisStreams);
-        scan::Reader(*P.get(), driver,
+        StreamSet * const Codes = su::Multiplex(P, BasisStreams);
+        scan::Reader(P, driver,
             SCAN_CALLBACK(postproc_duplicateAttrDetector), 
             ByteStream, 
             { StartIndices, EndIndices },
@@ -246,8 +245,8 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & driver, std::shared_ptr<PabloP
     // Use a custom linebreak kernel which always places a bit at EOF even if
     // the file ends in a linebreak. This is done to simplify the LineSpan
     // logic while maintaining the ability to find errors which occur at EOF.
-    StreamSet * const LineBreakStream = XmlLineBreaks(*P.get(), ByteStream);
-    StreamSet * const LineSpans = scan::LineSpans(*P.get(), LineBreakStream);
+    StreamSet * const LineBreakStream = XmlLineBreaks(P, ByteStream);
+    StreamSet * const LineSpans = scan::LineSpans(P, LineBreakStream);
 
 
     /**
@@ -258,12 +257,12 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & driver, std::shared_ptr<PabloP
      * via a `Code` and logged.
      */
     { // Error Stream Processing Scope
-        StreamSet * const Errs = su::Collapse(*P.get(), Errors);
-        StreamSet * const Indices = scan::ToIndices(*P.get(), Errs);
-        StreamSet * const LineNumbers = scan::LineNumbers(*P.get(), Errs, LineBreakStream);
-        StreamSet * const Spans = scan::FilterLineSpans(*P.get(), LineNumbers, LineSpans);
-        StreamSet * const Codes = su::MultiplexWithMask(*P.get(), su::Select(*P.get(), Errors, su::Range(0, 8)), /*mask:*/ Errs);
-        scan::Reader(*P.get(), driver,
+        StreamSet * const Errs = su::Collapse(P, Errors);
+        StreamSet * const Indices = scan::ToIndices(P, Errs);
+        StreamSet * const LineNumbers = scan::LineNumbers(P, Errs, LineBreakStream);
+        StreamSet * const Spans = scan::FilterLineSpans(P, LineNumbers, LineSpans);
+        StreamSet * const Codes = su::MultiplexWithMask(P, su::Select(P, Errors, su::Range(0, 8)), /*mask:*/ Errs);
+        scan::Reader(P, driver,
             SCAN_CALLBACK(postproc_errorStreamsCallback),
             ByteStream, 
             { Indices, Spans },
@@ -274,35 +273,35 @@ XMLProcessFunctionType xmlPipelineGen(CPUDriver & driver, std::shared_ptr<PabloP
 #define POSTPROCESS_SCAN_KERNEL(SCAN_STREAM, CALLBACK) \
 { \
     StreamSet * const ScanStream = SCAN_STREAM; \
-    StreamSet * const ScanPositions = scan::ToIndices(*P.get(), ScanStream); \
-    StreamSet * const LineNumbers = scan::LineNumbers(*P.get(), ScanStream, LineBreakStream); \
-    StreamSet * const Spans = scan::FilterLineSpans(*P.get(), LineNumbers, LineSpans); \
-    scan::Reader(*P.get(), driver, SCAN_CALLBACK(CALLBACK), ByteStream, { ScanPositions, Spans }, { LineNumbers }); \
+    StreamSet * const ScanPositions = scan::ToIndices(P, ScanStream); \
+    StreamSet * const LineNumbers = scan::LineNumbers(P, ScanStream, LineBreakStream); \
+    StreamSet * const Spans = scan::FilterLineSpans(P, LineNumbers, LineSpans); \
+    scan::Reader(P, driver, SCAN_CALLBACK(CALLBACK), ByteStream, { ScanPositions, Spans }, { LineNumbers }); \
 }
 
-    POSTPROCESS_SCAN_KERNEL(su::Select(*P.get(), CheckStreams, 0), postproc_validateNameStart);
-    POSTPROCESS_SCAN_KERNEL(su::Select(*P.get(), CheckStreams, 1), postproc_validateName);
-    POSTPROCESS_SCAN_KERNEL(su::Select(*P.get(), CCPCallouts, 4), postproc_validatePIName);
-    POSTPROCESS_SCAN_KERNEL(su::Select(*P.get(), CCPCallouts, 2), postproc_validateCDATA);
-    POSTPROCESS_SCAN_KERNEL(su::Select(*P.get(), RefCallouts, 0), postproc_validateGenRef);
-    POSTPROCESS_SCAN_KERNEL(su::Select(*P.get(), RefCallouts, 2), postproc_validateDecRef);
-    POSTPROCESS_SCAN_KERNEL(su::Select(*P.get(), RefCallouts, 4), postproc_validateHexRef);
-    POSTPROCESS_SCAN_KERNEL(su::Select(*P.get(), CheckStreams, 2), postproc_validateAttRef);
+    POSTPROCESS_SCAN_KERNEL(su::Select(P, CheckStreams, 0), postproc_validateNameStart);
+    POSTPROCESS_SCAN_KERNEL(su::Select(P, CheckStreams, 1), postproc_validateName);
+    POSTPROCESS_SCAN_KERNEL(su::Select(P, CCPCallouts, 4), postproc_validatePIName);
+    POSTPROCESS_SCAN_KERNEL(su::Select(P, CCPCallouts, 2), postproc_validateCDATA);
+    POSTPROCESS_SCAN_KERNEL(su::Select(P, RefCallouts, 0), postproc_validateGenRef);
+    POSTPROCESS_SCAN_KERNEL(su::Select(P, RefCallouts, 2), postproc_validateDecRef);
+    POSTPROCESS_SCAN_KERNEL(su::Select(P, RefCallouts, 4), postproc_validateHexRef);
+    POSTPROCESS_SCAN_KERNEL(su::Select(P, CheckStreams, 2), postproc_validateAttRef);
 
     /*
         XML Declaration Parsing
      */
     {
-        StreamSet * const Marker = su::Select(*P.get(), CCPCallouts, 8);
-        StreamSet * const Indices = scan::ToIndices(*P.get(), Marker);
-        scan::Reader(*P.get(), driver,
+        StreamSet * const Marker = su::Select(P, CCPCallouts, 8);
+        StreamSet * const Indices = scan::ToIndices(P, Marker);
+        scan::Reader(P, driver,
             SCAN_CALLBACK(postproc_validateXmlDecl),
             ByteStream,
             { Indices },
             { Indices });
     }
 
-    return reinterpret_cast<XMLProcessFunctionType>(P->compile());
+    return reinterpret_cast<XMLProcessFunctionType>(P.compile());
 }
 
 

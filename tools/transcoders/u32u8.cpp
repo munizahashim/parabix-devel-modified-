@@ -50,30 +50,28 @@ typedef void (*u32u8FunctionType)(uint32_t fd);
 
 u32u8FunctionType u32u8_gen (CPUDriver & driver) {
 
-    Type * const int32Ty = driver.getInt32Ty();
-    auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
-
-    Scalar * const fileDescriptor = P->getInputScalar("fd");
+    auto P = CreatePipeline(driver, Input<uint32_t>("fd"));
+    Scalar * const fileDescriptor = P.getInputScalar("fd");
 
     // Source data
-    StreamSet * const codeUnitStream = P->CreateStreamSet(1, 32);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
+    StreamSet * const codeUnitStream = P.CreateStreamSet(1, 32);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
 
     // Source buffers for transposed UTF-32 basis bits.
-    StreamSet * const u32basis = P->CreateStreamSet(21);
-    P->CreateKernelCall<S2P_21Kernel>(codeUnitStream, u32basis);
+    StreamSet * const u32basis = P.CreateStreamSet(21);
+    P.CreateKernelCall<S2P_21Kernel>(codeUnitStream, u32basis);
 
     // Final buffers for computed UTF-8 basis bits and byte stream.
-    StreamSet * const u8basis = P->CreateStreamSet(8);
-    StreamSet * const u8bytes = P->CreateStreamSet(1, 8);
+    StreamSet * const u8basis = P.CreateStreamSet(8);
+    StreamSet * const u8bytes = P.CreateStreamSet(1, 8);
 
-    U21_to_UTF8(*P.get(), u32basis, u8basis);
+    U21_to_UTF8(P, u32basis, u8basis);
 
-    P->CreateKernelCall<P2SKernel>(u8basis, u8bytes);
+    P.CreateKernelCall<P2SKernel>(u8basis, u8bytes);
 
-    P->CreateKernelCall<StdOutKernel>(u8bytes);
+    P.CreateKernelCall<StdOutKernel>(u8bytes);
 
-    return reinterpret_cast<u32u8FunctionType>(P->compile());
+    return reinterpret_cast<u32u8FunctionType>(P.compile());
 }
 
 int main(int argc, char *argv[]) {

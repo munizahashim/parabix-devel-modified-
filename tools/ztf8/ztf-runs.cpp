@@ -160,65 +160,63 @@ typedef void (*ztfRunsFunctionType)(uint32_t fd);
 
 ztfRunsFunctionType ztfRuns_compression_gen (CPUDriver & driver) {
 
-    Type * const int32Ty = driver.getInt32Ty();
-    auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
+    auto P = CreatePipeline(driver, Input<uint32_t>{"fd"});
 
-    Scalar * const fileDescriptor = P->getInputScalar("fd");
+    Scalar * const fileDescriptor = P.getInputScalar("fd");
 
     // Source data
-    StreamSet * const codeUnitStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
+    StreamSet * const codeUnitStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
 
-    StreamSet * const u8basis = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(codeUnitStream, u8basis);
+    StreamSet * const u8basis = P.CreateStreamSet(8);
+    P.CreateKernelCall<S2PKernel>(codeUnitStream, u8basis);
     
-    StreamSet * excludedWordChars = P->CreateStreamSet(1);
-    P->CreateKernelCall<WordMarkKernel>(u8basis, excludedWordChars);
+    StreamSet * excludedWordChars = P.CreateStreamSet(1);
+    P.CreateKernelCall<WordMarkKernel>(u8basis, excludedWordChars);
     
-    StreamSet * const byteRuns = P->CreateStreamSet(1);
-    P->CreateKernelCall<ByteRun>(u8basis, excludedWordChars, byteRuns);
+    StreamSet * const byteRuns = P.CreateStreamSet(1);
+    P.CreateKernelCall<ByteRun>(u8basis, excludedWordChars, byteRuns);
 
-    StreamSet * const runIndex = P->CreateStreamSet(3);
-    P->CreateKernelCall<RunIndex>(byteRuns, runIndex);
+    StreamSet * const runIndex = P.CreateStreamSet(3);
+    P.CreateKernelCall<RunIndex>(byteRuns, runIndex);
 
-    StreamSet * const replacedBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<ZTF_Run_Replacement>(u8basis, runIndex, replacedBasis);
+    StreamSet * const replacedBasis = P.CreateStreamSet(8);
+    P.CreateKernelCall<ZTF_Run_Replacement>(u8basis, runIndex, replacedBasis);
     
-    StreamSet * const toExtract = P->CreateStreamSet(1);
-    P->CreateKernelCall<ZTF_CompressionMask>(byteRuns, runIndex, toExtract);
+    StreamSet * const toExtract = P.CreateStreamSet(1);
+    P.CreateKernelCall<ZTF_CompressionMask>(byteRuns, runIndex, toExtract);
 
-    StreamSet * const ztf_basis = P->CreateStreamSet(8);
-    FilterByMask(*P.get(), toExtract, replacedBasis, ztf_basis);
-    StreamSet * const ZTF_bytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(ztf_basis, ZTF_bytes);
-    P->CreateKernelCall<StdOutKernel>(ZTF_bytes);
-    return reinterpret_cast<ztfRunsFunctionType>(P->compile());
+    StreamSet * const ztf_basis = P.CreateStreamSet(8);
+    FilterByMask(P, toExtract, replacedBasis, ztf_basis);
+    StreamSet * const ZTF_bytes = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(ztf_basis, ZTF_bytes);
+    P.CreateKernelCall<StdOutKernel>(ZTF_bytes);
+    return P.compile();
 }
 
 ztfRunsFunctionType ztfRuns_decompression_gen (CPUDriver & driver) {
-    Type * const int32Ty = driver.getInt32Ty();
-    auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
-    Scalar * const fileDescriptor = P->getInputScalar("fd");
+    auto P = CreatePipeline(driver, Input<uint32_t>{"fd"});
+    Scalar * const fileDescriptor = P.getInputScalar("fd");
 
     // Source data
-    StreamSet * const source = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, source);
-    StreamSet * const ztfRunsBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(source, ztfRunsBasis);
-    StreamSet * const ztfRunLengths = P->CreateStreamSet(3);
-    P->CreateKernelCall<ZTF_Run_Length_Decoder>(ztfRunsBasis, ztfRunLengths);
-    StreamSet * const ztfRunSpreadMask = InsertionSpreadMask(*P.get(), ztfRunLengths);
-    StreamSet * const ztfRuns_u8_Basis = P->CreateStreamSet(8);
-    SpreadByMask(*P.get(), ztfRunSpreadMask, ztfRunsBasis, ztfRuns_u8_Basis);
-    StreamSet * const ztfRunCodes = P->CreateStreamSet(1);
+    StreamSet * const source = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, source);
+    StreamSet * const ztfRunsBasis = P.CreateStreamSet(8);
+    P.CreateKernelCall<S2PKernel>(source, ztfRunsBasis);
+    StreamSet * const ztfRunLengths = P.CreateStreamSet(3);
+    P.CreateKernelCall<ZTF_Run_Length_Decoder>(ztfRunsBasis, ztfRunLengths);
+    StreamSet * const ztfRunSpreadMask = InsertionSpreadMask(P, ztfRunLengths);
+    StreamSet * const ztfRuns_u8_Basis = P.CreateStreamSet(8);
+    SpreadByMask(P, ztfRunSpreadMask, ztfRunsBasis, ztfRuns_u8_Basis);
+    StreamSet * const ztfRunCodes = P.CreateStreamSet(1);
     re::CC * const runCodeCC = re::makeByte(0xF9, 0xFF);
-    P->CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{runCodeCC}, ztfRuns_u8_Basis, ztfRunCodes);
-    StreamSet * const u8basis = P->CreateStreamSet(8);
-    P->CreateKernelCall<ZTF_Run_Decompression>(ztfRunCodes, ztfRunSpreadMask, ztfRuns_u8_Basis, u8basis);
-    StreamSet * const u8bytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(u8basis, u8bytes);
-    P->CreateKernelCall<StdOutKernel>(u8bytes);
-    return reinterpret_cast<ztfRunsFunctionType>(P->compile());
+    P.CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{runCodeCC}, ztfRuns_u8_Basis, ztfRunCodes);
+    StreamSet * const u8basis = P.CreateStreamSet(8);
+    P.CreateKernelCall<ZTF_Run_Decompression>(ztfRunCodes, ztfRunSpreadMask, ztfRuns_u8_Basis, u8basis);
+    StreamSet * const u8bytes = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(u8basis, u8bytes);
+    P.CreateKernelCall<StdOutKernel>(u8bytes);
+    return P.compile();
 }
 
 int main(int argc, char *argv[]) {

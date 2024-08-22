@@ -107,9 +107,9 @@
 #include <iostream>
 #include <kernel/pipeline/driver/cpudriver.h>
 
-#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
-#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
-#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
 using namespace kernel;
 using namespace llvm;
@@ -185,19 +185,19 @@ typedef void (*HexLinesFunctionType)(uint32_t fd);
 HexLinesFunctionType generatePipeline(CPUDriver & driver) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
-    auto P = driver.makePipeline({Binding{driver.getInt32Ty(), "inputFileDecriptor"}}, {});
+    auto P = CreatePipeline(driver, Input<uint32_t>{"inputFileDecriptor"});
     //  The program will use a file descriptor as an input.
-    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-    StreamSet * ByteStream = P->CreateStreamSet(1, 8);
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+    StreamSet * ByteStream = P.CreateStreamSet(1, 8);
     //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
     //  from a file descriptor.
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
     SHOW_BYTES(ByteStream);
 
     //  The Parabix basis bits representation is created by the Parabix S2P kernel.
     //  S2P stands for serial-to-parallel.
-    StreamSet * BasisBits = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    StreamSet * BasisBits = P.CreateStreamSet(8);
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
 
     //  We need to know which input positions are LFs and which are not.
@@ -206,9 +206,9 @@ HexLinesFunctionType generatePipeline(CPUDriver & driver) {
     //  characters.   Note that the input is the set of byte values in the range
     //  [\x{00}-x{09}\x{0B}-\x{FF}] that is, all byte values except \x{0A}.
     //  For our example input "Wolf!\b", the nonLF stream is "11111."
-    StreamSet * nonLF = P->CreateStreamSet(1);
+    StreamSet * nonLF = P.CreateStreamSet(1);
     std::vector<re::CC *> nonLF_CC = {re::makeCC(re::makeByte(0,9), re::makeByte(0xB, 0xff))};
-    P->CreateKernelCall<CharacterClassKernelBuilder>(nonLF_CC, BasisBits, nonLF);
+    P.CreateKernelCall<CharacterClassKernelBuilder>(nonLF_CC, BasisBits, nonLF);
     SHOW_STREAM(nonLF);
 
     //  We need to spread out the basis bits to make room for two positions for
@@ -216,31 +216,31 @@ HexLinesFunctionType generatePipeline(CPUDriver & driver) {
     //  takes care of this using a mask of positions for insertion of one position.
     //  We insert one position for eacn nonLF character.    Given the
     //  nonLF stream "11111", the hexInsertMask is "1.1.1.1.1.1"
-    StreamSet * hexInsertMask = UnitInsertionSpreadMask(*P.get(), nonLF, InsertPosition::After);
+    StreamSet * hexInsertMask = UnitInsertionSpreadMask(P, nonLF, InsertPosition::After);
     SHOW_STREAM(hexInsertMask);
 
     // The parabix SpreadByMask function copies bits from an input stream
     // set to an output stream set, to positions marked by 1s in the first
     // argument (the spread mask).   Zeroes are inserted everywhere else.
     // This function performs STEP 1 in the comments above.
-    StreamSet * spreadBasis = P->CreateStreamSet(8);
-    SpreadByMask(*P.get(), hexInsertMask, BasisBits, spreadBasis);
+    StreamSet * spreadBasis = P.CreateStreamSet(8);
+    SpreadByMask(P, hexInsertMask, BasisBits, spreadBasis);
     SHOW_BIXNUM(spreadBasis);
 
     // Perform the logic of the Hexify kernel.
-    StreamSet * hexBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<Hexify>(hexInsertMask, spreadBasis, hexBasis);
+    StreamSet * hexBasis = P.CreateStreamSet(8);
+    P.CreateKernelCall<Hexify>(hexInsertMask, spreadBasis, hexBasis);
     SHOW_BIXNUM(hexBasis);
 
     // The computed output can be converted back to byte stream form by the
     // P2S kernel (parallel-to-serial).
-    StreamSet * hexLines = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(hexBasis, hexLines);
+    StreamSet * hexLines = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(hexBasis, hexLines);
     SHOW_BYTES(hexLines);
 
     //  The StdOut kernel writes a byte stream to standard output.
-    P->CreateKernelCall<StdOutKernel>(hexLines);
-    return reinterpret_cast<HexLinesFunctionType>(P->compile());
+    P.CreateKernelCall<StdOutKernel>(hexLines);
+    return P.compile();
 }
 
 int main(int argc, char *argv[]) {

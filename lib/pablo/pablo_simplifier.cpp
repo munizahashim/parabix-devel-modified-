@@ -673,7 +673,13 @@ static bool evaluateAssign(Assign * const assign, VariableTable & variables) {
     }
     if (toCopy.size() > 0) {
         scope->setInsertPoint(assign->getPrevNode());
-        Var * newVar = scope->createVar(var->getName().str() + "'");
+
+        std::string tmp;
+        raw_string_ostream out(tmp);
+        PabloPrinter::print(var, out);
+        out.flush();
+
+        Var * newVar = scope->createVar(tmp + "'");
         scope->createAssign(newVar, var);
         variables.put(newVar, newVar);
         for (Var * other : toCopy) {

@@ -33,8 +33,6 @@ public:
     using KernelSet = std::vector<std::unique_ptr<Kernel>>;
     using KernelMap = llvm::StringMap<std::unique_ptr<Kernel>>;
 
-//    std::unique_ptr<kernel::ProgramBuilder> makePipelineWithIO(Bindings stream_inputs = {}, Bindings stream_outputs = {}, Bindings scalar_inputs = {}, Bindings scalar_outputs = {});
-
     std::unique_ptr<kernel::ProgramBuilder> makePipeline(Bindings scalar_inputs = {}, Bindings scalar_outputs = {});
 
     kernel::StreamSet * CreateStreamSet(const unsigned NumElements = 1, const unsigned FieldWidth = 1) noexcept;

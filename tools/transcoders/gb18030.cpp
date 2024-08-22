@@ -555,38 +555,43 @@ void GB_18030_FourByteLogic::generatePabloMethod() {
 
 typedef void (*gb18030FunctionType)(uint32_t fd, const char *);
 
+
+
+
 gb18030FunctionType generatePipeline(CPUDriver & driver, unsigned encodingBits, cc::ByteNumbering byteNumbering) {
-    auto P = driver.makePipeline({Binding{driver.getInt32Ty(), "inputFileDecriptor"}, Binding{driver.getInt8PtrTy(), "outputFileName"}}, {});
-    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+
+    auto P = CreatePipeline(driver, Input<uint32_t>("inputFileDecriptor"), Input<const char *>("outputFileName"));
+
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     // Transposed bits from s2p
-    StreamSet * BasisBits = P->CreateStreamSet(8);
-    Selected_S2P(*P.get(), ByteStream, BasisBits);
+    StreamSet * BasisBits = P.CreateStreamSet(8);
+    Selected_S2P(P, ByteStream, BasisBits);
 
     GB_18030_IndexingKind indexing = (encodingBits == 16) ? GB_18030_IndexingKind::UTF16 : GB_18030_IndexingKind::Codepoint;
 
-    StreamSet * GB_marks = P->CreateStreamSet(4);
-    P->CreateKernelCall<GB_18030_Parser>(BasisBits, GB_marks);
+    StreamSet * GB_marks = P.CreateStreamSet(4);
+    P.CreateKernelCall<GB_18030_Parser>(BasisBits, GB_marks);
 
     // Masks for extraction of 1 bit per GB code unit sequence.
-    StreamSet * GB_mask1 = P->CreateStreamSet(1);
-    StreamSet * GB_mask2 = P->CreateStreamSet(1);
-    StreamSet * GB_mask3 = P->CreateStreamSet(1);
-    StreamSet * GB_mask4 = P->CreateStreamSet(1);
-    StreamSet * GB_prefix4 = P->CreateStreamSet(1);
-    StreamSet * const error = P->CreateStreamSet();
-    P->CreateKernelCall<GB_18030_ExtractionMasks>(GB_marks, BasisBits, GB_mask1, GB_mask2, GB_mask3, GB_mask4, GB_prefix4, error, indexing);
+    StreamSet * GB_mask1 = P.CreateStreamSet(1);
+    StreamSet * GB_mask2 = P.CreateStreamSet(1);
+    StreamSet * GB_mask3 = P.CreateStreamSet(1);
+    StreamSet * GB_mask4 = P.CreateStreamSet(1);
+    StreamSet * GB_prefix4 = P.CreateStreamSet(1);
+    StreamSet * const error = P.CreateStreamSet();
+    P.CreateKernelCall<GB_18030_ExtractionMasks>(GB_marks, BasisBits, GB_mask1, GB_mask2, GB_mask3, GB_mask4, GB_prefix4, error, indexing);
 
     if (GBerrorOption == GBerrorMode::Abort) {
-        StreamSet * BasisBitsOut = P->CreateStreamSet(8);
-        StreamSet * GB_mask1Out = P->CreateStreamSet(1);
-        StreamSet * GB_mask2Out = P->CreateStreamSet(1);
-        StreamSet * GB_mask3Out = P->CreateStreamSet(1);
-        StreamSet * GB_mask4Out = P->CreateStreamSet(1);
-        StreamSet * GB_prefix4Out = P->CreateStreamSet(1);
-        P->CreateKernelCall<ErrorMonitorKernel>(
+        StreamSet * BasisBitsOut = P.CreateStreamSet(8);
+        StreamSet * GB_mask1Out = P.CreateStreamSet(1);
+        StreamSet * GB_mask2Out = P.CreateStreamSet(1);
+        StreamSet * GB_mask3Out = P.CreateStreamSet(1);
+        StreamSet * GB_mask4Out = P.CreateStreamSet(1);
+        StreamSet * GB_prefix4Out = P.CreateStreamSet(1);
+        P.CreateKernelCall<ErrorMonitorKernel>(
             // error stream set
             error,
             // monitored stream bindings
@@ -607,25 +612,25 @@ gb18030FunctionType generatePipeline(CPUDriver & driver, unsigned encodingBits, 
         GB_prefix4 = GB_prefix4Out;
     }
 
-    StreamSet * GB_4byte = P->CreateStreamSet(1); // markers for 4-byte sequences
-    StreamSet * const byte1 = P->CreateStreamSet(8);
-    StreamSet * const nybble1 = P->CreateStreamSet(4);
-    StreamSet * const byte2 = P->CreateStreamSet(8);
-    StreamSet * const nybble2 = P->CreateStreamSet(4);
+    StreamSet * GB_4byte = P.CreateStreamSet(1); // markers for 4-byte sequences
+    StreamSet * const byte1 = P.CreateStreamSet(8);
+    StreamSet * const nybble1 = P.CreateStreamSet(4);
+    StreamSet * const byte2 = P.CreateStreamSet(8);
+    StreamSet * const nybble2 = P.CreateStreamSet(4);
 
-    FilterByMask(*P.get(), GB_mask1, GB_prefix4, GB_4byte);
-    FilterByMask(*P.get(), GB_mask1, BasisBits, byte1);
-    FilterByMask(*P.get(), GB_mask2, BasisBits, nybble1);
-    FilterByMask(*P.get(), GB_mask3, BasisBits, byte2);
-    FilterByMask(*P.get(), GB_mask4, BasisBits, nybble2);
+    FilterByMask(P, GB_mask1, GB_prefix4, GB_4byte);
+    FilterByMask(P, GB_mask1, BasisBits, byte1);
+    FilterByMask(P, GB_mask2, BasisBits, nybble1);
+    FilterByMask(P, GB_mask3, BasisBits, byte2);
+    FilterByMask(P, GB_mask4, BasisBits, nybble2);
 
-    StreamSet * const GB_2byte = P->CreateStreamSet(1); // markers for 2-byte sequences
-    StreamSet * const gb15index = P->CreateStreamSet(15);
-    P->CreateKernelCall<GB_18030_DoubleByteIndex>(GB_4byte, byte1, byte2, GB_2byte, gb15index);
+    StreamSet * const GB_2byte = P.CreateStreamSet(1); // markers for 2-byte sequences
+    StreamSet * const gb15index = P.CreateStreamSet(15);
+    P.CreateKernelCall<GB_18030_DoubleByteIndex>(GB_4byte, byte1, byte2, GB_2byte, gb15index);
 
-    StreamSet * u16basis = P->CreateStreamSet(16);
+    StreamSet * u16basis = P.CreateStreamSet(16);
 
-    P->CreateKernelCall<GB_18030_InitializeASCII>(byte1, u16basis);
+    P.CreateKernelCall<GB_18030_InitializeASCII>(byte1, u16basis);
 
     const unsigned KernelSubrangeBits = 11;
     const unsigned KernelSubrangeSize = 1 << KernelSubrangeBits;
@@ -633,64 +638,64 @@ gb18030FunctionType generatePipeline(CPUDriver & driver, unsigned encodingBits, 
 
     for (unsigned rangeBase = 0; rangeBase < GB2_tblSize; rangeBase += KernelSubrangeSize) {
         //llvm::errs() << "rangeBase = " << rangeBase << "\n";
-        StreamSet * u16out = P->CreateStreamSet(16);
-        P->CreateKernelCall<GB_18030_DoubleByteRangeKernel>(GB_2byte, gb15index, u16basis, u16out, rangeBase, KernelSubrangeBits);
+        StreamSet * u16out = P.CreateStreamSet(16);
+        P.CreateKernelCall<GB_18030_DoubleByteRangeKernel>(GB_2byte, gb15index, u16basis, u16out, rangeBase, KernelSubrangeBits);
         u16basis = u16out;
     }
 
-    StreamSet * const utfBasis = P->CreateStreamSet((encodingBits == 16) ? 16 : 21);
-    P->CreateKernelCall<GB_18030_FourByteLogic>(GB_4byte, byte1, nybble1, byte2, nybble2, u16basis, utfBasis, indexing);
+    StreamSet * const utfBasis = P.CreateStreamSet((encodingBits == 16) ? 16 : 21);
+    P.CreateKernelCall<GB_18030_FourByteLogic>(GB_4byte, byte1, nybble1, byte2, nybble2, u16basis, utfBasis, indexing);
 
     if (encodingBits == 32) {
-        StreamSet * const u32data = P->CreateStreamSet(1, 32);
-        P->CreateKernelCall<P2S21Kernel>(utfBasis, u32data, byteNumbering);
-        P->CreateKernelCall<StdOutKernel>(u32data);
+        StreamSet * const u32data = P.CreateStreamSet(1, 32);
+        P.CreateKernelCall<P2S21Kernel>(utfBasis, u32data, byteNumbering);
+        P.CreateKernelCall<StdOutKernel>(u32data);
     } else if (encodingBits == 16) {
-            StreamSet * const u16data = P->CreateStreamSet(1, 16);
-            P->CreateKernelCall<P2S16Kernel>(utfBasis, u16data, byteNumbering);
-            P->CreateKernelCall<StdOutKernel>(u16data);
+            StreamSet * const u16data = P.CreateStreamSet(1, 16);
+            P.CreateKernelCall<P2S16Kernel>(utfBasis, u16data, byteNumbering);
+            P.CreateKernelCall<StdOutKernel>(u16data);
     } else if (encodingBits == 8) {
         // Buffers for calculated deposit masks.
-        StreamSet * const u8fieldMask = P->CreateStreamSet();
-        StreamSet * const u8final = P->CreateStreamSet();
-        StreamSet * const u8initial = P->CreateStreamSet();
-        StreamSet * const u8mask12_17 = P->CreateStreamSet();
-        StreamSet * const u8mask6_11 = P->CreateStreamSet();
+        StreamSet * const u8fieldMask = P.CreateStreamSet();
+        StreamSet * const u8final = P.CreateStreamSet();
+        StreamSet * const u8initial = P.CreateStreamSet();
+        StreamSet * const u8mask12_17 = P.CreateStreamSet();
+        StreamSet * const u8mask6_11 = P.CreateStreamSet();
 
         // Intermediate buffers for deposited bits
-        StreamSet * const deposit18_20 = P->CreateStreamSet(3);
-        StreamSet * const deposit12_17 = P->CreateStreamSet(6);
-        StreamSet * const deposit6_11 = P->CreateStreamSet(6);
-        StreamSet * const deposit0_5 = P->CreateStreamSet(6);
+        StreamSet * const deposit18_20 = P.CreateStreamSet(3);
+        StreamSet * const deposit12_17 = P.CreateStreamSet(6);
+        StreamSet * const deposit6_11 = P.CreateStreamSet(6);
+        StreamSet * const deposit0_5 = P.CreateStreamSet(6);
 
         // Final buffers for computed UTF-8 basis bits and byte stream.
-        StreamSet * const u8basis = P->CreateStreamSet(8);
-        StreamSet * const u8bytes = P->CreateStreamSet(1, 8);
+        StreamSet * const u8basis = P.CreateStreamSet(8);
+        StreamSet * const u8bytes = P.CreateStreamSet(1, 8);
 
         // Calculate the u8final deposit mask.
-        StreamSet * const extractionMask = P->CreateStreamSet();
-        P->CreateKernelCall<UTF8fieldDepositMask>(utfBasis, u8fieldMask, extractionMask);
-        P->CreateKernelCall<StreamCompressKernel>(extractionMask, u8fieldMask, u8final);
+        StreamSet * const extractionMask = P.CreateStreamSet();
+        P.CreateKernelCall<UTF8fieldDepositMask>(utfBasis, u8fieldMask, extractionMask);
+        P.CreateKernelCall<StreamCompressKernel>(extractionMask, u8fieldMask, u8final);
 
-        P->CreateKernelCall<UTF8_DepositMasks>(u8final, u8initial, u8mask12_17, u8mask6_11);
+        P.CreateKernelCall<UTF8_DepositMasks>(u8final, u8initial, u8mask12_17, u8mask6_11);
 
-        SpreadByMask(*P.get(), u8initial, utfBasis, deposit18_20, /* inputOffset = */ 18);
-        SpreadByMask(*P.get(), u8mask12_17, utfBasis, deposit12_17, /* inputOffset = */ 12);
-        SpreadByMask(*P.get(), u8mask6_11, utfBasis, deposit6_11, /* inputOffset = */ 6);
-        SpreadByMask(*P.get(), u8final, utfBasis, deposit0_5, /* inputOffset = */ 0);
+        SpreadByMask(P, u8initial, utfBasis, deposit18_20, /* inputOffset = */ 18);
+        SpreadByMask(P, u8mask12_17, utfBasis, deposit12_17, /* inputOffset = */ 12);
+        SpreadByMask(P, u8mask6_11, utfBasis, deposit6_11, /* inputOffset = */ 6);
+        SpreadByMask(P, u8final, utfBasis, deposit0_5, /* inputOffset = */ 0);
 
-        P->CreateKernelCall<UTF8assembly>(deposit18_20, deposit12_17, deposit6_11, deposit0_5,
+        P.CreateKernelCall<UTF8assembly>(deposit18_20, deposit12_17, deposit6_11, deposit0_5,
                                         u8initial, u8final, u8mask6_11, u8mask12_17,
                                         u8basis);
 
-        P->CreateKernelCall<P2SKernel>(u8basis, u8bytes);
+        P.CreateKernelCall<P2SKernel>(u8basis, u8bytes);
 
-        P->CreateKernelCall<StdOutKernel>(u8bytes);
+        P.CreateKernelCall<StdOutKernel>(u8bytes);
     } else {
         llvm::report_fatal_error(llvm::StringRef("Unsupported output encoding: ") + OutputEncoding);
     }
 
-    return reinterpret_cast<gb18030FunctionType>(P->compile());
+    return P.compile();
 }
 
 

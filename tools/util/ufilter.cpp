@@ -55,65 +55,64 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 
 static cl::opt<bool> UseDefaultFilter("default-filter", cl::desc("Use the default byte filter by mask via S2P-FilterByMaks-P2S"), cl::cat(ufFlags));
 
-#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
-#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
-#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
 
 
-typedef uint64_t (*UFiltertFunctionType)(uint32_t fd);
+typedef void (*UFiltertFunctionType)(uint32_t fd);
 
 UFiltertFunctionType pipelineGen(CPUDriver & driver, re::Name * CC_name) {
 
-    auto P = driver.makePipeline(
-                {Binding{driver.getInt32Ty(), "fileDescriptor"}});
+    auto P = CreatePipeline(driver, Input<uint32_t>{"fileDescriptor"});
 
-    Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
+    Scalar * const fileDescriptor = P.getInputScalar("fileDescriptor");
 
     //  Create a stream set consisting of a single stream of 8-bit units (bytes).
-    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
     SHOW_BYTES(ByteStream);
 
     //  Read the file into the ByteStream.
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     //  Create a set of 8 parallel streams of 1-bit units (bits).
-    StreamSet * BasisBits = P->CreateStreamSet(8, 1);
+    StreamSet * BasisBits = P.CreateStreamSet(8, 1);
     SHOW_BIXNUM(BasisBits);
 
     //  Transpose the ByteSteam into parallel bit stream form.
-    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
 
     //  Create a character class bit stream.
-    StreamSet * CCmask = P->CreateStreamSet(1, 1);
+    StreamSet * CCmask = P.CreateStreamSet(1, 1);
 
     std::map<std::string, StreamSet *> propertyStreamMap;
     auto nameString = CC_name->getFullName();
     propertyStreamMap.emplace(nameString, CCmask);
-    P->CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(CC_name, BasisBits, CCmask);
+    P.CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(CC_name, BasisBits, CCmask);
     SHOW_STREAM(CCmask);
 
-    StreamSet * u8index = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    StreamSet * u8index = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
     SHOW_STREAM(u8index);
 
-    StreamSet * CCspans = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<U8Spans>(CCmask, u8index, CCspans);
+    StreamSet * CCspans = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<U8Spans>(CCmask, u8index, CCspans);
     SHOW_STREAM(CCspans);
 
-    StreamSet * const FilteredBytes = P->CreateStreamSet(1, 8);
+    StreamSet * const FilteredBytes = P.CreateStreamSet(1, 8);
 
     if (UseDefaultFilter) {
-        FilterByMask(*P.get(), CCspans, ByteStream, FilteredBytes, 0, 64, true);
+        FilterByMask(P, CCspans, ByteStream, FilteredBytes, 0, 64, true);
     } else {
         // Replace the following with a custom ByteFilterByMask operation.
-        FilterByMask(*P.get(), CCspans, ByteStream, FilteredBytes, 0, 64, true);
+        FilterByMask(P, CCspans, ByteStream, FilteredBytes, 0, 64, true);
     }
     SHOW_BYTES(FilteredBytes);
 
-    P->CreateKernelCall<StdOutKernel>(FilteredBytes);
+    P.CreateKernelCall<StdOutKernel>(FilteredBytes);
 
-    return reinterpret_cast<UFiltertFunctionType>(P->compile());
+    return P.compile();
 }
 
 int main(int argc, char *argv[]) {

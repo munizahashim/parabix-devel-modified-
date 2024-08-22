@@ -166,27 +166,28 @@ typedef void (*x8u16FunctionType)(uint32_t fd, const char *);
 
 x8u16FunctionType generatePipeline(CPUDriver & driver) {
 
-    auto P = driver.makePipeline({Binding{driver.getInt32Ty(), "inputFileDecriptor"}, Binding{driver.getInt8PtrTy(), "outputFileName"}}, {});
-    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    auto P = CreatePipeline(driver, Input<uint32_t>("inputFileDecriptor"), Input<const char *>("outputFileName"));
+
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     // Transposed bits from s2p
-    StreamSet * BasisBits = P->CreateStreamSet(8);
-    Selected_S2P(*P.get(), ByteStream, BasisBits);
+    StreamSet * BasisBits = P.CreateStreamSet(8);
+    Selected_S2P(P, ByteStream, BasisBits);
 
-    StreamSet * u16bits = P->CreateStreamSet(16);
+    StreamSet * u16bits = P.CreateStreamSet(16);
 
-    P->CreateKernelCall<TranscoderKernelBuilder>(iso_8859_5::alphabet, BasisBits, u16bits);
+    P.CreateKernelCall<TranscoderKernelBuilder>(iso_8859_5::alphabet, BasisBits, u16bits);
 
-    StreamSet * UTF16_out = P->CreateStreamSet(1, 16);
+    StreamSet * UTF16_out = P.CreateStreamSet(1, 16);
 
-    P->CreateKernelCall<P2S16Kernel>(u16bits, UTF16_out);
+    P.CreateKernelCall<P2S16Kernel>(u16bits, UTF16_out);
 
-    Scalar * outputFileName = P->getInputScalar("outputFileName");
-    P->CreateKernelCall<FileSink>(outputFileName, UTF16_out);
+    Scalar * outputFileName = P.getInputScalar("outputFileName");
+    P.CreateKernelCall<FileSink>(outputFileName, UTF16_out);
 
-    return reinterpret_cast<x8u16FunctionType>(P->compile());
+    return P.compile();
 }
 
 size_t file_size(const int fd) {

@@ -60,33 +60,31 @@ typedef uint64_t (*UCountFunctionType)(uint32_t fd);
 
 UCountFunctionType pipelineGen(CPUDriver & driver, re::Name * CC_name) {
 
-    auto P = driver.makePipeline(
-                {Binding{driver.getInt32Ty(), "fileDescriptor"}},
-                {Binding{driver.getInt64Ty(), "countResult"}});
+    auto P = CreatePipeline(driver, Input<uint32_t>{"fileDescriptor"}, Output<uint64_t>{"countResult"});
 
-    Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
+    Scalar * const fileDescriptor = P.getInputScalar("fileDescriptor");
 
     //  Create a stream set consisting of a single stream of 8-bit units (bytes).
-    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
 
     //  Read the file into the ByteStream.
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     //  Create a set of 8 parallel streams of 1-bit units (bits).
-    StreamSet * BasisBits = P->CreateStreamSet(8, 1);
+    StreamSet * BasisBits = P.CreateStreamSet(8, 1);
 
     //  Transpose the ByteSteam into parallel bit stream form.
-    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
 
     if (U21) {
-        StreamSet * const u21_Basis = P->CreateStreamSet(21, 1);
-        P->CreateKernelCall<UTF8_Decoder>(BasisBits, u21_Basis, pablo::MovementMode);
+        StreamSet * const u21_Basis = P.CreateStreamSet(21, 1);
+        P.CreateKernelCall<UTF8_Decoder>(BasisBits, u21_Basis, pablo::MovementMode);
         BasisBits = u21_Basis;
-        if (codegen::EnableIllustrator) {
-            P->captureByteData("bytedata", ByteStream, '.');
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureByteData("bytedata", ByteStream, '.');
             for (unsigned i = 0; i < 21; i++) {
-                StreamSet * u21_basis_i = streamutils::Select(*P.get(), u21_Basis, i);
-                P->captureBitstream("u21_" + std::to_string(i), u21_basis_i);
+                StreamSet * u21_basis_i = streamutils::Select(P, u21_Basis, i);
+                P.captureBitstream("u21_" + std::to_string(i), u21_basis_i);
             }
         }
 
@@ -94,17 +92,17 @@ UCountFunctionType pipelineGen(CPUDriver & driver, re::Name * CC_name) {
 
 
     //  Create a character class bit stream.
-    StreamSet * CCstream = P->CreateStreamSet(1, 1);
+    StreamSet * CCstream = P.CreateStreamSet(1, 1);
     
     std::map<std::string, StreamSet *> propertyStreamMap;
     auto nameString = CC_name->getFullName();
     propertyStreamMap.emplace(nameString, CCstream);
     pablo::BitMovementMode mode = Lookahead ? pablo::BitMovementMode::LookAhead : pablo::BitMovementMode::Advance;
-    P->CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(CC_name, BasisBits, CCstream, mode);
+    P.CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(CC_name, BasisBits, CCstream, mode);
 
-    P->CreateKernelCall<PopcountKernel>(CCstream, P->getOutputScalar("countResult"));
+    P.CreateKernelCall<PopcountKernel>(CCstream, P.getOutputScalar("countResult"));
 
-    return reinterpret_cast<UCountFunctionType>(P->compile());
+    return P.compile();
 }
 
 uint64_t ucount1(UCountFunctionType fn_ptr, const uint32_t fileIdx) {

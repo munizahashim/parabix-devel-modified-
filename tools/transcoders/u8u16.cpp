@@ -269,47 +269,48 @@ typedef void (*u8u16FunctionType)(uint32_t fd, const char *);
 
 u8u16FunctionType generatePipeline(CPUDriver & driver, cc::ByteNumbering byteNumbering) {
 
-    auto P = driver.makePipeline({Binding{driver.getInt32Ty(), "inputFileDecriptor"}, Binding{driver.getInt8PtrTy(), "outputFileName"}}, {});
-    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    auto P = CreatePipeline(driver, Input<uint32_t>("inputFileDecriptor"), Input<const char *>("outputFileName"));
+
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     // Transposed bits from s2p
-    StreamSet * BasisBits = P->CreateStreamSet(8);
-    Selected_S2P(*P.get(), ByteStream, BasisBits);
+    StreamSet * BasisBits = P.CreateStreamSet(8);
+    Selected_S2P(P, ByteStream, BasisBits);
 
     // Calculate UTF-16 data bits through bitwise logic on u8-indexed streams.
-    StreamSet * u8bits = P->CreateStreamSet(16);
-    StreamSet * u16bits = P->CreateStreamSet(16);
-    StreamSet * selectors = P->CreateStreamSet();
-    P->CreateKernelCall<U8U16Kernel>(BasisBits, u8bits, selectors);
-    StreamSet * u16bytes = P->CreateStreamSet(1, 16);
+    StreamSet * u8bits = P.CreateStreamSet(16);
+    StreamSet * u16bits = P.CreateStreamSet(16);
+    StreamSet * selectors = P.CreateStreamSet();
+    P.CreateKernelCall<U8U16Kernel>(BasisBits, u8bits, selectors);
+    StreamSet * u16bytes = P.CreateStreamSet(1, 16);
     if (useAVX2()) {
         // Allocate space for fully compressed swizzled UTF-16 bit streams
         std::vector<StreamSet *> u16Swizzles(4);
-        u16Swizzles[0] = P->CreateStreamSet(4);
-        u16Swizzles[1] = P->CreateStreamSet(4);
-        u16Swizzles[2] = P->CreateStreamSet(4);
-        u16Swizzles[3] = P->CreateStreamSet(4);
+        u16Swizzles[0] = P.CreateStreamSet(4);
+        u16Swizzles[1] = P.CreateStreamSet(4);
+        u16Swizzles[2] = P.CreateStreamSet(4);
+        u16Swizzles[3] = P.CreateStreamSet(4);
         // Apply a deletion algorithm to discard all but the final position of the UTF-8
         // sequences (bit streams) for each UTF-16 code unit. Also compresses and swizzles the result.
-        P->CreateKernelCall<SwizzledDeleteByPEXTkernel>(selectors, u8bits, u16Swizzles);
+        P.CreateKernelCall<SwizzledDeleteByPEXTkernel>(selectors, u8bits, u16Swizzles);
         // Produce unswizzled UTF-16 bit streams
-        P->CreateKernelCall<SwizzleGenerator>(u16Swizzles, std::vector<StreamSet *>{u16bits});
-        P->CreateKernelCall<P2S16Kernel>(u16bits, u16bytes);
+        P.CreateKernelCall<SwizzleGenerator>(u16Swizzles, std::vector<StreamSet *>{u16bits});
+        P.CreateKernelCall<P2S16Kernel>(u16bits, u16bytes);
     } else {
         const auto fieldWidth = driver.getBitBlockWidth() / 16;
-        P->CreateKernelCall<FieldCompressKernel>(Select(selectors, {0}),
+        P.CreateKernelCall<FieldCompressKernel>(Select(selectors, {0}),
                                                  SelectOperationList{Select(u8bits, streamutils::Range(0, 16))},
                                                  u16bits,
                                                  fieldWidth);
-        P->CreateKernelCall<P2S16KernelWithCompressedOutput>(u16bits, selectors, u16bytes, byteNumbering);
+        P.CreateKernelCall<P2S16KernelWithCompressedOutput>(u16bits, selectors, u16bytes, byteNumbering);
     }
 
-    Scalar * outputFileName = P->getInputScalar("outputFileName");
-    P->CreateKernelCall<FileSink>(outputFileName, u16bytes);
+    Scalar * outputFileName = P.getInputScalar("outputFileName");
+    P.CreateKernelCall<FileSink>(outputFileName, u16bytes);
 
-    return reinterpret_cast<u8u16FunctionType>(P->compile());
+    return P.compile();
 }
 
 // ------------------------------------------------------
@@ -360,19 +361,20 @@ void makeAllAsciiBranch(PipelineBuilder & P, StreamSet * const ByteStream, Strea
 
 u8u16FunctionType generatePipeline2(CPUDriver & driver, cc::ByteNumbering byteNumbering) {
 
-    auto P = driver.makePipeline({Binding{driver.getInt32Ty(), "inputFileDecriptor"}, Binding{driver.getInt8PtrTy(), "outputFileName"}}, {});
-    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    StreamSet * const u16bytes = P->CreateStreamSet(1, 16);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    auto P = CreatePipeline(driver, Input<uint32_t>("inputFileDecriptor"), Input<const char *>("outputFileName"));
 
-    StreamSet * const nonAscii =  P->CreateStreamSet();
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
+    StreamSet * const u16bytes = P.CreateStreamSet(1, 16);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+
+    StreamSet * const nonAscii =  P.CreateStreamSet();
 
     CC * const nonAsciiCC = makeByte(0x80, 0xFF);
-    P->CreateKernelCall<CharacterClassKernelBuilder>(
+    P.CreateKernelCall<CharacterClassKernelBuilder>(
         std::vector<CC *>{nonAsciiCC}, ByteStream, nonAscii);
 
-    auto B = P->CreateOptimizationBranch(nonAscii,
+    auto B = P.CreateOptimizationBranch(nonAscii,
         {Binding{"ByteStream", ByteStream}, Binding{"condition", nonAscii}},
         {Binding{"u16bytes", u16bytes, BoundedRate(0, 1)}});
 
@@ -380,10 +382,10 @@ u8u16FunctionType generatePipeline2(CPUDriver & driver, cc::ByteNumbering byteNu
 
     makeNonAsciiBranch(driver, *B->getNonZeroBranch().get(), ByteStream, u16bytes, byteNumbering);
 
-    Scalar * outputFileName = P->getInputScalar("outputFileName");
-    P->CreateKernelCall<FileSink>(outputFileName, u16bytes);
+    Scalar * outputFileName = P.getInputScalar("outputFileName");
+    P.CreateKernelCall<FileSink>(outputFileName, u16bytes);
 
-    return reinterpret_cast<u8u16FunctionType>(P->compile());
+    return reinterpret_cast<u8u16FunctionType>(P.compile());
 }
 
 size_t file_size(const int fd) {

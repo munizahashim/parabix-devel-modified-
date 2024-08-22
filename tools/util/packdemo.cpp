@@ -21,9 +21,9 @@
 #include <boost/intrusive/detail/math.hpp>
 
 using boost::intrusive::detail::floor_log2;
-#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
-#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
-#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
 using namespace kernel;
 using namespace llvm;
@@ -99,33 +99,33 @@ typedef void (*PackDemoFunctionType)(uint32_t fd);
 
 PackDemoFunctionType packdemo_gen (CPUDriver & driver) {
 
-    auto P = driver.makePipeline({Binding{driver.getInt32Ty(), "inputFileDecriptor"}}, {});
+    auto P = CreatePipeline(driver, Input<uint32_t>{"inputFileDecriptor"});
 
-    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
 
     // Source data
-    StreamSet * const i16Stream = P->CreateStreamSet(1, 16);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, i16Stream);
+    StreamSet * const i16Stream = P.CreateStreamSet(1, 16);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, i16Stream);
 
-    StreamSet * const packedStreamL = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<PackKernel>(i16Stream, packedStreamL, PackOption::packl);
+    StreamSet * const packedStreamL = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<PackKernel>(i16Stream, packedStreamL, PackOption::packl);
     SHOW_BYTES(packedStreamL);
 
-    StreamSet * const BasisBitsL = P->CreateStreamSet(8, 1);
-    P->CreateKernelCall<S2PKernel>(packedStreamL, BasisBitsL);
+    StreamSet * const BasisBitsL = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<S2PKernel>(packedStreamL, BasisBitsL);
     SHOW_BIXNUM(BasisBitsL);
 
-    StreamSet * const packedStreamH = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<PackKernel>(i16Stream, packedStreamH, PackOption::packh);
+    StreamSet * const packedStreamH = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<PackKernel>(i16Stream, packedStreamH, PackOption::packh);
     SHOW_BYTES(packedStreamH);
 
-    StreamSet * const BasisBitsH = P->CreateStreamSet(8, 1);
-    P->CreateKernelCall<S2PKernel>(packedStreamH, BasisBitsH);
+    StreamSet * const BasisBitsH = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<S2PKernel>(packedStreamH, BasisBitsH);
     SHOW_BIXNUM(BasisBitsH);
 
-    P->CreateKernelCall<StdOutKernel>(packedStreamH);
+    P.CreateKernelCall<StdOutKernel>(packedStreamH);
 
-    return reinterpret_cast<PackDemoFunctionType>(P->compile());
+    return P.compile();
 }
 
 

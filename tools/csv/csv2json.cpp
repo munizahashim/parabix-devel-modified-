@@ -44,9 +44,9 @@
 #include <util/papi_helper.hpp>
 #endif
 
-#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
-#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
-#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
 using namespace kernel;
 using namespace llvm;
@@ -120,53 +120,53 @@ inline void MergeByMask01(PipelineBuilder & P, StreamSet * mask, StreamSet * a, 
 CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::string> & templateStrs) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
-    auto P = driver.makePipeline({Binding{driver.getInt32Ty(), "inputFileDecriptor"}}, {});
+    auto P = CreatePipeline(driver, Input<uint32_t>{"inputFileDecriptor"});
     //  The program will use a file descriptor as an input.
-    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
     // File data from mmap
-    StreamSet * ByteStream = P->CreateStreamSet(1, 8);
+    StreamSet * ByteStream = P.CreateStreamSet(1, 8);
     //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
     //  from a file descriptor.
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     //  The Parabix basis bits representation is created by the Parabix S2P kernel.
     //  S2P stands for serial-to-parallel.
-    StreamSet * BasisBits = P->CreateStreamSet(8);
-    Selected_S2P(*P.get(), ByteStream, BasisBits);
+    StreamSet * BasisBits = P.CreateStreamSet(8);
+    Selected_S2P(P, ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
     //  We need to know which input positions are dquotes and which are not.
-    StreamSet * csvCCs = P->CreateStreamSet(5);
-    P->CreateKernelCall<CSVlexer>(BasisBits, csvCCs);
-    StreamSet * recordSeparators = P->CreateStreamSet(1);
-    StreamSet * fieldSeparators = P->CreateStreamSet(1);
-    StreamSet * quoteEscape = P->CreateStreamSet(1);
+    StreamSet * csvCCs = P.CreateStreamSet(5);
+    P.CreateKernelCall<CSVlexer>(BasisBits, csvCCs);
+    StreamSet * recordSeparators = P.CreateStreamSet(1);
+    StreamSet * fieldSeparators = P.CreateStreamSet(1);
+    StreamSet * quoteEscape = P.CreateStreamSet(1);
 
-    P->CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape);
+    P.CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape);
     SHOW_STREAM(recordSeparators);
     SHOW_STREAM(fieldSeparators);
     SHOW_STREAM(quoteEscape);
-    StreamSet * toKeep = P->CreateStreamSet(1);
-    P->CreateKernelCall<CSVdataFieldMask>(csvCCs, recordSeparators, quoteEscape, toKeep, HeaderSpec == "");
+    StreamSet * toKeep = P.CreateStreamSet(1);
+    P.CreateKernelCall<CSVdataFieldMask>(csvCCs, recordSeparators, quoteEscape, toKeep, HeaderSpec == "");
     SHOW_STREAM(toKeep);
     //
     // Create a short stream which is 1-to-1 with the (field/record) separators,
     // having 0 bits for field separators and 1 bits for record separators.
     // Normally this will be a stream having exactly one bit set for every
     // N positions, where N is the number of entries per row.
-    StreamSet * recordsByField = P->CreateStreamSet(1);
-    FilterByMask(*P.get(), fieldSeparators, recordSeparators, recordsByField);
+    StreamSet * recordsByField = P.CreateStreamSet(1);
+    FilterByMask(P, fieldSeparators, recordSeparators, recordsByField);
     SHOW_STREAM(recordsByField);
 
-    StreamSet * translatedBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<CSV_Char_Replacement>(quoteEscape, BasisBits, translatedBasis);
+    StreamSet * translatedBasis = P.CreateStreamSet(8);
+    P.CreateKernelCall<CSV_Char_Replacement>(quoteEscape, BasisBits, translatedBasis);
     SHOW_BIXNUM(translatedBasis);
 
-    StreamSet * filteredBasis = P->CreateStreamSet(8);
-    StreamSet * filteredFieldSeparators = P->CreateStreamSet(1);
-    FilterByMask(*P.get(), toKeep, translatedBasis, filteredBasis);
+    StreamSet * filteredBasis = P.CreateStreamSet(8);
+    StreamSet * filteredFieldSeparators = P.CreateStreamSet(1);
+    FilterByMask(P, toKeep, translatedBasis, filteredBasis);
     SHOW_BIXNUM(filteredBasis);
 
-    FilterByMask(*P.get(), toKeep, fieldSeparators, filteredFieldSeparators);
+    FilterByMask(P, toKeep, fieldSeparators, filteredFieldSeparators);
     SHOW_STREAM(filteredFieldSeparators);
 
     std::vector<uint64_t> insertionAmts;
@@ -178,14 +178,14 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     }
     const unsigned insertLengthBits = ceil_log2(maxInsertAmt+1);
 
-    StreamSet * PrefixLgths = P->CreateRepeatingBixNum(insertLengthBits, insertionAmts, TestDynamicRepeatingFile);
+    StreamSet * PrefixLgths = P.CreateRepeatingBixNum(insertLengthBits, insertionAmts, TestDynamicRepeatingFile);
 
-    StreamSet * fieldStarts = P->CreateStreamSet(1);
-    P->CreateKernelCall<LineStartsKernel>(filteredFieldSeparators, fieldStarts);
+    StreamSet * fieldStarts = P.CreateStreamSet(1);
+    P.CreateKernelCall<LineStartsKernel>(filteredFieldSeparators, fieldStarts);
     SHOW_STREAM(fieldStarts);
 
-    StreamSet * PrefixInsertBixNum = P->CreateStreamSet(insertLengthBits);
-    SpreadByMask(*P.get(), fieldStarts, PrefixLgths, PrefixInsertBixNum);
+    StreamSet * PrefixInsertBixNum = P.CreateStreamSet(insertLengthBits);
+    SpreadByMask(P, fieldStarts, PrefixLgths, PrefixInsertBixNum);
     SHOW_BIXNUM(PrefixInsertBixNum);
 
     std::vector<uint64_t> fieldSuffixLgths;
@@ -197,17 +197,17 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     fieldSuffixLgths.push_back(3);
 
     const unsigned suffixLgthBits = 2;  // insert 1-3 characters.
-    StreamSet * RepeatingSuffixLgths = P->CreateRepeatingBixNum(suffixLgthBits, fieldSuffixLgths, TestDynamicRepeatingFile);
+    StreamSet * RepeatingSuffixLgths = P.CreateRepeatingBixNum(suffixLgthBits, fieldSuffixLgths, TestDynamicRepeatingFile);
 
-    StreamSet * SuffixInsertBixNum = P->CreateStreamSet(suffixLgthBits);
-    SpreadByMask(*P.get(), filteredFieldSeparators, RepeatingSuffixLgths, SuffixInsertBixNum);
+    StreamSet * SuffixInsertBixNum = P.CreateStreamSet(suffixLgthBits);
+    SpreadByMask(P, filteredFieldSeparators, RepeatingSuffixLgths, SuffixInsertBixNum);
     SHOW_BIXNUM(SuffixInsertBixNum);
 
-    StreamSet * InsertBixNum = P->CreateStreamSet(insertLengthBits);
-    P->CreateKernelCall<bixnum::Add>(PrefixInsertBixNum, SuffixInsertBixNum, InsertBixNum);
+    StreamSet * InsertBixNum = P.CreateStreamSet(insertLengthBits);
+    P.CreateKernelCall<bixnum::Add>(PrefixInsertBixNum, SuffixInsertBixNum, InsertBixNum);
     SHOW_BIXNUM(InsertBixNum);
 
-    StreamSet * const BasisSpreadMask = InsertionSpreadMask(*P.get(), InsertBixNum, InsertPosition::Before);
+    StreamSet * const BasisSpreadMask = InsertionSpreadMask(P, InsertBixNum, InsertPosition::Before);
     SHOW_STREAM(BasisSpreadMask);
     
     std::vector<uint64_t> templateBytes;
@@ -221,19 +221,19 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
             templateBytes.push_back(static_cast<uint64_t>(','));
         }
     }
-    StreamSet * TemplateBasis = P->CreateRepeatingBixNum(8, templateBytes, TestDynamicRepeatingFile);
+    StreamSet * TemplateBasis = P.CreateRepeatingBixNum(8, templateBytes, TestDynamicRepeatingFile);
 
-    StreamSet * FinalBasis = P->CreateStreamSet(8);
+    StreamSet * FinalBasis = P.CreateStreamSet(8);
     if (UseMergeByMaskKernel) {
-        MergeByMask(*P.get(), BasisSpreadMask, filteredBasis, TemplateBasis, FinalBasis);
+        MergeByMask(P, BasisSpreadMask, filteredBasis, TemplateBasis, FinalBasis);
     } else {
-        MergeByMask01(*P.get(), BasisSpreadMask, filteredBasis, TemplateBasis, FinalBasis);
+        MergeByMask01(P, BasisSpreadMask, filteredBasis, TemplateBasis, FinalBasis);
     }
     SHOW_BIXNUM(FinalBasis);
-    StreamSet * Instantiated = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(FinalBasis, Instantiated);
-    P->CreateKernelCall<StdOutKernel>(Instantiated);
-    return reinterpret_cast<CSVFunctionType>(P->compile());
+    StreamSet * Instantiated = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(FinalBasis, Instantiated);
+    P.CreateKernelCall<StdOutKernel>(Instantiated);
+    return P.compile();
 }
 
 const unsigned MaxHeaderSize = 24;

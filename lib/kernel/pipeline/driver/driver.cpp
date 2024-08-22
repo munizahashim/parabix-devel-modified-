@@ -12,19 +12,6 @@ using namespace llvm;
 
 using RelationshipAllocator = Relationship::Allocator;
 
-#if 0
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief makePipelineWithIO
- ** ------------------------------------------------------------------------------------------------------------- */
-std::unique_ptr<ProgramBuilder> BaseDriver::makePipelineWithIO(Bindings stream_inputs, Bindings stream_outputs, Bindings scalar_inputs, Bindings scalar_outputs) {
-    PipelineKernel * const pipeline =
-        new PipelineKernel(*this,
-                           std::move(stream_inputs), std::move(stream_outputs),
-                           std::move(scalar_inputs), std::move(scalar_outputs));
-    return std::make_unique<ProgramBuilder>(*this, pipeline);
-}
-#endif
-
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief makePipeline
  ** ------------------------------------------------------------------------------------------------------------- */

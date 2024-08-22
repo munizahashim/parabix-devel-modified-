@@ -723,22 +723,18 @@ StreamSet * GrepEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * In
 
 void GrepEngine::grepCodeGen() {
 
-    auto P = mGrepDriver.makePipeline(
-                // inputs
-                {Binding{mGrepDriver.getSizeTy(), "useMMap"},
-                Binding{mGrepDriver.getInt32Ty(), "fileDescriptor"},
-                Binding{mGrepDriver.getIntAddrTy(), "callbackObject"},
-                Binding{mGrepDriver.getSizeTy(), "maxCount"}}
-                ,// output
-                {Binding{mGrepDriver.getInt64Ty(), "countResult"}});
+    auto P = CreatePipeline(mGrepDriver,
+                            Input<size_t>{"useMMap"}, Input<uint32_t>{"fileDescriptor"},
+                            Input<uintptr_t>{"callbackObject"}, Input<size_t>{"maxCount"},
+                            Output<uint64_t>{"countResult"});
 
-    Scalar * const useMMap = P->getInputScalar("useMMap");
-    Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
-    StreamSet * const ByteStream = P->CreateStreamSet(1, ENCODING_BITS);
-    P->CreateKernelCall<FDSourceKernel>(useMMap, fileDescriptor, ByteStream);
-    StreamSet * const Matches = grepPipeline(*P.get(), ByteStream);
-    P->CreateKernelCall<PopcountKernel>(Matches, P->getOutputScalar("countResult"));
-    mMainMethod = P->compile();
+    Scalar * const useMMap = P.getInputScalar("useMMap");
+    Scalar * const fileDescriptor = P.getInputScalar("fileDescriptor");
+    StreamSet * const ByteStream = P.CreateStreamSet(1, ENCODING_BITS);
+    P.CreateKernelCall<FDSourceKernel>(useMMap, fileDescriptor, ByteStream);
+    StreamSet * const Matches = grepPipeline(P, ByteStream);
+    P.CreateKernelCall<PopcountKernel>(Matches, P.getOutputScalar("countResult"));
+    mMainMethod = (void*)P.compile();
 }
 
 //
@@ -1101,23 +1097,20 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & E, StreamSet * By
 
 
 void EmitMatchesEngine::grepCodeGen() {
-    auto P = mGrepDriver.makePipeline(
-                    // inputs
-                    {Binding{mGrepDriver.getInt8PtrTy(), "buffer"},
-                    Binding{mGrepDriver.getSizeTy(), "length"},
-                    Binding{mGrepDriver.getIntAddrTy(), "callbackObject"},
-                    Binding{mGrepDriver.getSizeTy(), "maxCount"}}
-                    ,// output
-                    {Binding{mGrepDriver.getInt64Ty(), "countResult"}});
 
-    Scalar * const buffer = P->getInputScalar("buffer");
-    Scalar * const length = P->getInputScalar("length");
-    StreamSet * const InternalBytes = P->CreateStreamSet(1, 8);
+    auto P = CreatePipeline(mGrepDriver,
+                            Input<uint8_t*>{"buffer"}, Input<size_t>{"length"},
+                            Input<uintptr_t>{"callbackObject"}, Input<size_t>{"maxCount"},
+                            Output<uint64_t>{"countResult"});
 
-    P->CreateKernelCall<MemorySourceKernel>(buffer, length, InternalBytes);
-    grepPipeline(*P.get(), InternalBytes);
-    P->setOutputScalar("countResult", P->CreateConstant(mGrepDriver.getInt64(0)));
-    mBatchMethod = P->compile();
+    Scalar * const buffer = P.getInputScalar("buffer");
+    Scalar * const length = P.getInputScalar("length");
+    StreamSet * const InternalBytes = P.CreateStreamSet(1, 8);
+
+    P.CreateKernelCall<MemorySourceKernel>(buffer, length, InternalBytes);
+    grepPipeline(P, InternalBytes);
+    P.setOutputScalar("countResult", P.CreateConstant(mGrepDriver.getInt64(0)));
+    mBatchMethod = (void*)P.compile();
 }
 
 bool canMMap(const std::string & fileName) {
@@ -1420,48 +1413,48 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
     matchingRE = regular_expression_passes(matchingRE);
     matchingRE = toUTF8(matchingRE);
 
-    auto E = mGrepDriver.makePipeline({Binding{mGrepDriver.getInt8PtrTy(), "buffer"},
-                                       Binding{mGrepDriver.getSizeTy(), "length"},
-                                       Binding{mGrepDriver.getIntAddrTy(), "accumulator"}});
+    auto E = CreatePipeline(mGrepDriver,
+                            Input<uint8_t*>{"buffer"}, Input<size_t>{"length"},
+                            Input<uintptr_t>{"accumulator"});
 
-    Scalar * const buffer = E->getInputScalar(0);
-    Scalar * const length = E->getInputScalar(1);
-    Scalar * const callbackObject = E->getInputScalar(2);
-    StreamSet * ByteStream = E->CreateStreamSet(1, 8);
-    E->CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
+    Scalar * const buffer = E.getInputScalar(0);
+    Scalar * const length = E.getInputScalar(1);
+    Scalar * const callbackObject = E.getInputScalar(2);
+    StreamSet * ByteStream = E.CreateStreamSet(1, 8);
+    E.CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
 
-    StreamSet * RecordBreakStream = E->CreateStreamSet();
-    StreamSet * BasisBits = E->CreateStreamSet(8);
-    E->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
-    E->CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{breakCC}, BasisBits, RecordBreakStream);
+    StreamSet * RecordBreakStream = E.CreateStreamSet();
+    StreamSet * BasisBits = E.CreateStreamSet(8);
+    E.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    E.CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{breakCC}, BasisBits, RecordBreakStream);
 
-    StreamSet * u8index = E->CreateStreamSet();
-    E->CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    StreamSet * u8index = E.CreateStreamSet();
+    E.CreateKernelCall<UTF8_index>(BasisBits, u8index);
 
-    StreamSet * MatchResults = E->CreateStreamSet();
+    StreamSet * MatchResults = E.CreateStreamSet();
     auto options = std::make_unique<GrepKernelOptions>(&cc::UTF8);
     options->setBarrier(RecordBreakStream);
     options->setRE(matchingRE);
     options->addAlphabet(&cc::UTF8, BasisBits);
     options->setResults(MatchResults);
     options->addExternal("UTF8_index", u8index);
-    E->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
-    StreamSet * MatchingRecords = E->CreateStreamSet();
-    E->CreateKernelCall<MatchedLinesKernel>(MatchResults, RecordBreakStream, MatchingRecords);
+    E.CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
+    StreamSet * MatchingRecords = E.CreateStreamSet();
+    E.CreateKernelCall<MatchedLinesKernel>(MatchResults, RecordBreakStream, MatchingRecords);
 
     if (MatchCoordinateBlocks > 0) {
-        StreamSet * MatchCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
-        E->CreateKernelCall<MatchCoordinatesKernel>(MatchingRecords, RecordBreakStream, MatchCoords, MatchCoordinateBlocks);
-        Kernel * const matchK = E->CreateKernelCall<MatchReporter>(ByteStream, MatchCoords, callbackObject);
+        StreamSet * MatchCoords = E.CreateStreamSet(3, sizeof(size_t) * 8);
+        E.CreateKernelCall<MatchCoordinatesKernel>(MatchingRecords, RecordBreakStream, MatchCoords, MatchCoordinateBlocks);
+        Kernel * const matchK = E.CreateKernelCall<MatchReporter>(ByteStream, MatchCoords, callbackObject);
         matchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
         matchK->link("finalize_match_wrapper", finalize_match_wrapper);
     } else {
-        Kernel * const scanMatchK = E->CreateKernelCall<ScanMatchKernel>(MatchingRecords, RecordBreakStream, ByteStream, callbackObject, ScanMatchBlocks);
+        Kernel * const scanMatchK = E.CreateKernelCall<ScanMatchKernel>(MatchingRecords, RecordBreakStream, ByteStream, callbackObject, ScanMatchBlocks);
         scanMatchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
         scanMatchK->link("finalize_match_wrapper", finalize_match_wrapper);
     }
 
-    mMainMethod = E->compile();
+    mMainMethod = (void*)E.compile();
 }
 
 InternalSearchEngine::InternalSearchEngine(const std::unique_ptr<grep::GrepEngine> & engine)
@@ -1496,30 +1489,30 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
         breakCC = re::makeByte(0x0A);
     }
 
-    auto E = mGrepDriver.makePipeline({Binding{mGrepDriver.getInt8PtrTy(), "buffer"},
-        Binding{mGrepDriver.getSizeTy(), "length"},
-        Binding{mGrepDriver.getIntAddrTy(), "accumulator"}});
+    auto E = CreatePipeline(mGrepDriver,
+                            Input<uint8_t*>{"buffer"}, Input<size_t>{"length"},
+                            Input<uintptr_t>{"accumulator"});
 
-    Scalar * const buffer = E->getInputScalar(0);
-    Scalar * const length = E->getInputScalar(1);
-    Scalar * const callbackObject = E->getInputScalar(2);
-    StreamSet * ByteStream = E->CreateStreamSet(1, 8);
-    E->CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
+    Scalar * const buffer = E.getInputScalar(0);
+    Scalar * const length = E.getInputScalar(1);
+    Scalar * const callbackObject = E.getInputScalar(2);
+    StreamSet * ByteStream = E.CreateStreamSet(1, 8);
+    E.CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
 
-    StreamSet * RecordBreakStream = E->CreateStreamSet();
-    StreamSet * BasisBits = E->CreateStreamSet(8);
-    E->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
-    E->CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{breakCC}, BasisBits, RecordBreakStream);
+    StreamSet * RecordBreakStream = E.CreateStreamSet();
+    StreamSet * BasisBits = E.CreateStreamSet(8);
+    E.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    E.CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{breakCC}, BasisBits, RecordBreakStream);
 
-    StreamSet * u8index = E->CreateStreamSet();
-    E->CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    StreamSet * u8index = E.CreateStreamSet();
+    E.CreateKernelCall<UTF8_index>(BasisBits, u8index);
 
     StreamSet * resultsSoFar = RecordBreakStream;
 
     const auto n = patterns.size();
 
     for (unsigned i = 0; i < n; i++) {
-        StreamSet * const MatchResults = E->CreateStreamSet();
+        StreamSet * const MatchResults = E.CreateStreamSet();
 
         auto options = std::make_unique<GrepKernelOptions>();
 
@@ -1538,23 +1531,23 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
             options->setCombiningStream(isExclude ? GrepCombiningType::Exclude : GrepCombiningType::Include, resultsSoFar);
         }
         options->addExternal("UTF8_index", u8index);
-        E->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
+        E.CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
         resultsSoFar = MatchResults;
     }
 
     if (MatchCoordinateBlocks > 0) {
-        StreamSet * MatchCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
-        E->CreateKernelCall<MatchCoordinatesKernel>(resultsSoFar, RecordBreakStream, MatchCoords, MatchCoordinateBlocks);
-        Kernel * const matchK = E->CreateKernelCall<MatchReporter>(ByteStream, MatchCoords, callbackObject);
+        StreamSet * MatchCoords = E.CreateStreamSet(3, sizeof(size_t) * 8);
+        E.CreateKernelCall<MatchCoordinatesKernel>(resultsSoFar, RecordBreakStream, MatchCoords, MatchCoordinateBlocks);
+        Kernel * const matchK = E.CreateKernelCall<MatchReporter>(ByteStream, MatchCoords, callbackObject);
         matchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
         matchK->link("finalize_match_wrapper", finalize_match_wrapper);
     } else {
-        Kernel * const scanMatchK = E->CreateKernelCall<ScanMatchKernel>(resultsSoFar, RecordBreakStream, ByteStream, callbackObject, ScanMatchBlocks);
+        Kernel * const scanMatchK = E.CreateKernelCall<ScanMatchKernel>(resultsSoFar, RecordBreakStream, ByteStream, callbackObject, ScanMatchBlocks);
         scanMatchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
         scanMatchK->link("finalize_match_wrapper", finalize_match_wrapper);
     }
 
-    mMainMethod = E->compile();
+    mMainMethod = (void*)E.compile();
 }
 
 void InternalMultiSearchEngine::doGrep(const char * search_buffer, size_t bufferLength, MatchAccumulator & accum) {

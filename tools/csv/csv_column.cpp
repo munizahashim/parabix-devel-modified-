@@ -94,55 +94,56 @@ void SelectField::generatePabloMethod() {
 typedef void (*CSVFunctionType)(uint32_t fd);
 
 CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::string> & headers) {
+
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
-    auto P = driver.makePipeline({Binding{driver.getInt32Ty(), "inputFileDecriptor"}}, {});
+    auto P = CreatePipeline(driver, Input<uint32_t>{"inputFileDecriptor"});
     //  The program will use a file descriptor as an input.
-    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
     // File data from mmap
-    StreamSet * ByteStream = P->CreateStreamSet(1, 8);
+    StreamSet * ByteStream = P.CreateStreamSet(1, 8);
     //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
     //  from a file descriptor.
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     //  The Parabix basis bits representation is created by the Parabix S2P kernel.
     //  S2P stands for serial-to-parallel.
-    StreamSet * BasisBits = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
-    if (codegen::EnableIllustrator) {
-        P->captureBitstream("ByteStream", ByteStream, '_');
-        P->captureBitstream("BasisBits", BasisBits);
+    StreamSet * BasisBits = P.CreateStreamSet(8);
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        P.captureBitstream("ByteStream", ByteStream, '_');
+        P.captureBitstream("BasisBits", BasisBits);
     }
 
     //  We need to know which input positions are dquotes and which are not.
-    StreamSet * csvCCs = P->CreateStreamSet(5);
-    P->CreateKernelCall<CSVlexer>(BasisBits, csvCCs);
+    StreamSet * csvCCs = P.CreateStreamSet(5);
+    P.CreateKernelCall<CSVlexer>(BasisBits, csvCCs);
 
-    StreamSet * recordSeparators = P->CreateStreamSet(1);
-    StreamSet * fieldSeparators = P->CreateStreamSet(1);
-    StreamSet * quoteEscape = P->CreateStreamSet(1);
-    P->CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape);
+    StreamSet * recordSeparators = P.CreateStreamSet(1);
+    StreamSet * fieldSeparators = P.CreateStreamSet(1);
+    StreamSet * quoteEscape = P.CreateStreamSet(1);
+    P.CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape);
 
-    StreamSet * Selected = P->CreateStreamSet(1);
-    P->CreateKernelCall<SelectField>(csvCCs, recordSeparators, fieldSeparators, Selected, columnNo);
-    if (codegen::EnableIllustrator) {
-        P->captureBitstream("recordSeparators", recordSeparators);
-        P->captureBitstream("fieldSeparators", fieldSeparators);
-        P->captureBitstream("Selected", Selected);
+    StreamSet * Selected = P.CreateStreamSet(1);
+    P.CreateKernelCall<SelectField>(csvCCs, recordSeparators, fieldSeparators, Selected, columnNo);
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        P.captureBitstream("recordSeparators", recordSeparators);
+        P.captureBitstream("fieldSeparators", fieldSeparators);
+        P.captureBitstream("Selected", Selected);
     }
 
     
-    StreamSet * filteredBasis = P->CreateStreamSet(8);
-    FilterByMask(*P.get(), Selected, BasisBits, filteredBasis);
-    StreamSet * Filtered = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(filteredBasis, Filtered);
-    if (codegen::EnableIllustrator) {
-        P->captureBixNum("filteredBasis", filteredBasis);
-        P->captureByteData("Filtered", Filtered, '_');
+    StreamSet * filteredBasis = P.CreateStreamSet(8);
+    FilterByMask(P, Selected, BasisBits, filteredBasis);
+    StreamSet * Filtered = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(filteredBasis, Filtered);
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        P.captureBixNum("filteredBasis", filteredBasis);
+        P.captureByteData("Filtered", Filtered, '_');
     }
     //  The StdOut kernel writes a byte stream to standard output.
-    P->CreateKernelCall<StdOutKernel>(Filtered);
-    return reinterpret_cast<CSVFunctionType>(P->compile());
+    P.CreateKernelCall<StdOutKernel>(Filtered);
+    return P.compile();
 }
 
 

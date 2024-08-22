@@ -76,16 +76,14 @@ void MatchPriorKernel::generatePabloMethod() {
 typedef uint64_t (*MatchPriorFunctionType)(uint32_t fd);
 
 MatchPriorFunctionType mpPipelineGen(CPUDriver & driver) {
-    Type * const int32Ty = driver.getInt32Ty();
-    auto P = driver.makePipeline({Binding{int32Ty, "fd"}},
-                                   {Binding{driver.getInt64Ty(), "countResult"}});
-    Scalar * const fileDescriptor = P->getInputScalar("fd");
-    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
-    StreamSet * BasisBits = P->CreateStreamSet(8, 1);
-    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
-    P->CreateKernelCall<MatchPriorKernel>(BasisBits, P->getOutputScalar("countResult"));
-    return reinterpret_cast<MatchPriorFunctionType>(P->compile());
+    auto P = CreatePipeline(driver, Input<uint32_t>{"fd"}, Output<uint64_t>{"countResult"});
+    Scalar * const fileDescriptor = P.getInputScalar("fd");
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    StreamSet * BasisBits = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    P.CreateKernelCall<MatchPriorKernel>(BasisBits, P.getOutputScalar("countResult"));
+    return P.compile();
 }
 
 size_t file_size(const int fd) {

@@ -750,7 +750,7 @@ const bool mFamilyCall;
 
 bool runRepeatingStreamSetTest(CPUDriver & driver, std::default_random_engine & rng) {
 
-    auto P = driver.makePipeline({Binding{driver.getInt32Ty()->getPointerTo(), "output"}},{});
+    auto P = CreatePipeline(driver, Input<uint32_t*>{"output"});
 
     unsigned fieldWidth = optFieldWidth;
     if (fieldWidth == 0) {
@@ -809,40 +809,40 @@ bool runRepeatingStreamSetTest(CPUDriver & driver, std::default_random_engine & 
         }
     }
 
-    StreamSet * const Output = P->CreateStreamSet(numElements, fieldWidth);
+    StreamSet * const Output = P.CreateStreamSet(numElements, fieldWidth);
 
-    Scalar *  const repLength = P->CreateConstant(driver.getSize(repetitionLength));
+    Scalar *  const repLength = P.CreateConstant(driver.getSize(repetitionLength));
 
-    P->CreateKernelCall<RepeatingSourceKernel>(pattern, Output, repLength);
+    P.CreateKernelCall<RepeatingSourceKernel>(pattern, Output, repLength);
 
-    Scalar * invalid = P->getInputScalar("output");
+    Scalar * invalid = P.getInputScalar("output");
 
     if (useNestedTest == 2) {
         if (useFamilyCall[0]) {
-            P->CreateNestedPipelineFamilyCall<MultiLevelNestingTest>(pattern, allowUnaligned, useFamilyCall[1], Output, invalid);
+            P.CreateNestedPipelineFamilyCall<MultiLevelNestingTest>(pattern, allowUnaligned, useFamilyCall[1], Output, invalid);
         } else {
-            P->CreateNestedPipelineCall<MultiLevelNestingTest>(pattern, allowUnaligned, useFamilyCall[1], Output, invalid);
+            P.CreateNestedPipelineCall<MultiLevelNestingTest>(pattern, allowUnaligned, useFamilyCall[1], Output, invalid);
         }
     } else if (useNestedTest == 1) {
         if (useFamilyCall[0]) {
-            P->CreateNestedPipelineFamilyCall<NestedRepeatingStreamSetTest>(pattern, allowUnaligned, Output, invalid);
+            P.CreateNestedPipelineFamilyCall<NestedRepeatingStreamSetTest>(pattern, allowUnaligned, Output, invalid);
         } else {
-            P->CreateNestedPipelineCall<NestedRepeatingStreamSetTest>(pattern, allowUnaligned, Output, invalid);
+            P.CreateNestedPipelineCall<NestedRepeatingStreamSetTest>(pattern, allowUnaligned, Output, invalid);
         }
     } else {
         RepeatingStreamSet * RepeatingStream = nullptr;
         if (allowUnaligned) {
-            RepeatingStream = P->CreateUnalignedRepeatingStreamSet(fieldWidth, pattern);
+            RepeatingStream = P.CreateUnalignedRepeatingStreamSet(fieldWidth, pattern);
         } else {
-            RepeatingStream = P->CreateRepeatingStreamSet(fieldWidth, pattern);
+            RepeatingStream = P.CreateRepeatingStreamSet(fieldWidth, pattern);
         }
 
-        P->CreateKernelCall<StreamEq>(RepeatingStream, allowUnaligned, Output, false, invalid);
+        P.CreateKernelCall<StreamEq>(RepeatingStream, allowUnaligned, Output, false, invalid);
 
-        P->CreateKernelCall<StreamEq>(Output, false, RepeatingStream, allowUnaligned, invalid);
+        P.CreateKernelCall<StreamEq>(Output, false, RepeatingStream, allowUnaligned, invalid);
     }
 
-    const auto f = reinterpret_cast<TestFunctionType>(P->compile());
+    const auto f = P.compile();
 
     uint32_t result = 0;
     f(&result);

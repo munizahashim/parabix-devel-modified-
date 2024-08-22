@@ -308,11 +308,7 @@ bool runRepeatingStreamSetTest(CPUDriver & driver,
     IntegerType * const int64Ty = driver.getInt64Ty();
     PointerType * const int32PtrTy = driver.getInt32Ty()->getPointerTo();
 
-    auto P = driver.makePipeline(
-                {Binding{int64Ty, "copyCount"},
-                 Binding{int64Ty, "passCount"},
-                 Binding{int32PtrTy, "output"}},
-                {});
+    auto P = CreatePipeline(driver, Input<uint64_t>{"copyCount"}, Input<uint64_t>{"passCount"}, Input<uint32_t*>{"output"});
 
     const auto maxVal = (1ULL << static_cast<uint64_t>(fieldWidth)) - 1ULL;
 
@@ -327,29 +323,29 @@ bool runRepeatingStreamSetTest(CPUDriver & driver,
         }
     }
 
-    Scalar * const copyCountScalar = P->getInputScalar("copyCount");
+    Scalar * const copyCountScalar = P.getInputScalar("copyCount");
 
-    RepeatingStreamSet * const RepeatingStream = P->CreateRepeatingStreamSet(fieldWidth, pattern);
+    RepeatingStreamSet * const RepeatingStream = P.CreateRepeatingStreamSet(fieldWidth, pattern);
 
-    StreamSet * const Output = P->CreateStreamSet(numElements, fieldWidth);
+    StreamSet * const Output = P.CreateStreamSet(numElements, fieldWidth);
 
-    P->CreateKernelCall<CopyKernel>(RepeatingStream, Output, copyCountScalar);
+    P.CreateKernelCall<CopyKernel>(RepeatingStream, Output, copyCountScalar);
 
-    TruncatedStreamSet * const Trunc1 = P->CreateTruncatedStreamSet(RepeatingStream);
+    TruncatedStreamSet * const Trunc1 = P.CreateTruncatedStreamSet(RepeatingStream);
 
-    TruncatedStreamSet * const Trunc2 = P->CreateTruncatedStreamSet(Output);
+    TruncatedStreamSet * const Trunc2 = P.CreateTruncatedStreamSet(Output);
 
-    P->CreateKernelCall<PassThroughKernel>(Trunc1, copyCountScalar);
+    P.CreateKernelCall<PassThroughKernel>(Trunc1, copyCountScalar);
 
-    Scalar * const passCountScalar = P->getInputScalar("passCount");
+    Scalar * const passCountScalar = P.getInputScalar("passCount");
 
-    P->CreateKernelCall<PassThroughKernel>(Trunc2, passCountScalar);
+    P.CreateKernelCall<PassThroughKernel>(Trunc2, passCountScalar);
 
-    Scalar * output = P->getInputScalar("output");
+    Scalar * output = P.getInputScalar("output");
 
-    P->CreateKernelCall<StreamEq>(Trunc1, Trunc2, output);
+    P.CreateKernelCall<StreamEq>(Trunc1, Trunc2, output);
 
-    const auto f = reinterpret_cast<TestFunctionType>(P->compile());
+    const auto f = P.compile();
 
     uint32_t result = 0;
 

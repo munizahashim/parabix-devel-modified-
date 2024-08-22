@@ -234,36 +234,32 @@ typedef void (*WordCountFunctionType)(uint32_t fd, uint32_t fileIdx);
 
 auto wcPipelineGen(CPUDriver & driver) {
 
-    Type * const int32Ty = driver.getInt32Ty();
+    auto P = CreatePipeline(driver, Input<uint32_t>{"fd"}, Input<uint32_t>{"fileIdx"});
 
-//    auto P = driver.CreatePipeline(InputScalar{int32Ty, "fd"}, InputScalar{int32Ty, "fileIdx"});
+    Scalar * const fileDescriptor = P.getInputScalar("fd");
+    Scalar * const fileIdx = P.getInputScalar("fileIdx");
 
-    auto P = driver.makePipeline({Binding{int32Ty, "fd"}, Binding{int32Ty, "fileIdx"}});
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
 
-    Scalar * const fileDescriptor = P->getInputScalar("fd");
-    Scalar * const fileIdx = P->getInputScalar("fileIdx");
-
-    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-
-    Kernel * sourceK = P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    Kernel * sourceK = P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     auto CountableStream = ByteStream;
     if (CountWords || CountChars) {
-        auto BasisBits = P->CreateStreamSet(8, 1);
-        P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+        auto BasisBits = P.CreateStreamSet(8, 1);
+        P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
         CountableStream = BasisBits;
     }
 
-    Kernel * const wck = P->CreateKernelCall<WordCountKernel>(CountableStream);
+    Kernel * const wck = P.CreateKernelCall<WordCountKernel>(CountableStream);
 
     Scalar * const lineCount = wck->getOutputScalarAt(0);
     Scalar * const wordCount = wck->getOutputScalarAt(1);
     Scalar * const charCount = wck->getOutputScalarAt(2);
     Scalar * const fileSize = sourceK->getOutputScalarAt(0);
 
-    P->CreateCall("record_counts", record_counts, {lineCount, wordCount, charCount, fileSize, fileIdx});
+    P.CreateCall("record_counts", record_counts, {lineCount, wordCount, charCount, fileSize, fileIdx});
 
-    return reinterpret_cast<WordCountFunctionType>(P->compile());
+    return P.compile();
 }
 
 void wc(WordCountFunctionType fn_ptr, const uint32_t fileIdx) {
