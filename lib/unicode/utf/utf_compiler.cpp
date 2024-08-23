@@ -36,6 +36,7 @@ static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(4), c
 static cl::opt<bool> SuffixOptimization("SuffixOptimization", cl::init(false), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> InitialNonASCIITest("InitialNonASCIITest", cl::init(false), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> UTF_CompilationTracing("UTF_CompilationTracing", cl::init(false), cl::cat(codegen::CodeGenOptions));
+static cl::opt<bool> BixNumCCs("BixNumCCs", cl::init(false), cl::cat(codegen::CodeGenOptions));
 
 std::string kernelAnnotation() {
     std::string a = "+b" + std::to_string(BinaryLogicCostPerByte);
@@ -48,6 +49,9 @@ std::string kernelAnnotation() {
     }
     if (InitialNonASCIITest) {
         a += "+nA";
+    }
+    if (BixNumCCs) {
+        a += "+bx";
     }
     if (UseLegacyUTFHierarchy) {
         a += "+LegacyUTFH";
@@ -123,12 +127,16 @@ private:
 using PabloAST = pablo::PabloAST;
 using PabloBuilder = pablo::PabloBuilder;
 using Basis_Set = std::vector<PabloAST *>;
-
+using boost::intrusive::detail::ceil_log2;
 
 struct Range {
     codepoint_t lo;
     codepoint_t hi;
     bool is_empty() {return lo > hi;}
+    unsigned significant_bits() {
+        auto differing_bits = lo ^ hi;
+        return ceil_log2(differing_bits + 1);
+    }
 };
 
 const UTF_Legacy_Compiler::RangeList UTF_Legacy_Compiler::defaultIfHierachy = {
@@ -325,7 +333,15 @@ UCD::UnicodeSet computeEndpoints(const std::vector<const re::CC *> & CCs) {
     return endpoints;
 }
 
-
+re::CC * reduceCC(re::CC * cc, codepoint_t mask) {
+    UCD::UnicodeSet reduced;
+    for (const auto range : *cc) {
+        const auto lo = re::lo_codepoint(range) & mask;
+        const auto hi = re::hi_codepoint(range) & mask;
+        reduced.insert_range(lo, hi);
+    }
+    return re::makeCC(reduced);
+}
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateRange
  ** ------------------------------------------------------------------------------------------------------------- */
@@ -717,9 +733,6 @@ UTF_Legacy_Compiler::UTF_Legacy_Compiler(Var * basis_var, pablo::PabloBuilder & 
     }
 }
 
-
-using boost::intrusive::detail::ceil_log2;
-
 //
 // Determine the actual range of codepoints encountered in a CC_List.
 // If all the CCs are empty, return the impossible range {0x10FFF, 0}.
@@ -773,10 +786,7 @@ unsigned Unicode_Range_Compiler::costModel(CC_List & ccs) {
 
 
 void Unicode_Range_Compiler::subrangePartitioning(CC_List & ccs, Range & range, PabloAST * rangeTest, PabloBuilder & pb) {
-    auto differing_bits = range.lo ^ range.hi;
-    // Calculate the index of the high differing bit, noting that
-    // the special case if the differing bits value is exactly 2^k.
-    unsigned high_differing_bit = ceil_log2(differing_bits + 1) - 1;
+    unsigned high_differing_bit = range.significant_bits() - 1;
     codepoint_t partition_size = (1U << high_differing_bit)/PartitioningFactor;
     if (UTF_CompilationTracing) {
         llvm::errs() << "URC::subrangePartitioning(";
@@ -862,22 +872,32 @@ void Unicode_Range_Compiler::compileUnguardedSubrange(CC_List & ccs, Range & enc
         llvm::errs().write_hex(subrange.hi);
         llvm::errs() << ")\n";
     }
-    for (unsigned i = 0; i < subrangeCCs.size(); i++) {
-        for (const auto range : *subrangeCCs[i]) {
-            Range r{re::lo_codepoint(range), re::hi_codepoint(range)};
-            PabloAST * compiled = compileCodeRange(r, enclosingRange, enclosingTest, pb);
-            pb.createAssign(mTargets[i], pb.createOr(mTargets[i], compiled));
+    if (BixNumCCs) {
+        for (unsigned i = 0; i < subrangeCCs.size(); i++) {
+            for (const auto range : *subrangeCCs[i]) {
+                Range r{re::lo_codepoint(range), re::hi_codepoint(range)};
+                PabloAST * compiled = compileCodeRange(r, enclosingRange, enclosingTest, pb);
+                pb.createAssign(mTargets[i], pb.createOr(mTargets[i], compiled));
+            }
+        }
+    } else {
+        unsigned significant_bits = enclosingRange.significant_bits();
+        codepoint_t mask = (1U << significant_bits) - 1;
+        pablo::BixNumCompiler bnc(pb);
+        BixNum truncated = bnc.Truncate(mBasis, significant_bits);
+        std::unique_ptr<cc::CC_Compiler> truncatedCompiler;
+        truncatedCompiler = std::make_unique<cc::Parabix_CC_Compiler_Builder>(truncated); //(truncated);
+        for (unsigned i = 0; i < subrangeCCs.size(); i++) {
+            re::CC * reducedCC = reduceCC(subrangeCCs[i], mask);
+            PabloAST * compiled = truncatedCompiler->compileCC(reducedCC, pb);
+            pb.createAssign(mTargets[i], pb.createOr(mTargets[i], pb.createAnd(compiled, enclosingTest)));
         }
     }
 }
 
 PabloAST * Unicode_Range_Compiler::compileCodeRange(Range & codepointRange, Range & enclosingRange, PabloAST * enclosing, PabloBuilder & pb) {
     pablo::BixNumCompiler bnc(pb);
-    auto differing_bits = enclosingRange.lo ^ enclosingRange.hi;
-    // Calculate the number of significant bits, noting that
-    // the special case if the differing bits value is exactly 2^k.
-    unsigned significant_bits = ceil_log2(differing_bits + 1);
-    //unsigned high_differing_bit = ceil_log2(differing_bits + 1) - 1;
+    unsigned significant_bits = enclosingRange.significant_bits();
     codepoint_t mask = (1 << significant_bits) - 1;
     if (UTF_CompilationTracing) {
         llvm::errs() << "compileCodeRange(";
@@ -1126,12 +1146,14 @@ class U8_Advance_Compiler : public U8_Compiler {
 public:
     U8_Advance_Compiler(pablo::Var * Var, PabloBuilder & pb);
 protected:
+    //PabloAST * mSuffix;
     void prepareScope(unsigned scope, PabloBuilder & pb) override;
     void prepareUnifiedBasis(Basis_Set & UnifiedBasis) override;
 };
 
 U8_Lookahead_Compiler::U8_Lookahead_Compiler(pablo::Var * v, PabloBuilder & pb) :
-U8_Compiler(v, pb) {}
+U8_Compiler(v, pb) {
+}
 
 void U8_Lookahead_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
     for (unsigned sfx = 1; sfx <= scope; sfx++) {
@@ -1166,7 +1188,9 @@ void U8_Lookahead_Compiler::prepareUnifiedBasis(Basis_Set & UnifiedBasis) {
 }
 
 U8_Advance_Compiler::U8_Advance_Compiler(pablo::Var * v, PabloBuilder & pb) :
-U8_Compiler(v, pb) {}
+U8_Compiler(v, pb) {
+    //mSuffix = pb.createAnd(mScopeBasis[0][7], pb.createNot(mScopeBasis[0][6]));
+}
 
 void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
     if (mSeqData[scope].byte1CC->empty()) return;
@@ -1178,6 +1202,7 @@ void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
             for (unsigned i = 0; i < mScopeBasis[0].size(); i++) {
                 mScopeBasis[sfx][i] = pb.createAdvance(mScopeBasis[0][i], sfx);
             }
+            // TO DO: Deal with suffix testing.
             mCodeUnitCompilers[sfx] =
             std::make_unique<cc::Parabix_CC_Compiler_Builder>(mScopeBasis[sfx]);
         }
