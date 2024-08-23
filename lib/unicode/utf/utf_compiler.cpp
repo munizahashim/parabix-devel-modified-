@@ -27,7 +27,7 @@ using namespace boost::container;
 
 namespace UTF {
 
-static cl::opt<bool> UseComputedUTFHierarchy("UseComputedUTFHierarchy", cl::init(false), cl::cat(codegen::CodeGenOptions));
+static cl::opt<bool> UseLegacyUTFHierarchy("UseLegacyUTFHierarchy", cl::init(false), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> BinaryLogicCostPerByte("BinaryLogicCostPerByte", cl::init(2), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> TernaryLogicCostPerByte("TernaryLogicCostPerByte", cl::init(1), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> ShiftCostFactor("ShiftCostFactor", cl::init(10), cl::cat(codegen::CodeGenOptions));
@@ -49,7 +49,7 @@ std::string kernelAnnotation() {
     if (InitialNonASCIITest) {
         a += "+nA";
     }
-    if (!UseComputedUTFHierarchy) {
+    if (UseLegacyUTFHierarchy) {
         a += "+LegacyUTFH";
     }
     return a;
@@ -671,7 +671,7 @@ void UTF_Legacy_Compiler::addTarget(Var * theVar, const CC * theCC) {
 }
 
 void UTF_Legacy_Compiler::compile() {
-    if (!UseComputedUTFHierarchy) {
+    if (UseLegacyUTFHierarchy) {
         generateRange(defaultIfHierachy, mPb);
     } else {
         std::vector<const CC *> CCs;
@@ -899,14 +899,6 @@ PabloAST * Unicode_Range_Compiler::compileCodeRange(Range & codepointRange, Rang
     }
 }
 
-struct SeqData {
-    CC_List                 seqCCs;
-    Range                   actualRange;
-    re::CC *                byte1CC;
-    PabloAST *              test;
-    PabloAST *              combinedTest;
-};
-
 class New_UTF_Compiler {
 public:
     New_UTF_Compiler(pablo::Var * Var, PabloBuilder & pb);
@@ -919,14 +911,9 @@ protected:
     //  Depending on the actual CC_List being compiled, up to
     //  4 scope positions will be defined, with corresponding basis
     //  sets and code unit compilers.
-    unsigned                mMaxLength;
-    SeqData                 mSeqData[4];
     Basis_Set               mScopeBasis[4];
     std::unique_ptr<cc::CC_Compiler> mCodeUnitCompilers[4];
     virtual void createInitialHierarchy(CC_List & ccs) = 0;
-    re::CC * initialCC(CC_List & ccs);
-    re::CC * codeUnitCC(re::CC * cc, unsigned codeunit);
-    unsigned costModel(CC_List & ccs);
     virtual void prepareScope(unsigned scope, PabloBuilder & pb) = 0;
     virtual void prepareUnifiedBasis(Basis_Set & UnifiedBasis) = 0;
 };
@@ -959,44 +946,6 @@ PabloAST * combine(PabloAST * e1, PabloAST * e2, PabloBuilder & pb) {
     return pb.createOr(e1, e2);
 }
 
-re::CC * New_UTF_Compiler::codeUnitCC(re::CC * cc, unsigned codeunit) {
-    re::CC * unitCC = re::makeCC(&Byte);
-    for (auto i : *cc) {
-        unsigned lo_unit = mEncoder.nthCodeUnit(lo_codepoint(i), codeunit);
-        unsigned hi_unit = mEncoder.nthCodeUnit(hi_codepoint(i), codeunit);
-        //
-        // Mask off bits 6 and 7 for suffixes.
-        if (SuffixOptimization && (codeunit > 1)) {
-            lo_unit &= 0x3F;
-            hi_unit &= 0x3F;
-        }
-        unitCC = makeCC(unitCC, makeByte(lo_unit, hi_unit));
-    }
-    return unitCC;
-}
-
-re::CC * New_UTF_Compiler::initialCC(CC_List & ccs) {
-    re::CC * unitCC = re::makeCC(&Byte);
-    for (auto cc : ccs) {
-        for (auto i : *cc) {
-            unsigned lo_unit = mEncoder.nthCodeUnit(lo_codepoint(i), 1);
-            unsigned hi_unit = mEncoder.nthCodeUnit(hi_codepoint(i), 1);
-            unitCC = makeCC(unitCC, makeByte(lo_unit, hi_unit));
-        }
-    }
-    return unitCC;
-}
-
-
-unsigned New_UTF_Compiler::costModel(CC_List & ccs) {
-    UCD::UnicodeSet endpoints = computeEndpoints(ccs);
-    Range cc_span = CC_Set_Range(ccs);
-    if (cc_span.is_empty()) return 0;
-    unsigned bits_to_test = ceil_log2(cc_span.hi - cc_span.lo + 1);
-    unsigned total_codepoints = endpoints.count();
-    return total_codepoints * bits_to_test * BinaryLogicCostPerByte / 8;
-}
-
 class U21_Compiler : public New_UTF_Compiler {
 public:
     U21_Compiler(pablo::Var * v, PabloBuilder & pb) : New_UTF_Compiler(v, pb) {
@@ -1027,7 +976,6 @@ void U21_Compiler::createInitialHierarchy(CC_List & ccs) {
         Range ASCII_Range{0, 0x7F};
         CC_List ASCII_ccs;
         extract_CCs_by_range(ASCII_Range, ccs, ASCII_ccs);
-        //compileSubrange(ASCII_ccs, ASCII_Range, mPB.createOnes(), ASCII_Range, mPB);
         Basis_Set ASCIIBasis;
         ASCIIBasis.resize(7);
         prepareUnifiedBasis(ASCIIBasis);
@@ -1045,7 +993,6 @@ void U21_Compiler::createInitialHierarchy(CC_List & ccs) {
         Range nonASCII_Range{0x80, 0x10FFFF};
         CC_List nonASCII_ccs;
         extract_CCs_by_range(nonASCII_Range, ccs, nonASCII_ccs);
-        //subrangePartitioning(nonASCII_ccs, nonASCII_Range, nonASCII, nested);
         Basis_Set UnifiedBasis;
         UnifiedBasis.resize(21);
         prepareUnifiedBasis(UnifiedBasis);
@@ -1053,7 +1000,6 @@ void U21_Compiler::createInitialHierarchy(CC_List & ccs) {
         range_compiler.compile(nonASCII_ccs, nonASCII_Range, nonASCII);
     } else {
         Range UnicodeRange{0, 0x10FFFF};
-        //subrangePartitioning(ccs, UnicodeRange, mPB.createOnes(), mPB);
         Basis_Set UnifiedBasis;
         UnifiedBasis.resize(21);
         prepareUnifiedBasis(UnifiedBasis);
@@ -1066,29 +1012,47 @@ enum U8_Seq_Kind : unsigned {ASCII, TwoByte, ThreeByte, FourByte};
 std::vector<Range> UTF8_Range =
     {Range{0, 0x7F}, Range{0x80, 0x7FF}, Range{0x800, 0xFFFF}, Range{0x10000, 0x10FFFF}};
 
+struct SeqData {
+    CC_List                 seqCCs;
+    Range                   actualRange;
+    re::CC *                byte1CC;
+    PabloAST *              test;
+    PabloAST *              combinedTest;
+    PabloAST *              suffixTest;
+};
+
 class U8_Compiler : public New_UTF_Compiler {
 public:
     U8_Compiler(pablo::Var * v, PabloBuilder & pb) : New_UTF_Compiler(v, pb) {
         mEncoder.setCodeUnitBits(8);
     }
 protected:
+    SeqData                 mSeqData[4];
+    re::CC * prefixCC(CC_List & ccs);
     void lengthAnalysis(CC_List & ccs);
     void createInitialHierarchy(CC_List & ccs) override;
     void extendLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb);
     PabloAST * compilePrefix(re::CC * prefixCC, PabloBuilder & pb);
 };
 
+re::CC * U8_Compiler::prefixCC(CC_List & ccs) {
+    re::CC * unitCC = re::makeCC(&Byte);
+    for (auto cc : ccs) {
+        for (auto i : *cc) {
+            unsigned lo_unit = mEncoder.nthCodeUnit(lo_codepoint(i), 1);
+            unsigned hi_unit = mEncoder.nthCodeUnit(hi_codepoint(i), 1);
+            unitCC = makeCC(unitCC, makeByte(lo_unit, hi_unit));
+        }
+    }
+    return unitCC;
+}
+
 void U8_Compiler::lengthAnalysis(CC_List & ccs) {
-    mMaxLength = 0;
     for (unsigned k = ASCII; k <= FourByte; k++) {
-        unsigned lgth = k + 1;
         mSeqData[k].seqCCs.resize(ccs.size());
         extract_CCs_by_range(UTF8_Range[k], ccs, mSeqData[k].seqCCs);
         mSeqData[k].actualRange = CC_Set_Range(mSeqData[k].seqCCs);
-        if (!mSeqData[k].actualRange.is_empty()) {
-            mMaxLength = lgth;
-        }
-        mSeqData[k].byte1CC = initialCC(mSeqData[k].seqCCs);
+        mSeqData[k].byte1CC = prefixCC(mSeqData[k].seqCCs);
     }
 }
 
@@ -1099,12 +1063,12 @@ PabloAST * U8_Compiler::compilePrefix(re::CC * prefixCC, PabloBuilder & pb) {
 void U8_Compiler::createInitialHierarchy(CC_List & ccs) {
     lengthAnalysis(ccs);
     if (!mSeqData[ASCII].actualRange.is_empty()) {
+        PabloAST * ASCII_test = mPB.createNot(mScopeBasis[0][7]);
         Basis_Set ASCIIBasis;
         ASCIIBasis.resize(7);
         prepareUnifiedBasis(ASCIIBasis);
         Unicode_Range_Compiler ASCII_compiler(ASCIIBasis, mTargets, mPB);
-        ASCII_compiler.compile(ccs, UTF8_Range[ASCII], mPB.createNot(mScopeBasis[0][7]));
-        //compileSubrange(mSeqData[ASCII].seqCCs, UTF8_Range[ASCII], mPB.createOnes(), UTF8_Range[ASCII], mPB);
+        ASCII_compiler.compile(ccs, UTF8_Range[ASCII], ASCII_test);
     }
     for (unsigned k = TwoByte; k <= FourByte; k++) {
         if (mSeqData[k].actualRange.is_empty()) {
@@ -1136,7 +1100,6 @@ void U8_Compiler::extendLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb) {
             codepoint_t test_lo = mEncoder.minCodePointWithCommonCodeUnits(mSeqData[k].actualRange.lo, 1);
             codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(mSeqData[k].actualRange.hi, 1);
             Range testRange{test_lo, test_hi};
-            //subrangePartitioning(mSeqData[k].seqCCs, testRange, mSeqData[k].test, nested);
             Basis_Set UnifiedBasis;
             UnifiedBasis.resize(ceil_log2(UTF8_Range[k].hi));
             prepareUnifiedBasis(UnifiedBasis);
@@ -1178,19 +1141,17 @@ void U8_Lookahead_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
             for (unsigned i = 0; i < mScopeBasis[0].size(); i++) {
                 mScopeBasis[sfx][i] = pb.createLookahead(mScopeBasis[0][i], sfx);
             }
+            PabloAST * sfxmark = pb.createAnd(pb.createNot(mScopeBasis[sfx][6]), mScopeBasis[sfx][7]);
+            if (sfx > 1) {
+                mSeqData[sfx].suffixTest = pb.createAnd(mSeqData[sfx-1].suffixTest, sfxmark);
+            } else {
+                mSeqData[sfx].suffixTest = sfxmark;
+            }
+            mSeqData[scope].test = pb.createAnd(mSeqData[scope].test, mSeqData[sfx].suffixTest);
             mCodeUnitCompilers[sfx] =
             std::make_unique<cc::Parabix_CC_Compiler_Builder>(mScopeBasis[sfx]);
         }
     }
-#if 0
-    // Combine the suffix bits into the current test and discard them.
-    if (SuffixOptimization) {
-        // Combine the suffix bits into the current test and discard them.
-        inner_test = nested.createAnd(mScopeBasis[scope][7], inner_test);
-        SeqData[i].test = nested.createAnd(nested.createNot(mScopeBasis[scope][6]), inner_test);
-        mScopeBasis[scope].resize(6);
-    }
-#endif
 }
 
 void U8_Lookahead_Compiler::prepareUnifiedBasis(Basis_Set & UnifiedBasis) {
@@ -1265,9 +1226,14 @@ void UTF_Compiler::compile(Target_List targets, CC_List ccs) {
         VectorType * const vt = cast<VectorType>(ty->getArrayElementType());
         const auto streamWidth = vt->getElementType()->getIntegerBitWidth();
         codeUnitBits = streamWidth;
-    } else {
-        codeUnitBits = streamCount;
+        UTF_Legacy_Compiler utf_compiler(mVar, mPB, mMask);
+        for (unsigned i = 0; i < targets.size(); i++) {
+            utf_compiler.addTarget(targets[i], ccs[i]);
+        }
+        utf_compiler.compile();
+        return;
     }
+    codeUnitBits = streamCount;
     if (codeUnitBits == 8) {
         if (mBitMovement == pablo::BitMovementMode::LookAhead) {
             if (mMask != nullptr) {
@@ -1275,7 +1241,7 @@ void UTF_Compiler::compile(Target_List targets, CC_List ccs) {
             }
             U8_Lookahead_Compiler utf_compiler(mVar, mPB);
             utf_compiler.compile(targets, ccs);
-        } else if (UseComputedUTFHierarchy) {
+        } else if (!UseLegacyUTFHierarchy) {
             if (mMask != nullptr) {
                 llvm::report_fatal_error("mask parameter for the UTF advance compiler is a future option.");
             }
@@ -1289,15 +1255,16 @@ void UTF_Compiler::compile(Target_List targets, CC_List ccs) {
             utf_compiler.compile();
         }
     } else {
-        /*
-         * UTF_Legacy_Compiler utf_compiler(mVar, mPB, mMask);
-        for (unsigned i = 0; i < targets.size(); i++) {
-            utf_compiler.addTarget(targets[i], ccs[i]);
+        if (UseLegacyUTFHierarchy) {
+            UTF_Legacy_Compiler utf_compiler(mVar, mPB, mMask);
+            for (unsigned i = 0; i < targets.size(); i++) {
+                utf_compiler.addTarget(targets[i], ccs[i]);
+            }
+            utf_compiler.compile();
+        } else {
+            U21_Compiler u21_compiler(mVar, mPB);
+            u21_compiler.compile(targets, ccs);
         }
-        utf_compiler.compile();
-        */
-        U21_Compiler u21_compiler(mVar, mPB);
-        u21_compiler.compile(targets, ccs);
     }
 }
 
