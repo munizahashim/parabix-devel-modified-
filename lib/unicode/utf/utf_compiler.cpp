@@ -33,7 +33,7 @@ static cl::opt<unsigned> TernaryLogicCostPerByte("TernaryLogicCostPerByte", cl::
 static cl::opt<unsigned> ShiftCostFactor("ShiftCostFactor", cl::init(10), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", cl::init(15), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> PartitioningCostThreshhold("PartitioningCostThreshhold", cl::init(5), cl::cat(codegen::CodeGenOptions));
-static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(4), cl::cat(codegen::CodeGenOptions));
+static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(8), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> SuffixOptimization("SuffixOptimization", cl::init(false), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> InitialNonASCIITest("InitialNonASCIITest", cl::init(false), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> UTF_CompilationTracing("UTF_CompilationTracing", cl::init(false), cl::cat(codegen::CodeGenOptions));
