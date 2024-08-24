@@ -32,6 +32,7 @@ static cl::opt<unsigned> BinaryLogicCostPerByte("BinaryLogicCostPerByte", cl::in
 static cl::opt<unsigned> TernaryLogicCostPerByte("TernaryLogicCostPerByte", cl::init(1), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> ShiftCostFactor("ShiftCostFactor", cl::init(10), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", cl::init(15), cl::cat(codegen::CodeGenOptions));
+static cl::opt<unsigned> PartitioningCostThreshhold("PartitioningCostThreshhold", cl::init(5), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(4), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> SuffixOptimization("SuffixOptimization", cl::init(false), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> InitialNonASCIITest("InitialNonASCIITest", cl::init(false), cl::cat(codegen::CodeGenOptions));
@@ -43,7 +44,8 @@ std::string kernelAnnotation() {
     a += "t" + std::to_string(TernaryLogicCostPerByte);
     a += "s" + std::to_string(ShiftCostFactor);
     a += "i" + std::to_string(IfEmbeddingCostThreshhold);
-    a += "p" + std::to_string(PartitioningFactor);
+    a += "p" + std::to_string(PartitioningCostThreshhold);
+    a += "f" + std::to_string(PartitioningFactor);
     if (SuffixOptimization) {
         a += "+sfx";
     }
@@ -797,10 +799,7 @@ void Unicode_Range_Compiler::subrangePartitioning(CC_List & ccs, Range & range, 
         llvm::errs() << "URC::subrangePartitioning(" << range.hex_string() << ")\n";
         llvm::errs() << "  partition_size = " << partition_size << "\n";
     }
-    if (partition_size < 32) {
-        partition_size = 32;
-    }
-    if (range.hi-range.lo <= partition_size) {
+    if (partition_size <= 32) {
         compileUnguardedSubrange(ccs, range, rangeTest, range, pb);
         return;
     }
@@ -842,22 +841,21 @@ void Unicode_Range_Compiler::compileSubrange(CC_List & subrangeCCs, Range & encl
         llvm::errs() << "  costFactor = " << costFactor << "\n";
     }
     if (costFactor < IfEmbeddingCostThreshhold) {
-        compileUnguardedSubrange(subrangeCCs, enclosingRange, enclosingTest, enclosingRange, pb);
+        if (costFactor < PartitioningCostThreshhold) {
+            compileUnguardedSubrange(subrangeCCs, enclosingRange, enclosingTest, subrange, pb);
+        } else {
+            subrangePartitioning(subrangeCCs, enclosingRange, enclosingTest, pb);
+        }
         return;
     }
     // The subrange logic cost exceeds our cost model threshhold.
     // Construct a guarded if-block and partition into further subranges.
-    // TODO: Consider optimizing this test to take advantage of any bits
-    // the current unit that have been determined by enclosingTest.
     PabloAST * unit_test = compileCodeRange(subrange, enclosingRange, enclosingTest, pb);
     PabloAST * subrange_test = pb.createAnd(enclosingTest, unit_test);
 
     // Construct an if-block.
     auto nested = pb.createScope();
     pb.createIf(subrange_test, nested);
-    //codepoint_t test_lo = mEncoder.minCodePointWithCommonCodeUnits(actual_subrange.lo, code_unit_to_test);
-    //codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(actual_subrange.hi, code_unit_to_test);
-    //Range testRange{test_lo, test_hi};
     subrangePartitioning(subrangeCCs, subrange, subrange_test, nested);
 }
 
@@ -869,15 +867,7 @@ void Unicode_Range_Compiler::compileUnguardedSubrange(CC_List & ccs, Range & enc
     Range actual_subrange = CC_Set_Range(subrangeCCs);
     if (actual_subrange.is_empty()) return;
     if (UTF_CompilationTracing) {
-        llvm::errs() << "URC::compileUnguardedSubrange(";
-        llvm::errs().write_hex(enclosingRange.lo);
-        llvm::errs() << ", ";
-        llvm::errs().write_hex(enclosingRange.hi);
-        llvm::errs() << ") subrange(";
-        llvm::errs().write_hex(subrange.lo);
-        llvm::errs() << ", ";
-        llvm::errs().write_hex(subrange.hi);
-        llvm::errs() << ")\n";
+        llvm::errs() << "URC::compileUnguardedSubrange(" << enclosingRange.hex_string() << ") subrange(" << subrange.hex_string() << ")\n";
     }
     if (BixNumCCs) {
         for (unsigned i = 0; i < subrangeCCs.size(); i++) {
