@@ -137,6 +137,11 @@ struct Range {
         auto differing_bits = lo ^ hi;
         return ceil_log2(differing_bits + 1);
     }
+    std::string hex_string() {
+        std::stringstream s;
+        s << std::hex << lo << "_" << hi;
+        return s.str();
+    }
 };
 
 const UTF_Legacy_Compiler::RangeList UTF_Legacy_Compiler::defaultIfHierachy = {
@@ -789,11 +794,7 @@ void Unicode_Range_Compiler::subrangePartitioning(CC_List & ccs, Range & range, 
     unsigned high_differing_bit = range.significant_bits() - 1;
     codepoint_t partition_size = (1U << high_differing_bit)/PartitioningFactor;
     if (UTF_CompilationTracing) {
-        llvm::errs() << "URC::subrangePartitioning(";
-        llvm::errs().write_hex(range.lo);
-        llvm::errs() << ", ";
-        llvm::errs().write_hex(range.hi);
-        llvm::errs() << ")\n";
+        llvm::errs() << "URC::subrangePartitioning(" << range.hex_string() << ")\n";
         llvm::errs() << "  partition_size = " << partition_size << "\n";
     }
     if (partition_size < 32) {
@@ -808,30 +809,36 @@ void Unicode_Range_Compiler::subrangePartitioning(CC_List & ccs, Range & range, 
     for (unsigned partition_lo = base; partition_lo < range.hi; partition_lo += partition_size) {
         unsigned partition_hi = std::min(partition_lo + partition_size - 1, range.hi);
         Range partition{partition_lo, partition_hi};
-        compileSubrange(ccs, range, rangeTest, partition, pb);
+        CC_List partitionCCs(ccs.size());
+        extract_CCs_by_range(partition, ccs, partitionCCs);
+        Range actual_subrange = CC_Set_Range(partitionCCs);
+        if (!actual_subrange.is_empty()) {
+            unsigned partition_bits = partition.significant_bits();
+            PabloAST * partitionTest = rangeTest;
+            for (unsigned bit = partition_bits; bit <= high_differing_bit; bit++) {
+                PabloAST * bitTest;
+                if (((partition_lo >> bit) & 1) == 1) {
+                    bitTest = mBasis[bit];
+                } else {
+                    bitTest = pb.createNot(mBasis[bit]);
+                }
+                if (bit == high_differing_bit) {
+                    partitionTest = pb.createAnd(partitionTest, bitTest, "Range_" + partition.hex_string());
+                } else {
+                    partitionTest = pb.createAnd(partitionTest, bitTest);
+                }
+            }
+            compileSubrange(partitionCCs, partition, partitionTest, actual_subrange, pb);
+        }
     }
 }
 
-void Unicode_Range_Compiler::compileSubrange(CC_List & ccs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb) {
-    CC_List subrangeCCs(ccs.size());
-    extract_CCs_by_range(subrange, ccs, subrangeCCs);
-    //  If there are no CCs that intersect the subrange, no code
-    //  generation is required.
-    Range actual_subrange = CC_Set_Range(subrangeCCs);
-    if (actual_subrange.is_empty()) return;
+void Unicode_Range_Compiler::compileSubrange(CC_List & subrangeCCs, Range & enclosingRange, PabloAST * enclosingTest, Range & subrange, PabloBuilder & pb) {
     //
     // Determine whether compilation of the CCs is below our cost model threshhold.
     unsigned costFactor = costModel(subrangeCCs);
     if (UTF_CompilationTracing) {
-        llvm::errs() << "URC::compileSubrange(";
-        llvm::errs().write_hex(enclosingRange.lo);
-        llvm::errs() << ", ";
-        llvm::errs().write_hex(enclosingRange.hi);
-        llvm::errs() << ") subrange(";
-        llvm::errs().write_hex(subrange.lo);
-        llvm::errs() << ", ";
-        llvm::errs().write_hex(subrange.hi);
-        llvm::errs() << ")\n";
+        llvm::errs() << "URC::compileSubrange(" << enclosingRange.hex_string() << ") subrange(" << subrange.hex_string() << ")\n";
         llvm::errs() << "  costFactor = " << costFactor << "\n";
     }
     if (costFactor < IfEmbeddingCostThreshhold) {
@@ -842,7 +849,7 @@ void Unicode_Range_Compiler::compileSubrange(CC_List & ccs, Range & enclosingRan
     // Construct a guarded if-block and partition into further subranges.
     // TODO: Consider optimizing this test to take advantage of any bits
     // the current unit that have been determined by enclosingTest.
-    PabloAST * unit_test = compileCodeRange(actual_subrange, enclosingRange, enclosingTest, pb);
+    PabloAST * unit_test = compileCodeRange(subrange, enclosingRange, enclosingTest, pb);
     PabloAST * subrange_test = pb.createAnd(enclosingTest, unit_test);
 
     // Construct an if-block.
@@ -994,7 +1001,7 @@ void U21_Compiler::createInitialHierarchy(CC_List & ccs) {
     }
     if (InitialNonASCIITest) {
         Range ASCII_Range{0, 0x7F};
-        CC_List ASCII_ccs;
+        CC_List ASCII_ccs(ccs.size());
         extract_CCs_by_range(ASCII_Range, ccs, ASCII_ccs);
         Basis_Set ASCIIBasis;
         ASCIIBasis.resize(7);
@@ -1011,7 +1018,7 @@ void U21_Compiler::createInitialHierarchy(CC_List & ccs) {
         auto nested = mPB.createScope();
         mPB.createIf(nonASCII, nested);
         Range nonASCII_Range{0x80, 0x10FFFF};
-        CC_List nonASCII_ccs;
+        CC_List nonASCII_ccs(ccs.size());
         extract_CCs_by_range(nonASCII_Range, ccs, nonASCII_ccs);
         Basis_Set UnifiedBasis;
         UnifiedBasis.resize(21);
