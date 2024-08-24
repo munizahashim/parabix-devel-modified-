@@ -393,7 +393,7 @@ int32_t openFile(const std::string & fileName, llvm::raw_ostream & msgstrm) {
     }
 }
 
-typedef size_t (*IDISAtestFunctionType)(int32_t fd1, int32_t fd2);
+typedef size_t (*IDISAtestFunctionType)(uint32_t fd1, uint32_t fd2, const char * outputFileName);
 
 inline StreamSet * readHexToBinary(PipelineBuilder & P, const std::string & fd) {
     StreamSet * const hexStream = P.CreateStreamSet(1, 8);
@@ -415,42 +415,33 @@ inline StreamSet * applyShiftMask(kernel::PipelineBuilder & P, StreamSet * input
 
 IDISAtestFunctionType pipelineGen(CPUDriver & driver) {
 
-    Type * const sizeTy = driver.getSizeTy();
-    Type * const int32Ty = driver.getInt32Ty();
+    auto P = CreatePipeline(driver,
+                            Input<uint32_t>{"operand1FileDecriptor"}, Input<uint32_t>{"operand2FileDecriptor"}, Input<const char *>{"outputFileName"},
+                            Output<size_t>{"totalFailures"});
 
-    Bindings inputs;
-    inputs.emplace_back(int32Ty, "operand1FileDecriptor");
-    inputs.emplace_back(int32Ty, "operand2FileDecriptor");
-    if (!TestOutputFile.empty()) {
-        inputs.emplace_back(driver.getInt8PtrTy(), "outputFileName");
-    }
+    StreamSet * Operand1BitStream = readHexToBinary(P, "operand1FileDecriptor");
+    StreamSet * Operand2BitStream = applyShiftMask(P, readHexToBinary(P, "operand2FileDecriptor"));
 
-    auto P = driver.makePipeline(std::move(inputs), {Binding{sizeTy, "totalFailures"}});
+    StreamSet * ResultBitStream = P.CreateStreamSet(1, 1);
 
-
-    StreamSet * Operand1BitStream = readHexToBinary(*P.get(), "operand1FileDecriptor");
-    StreamSet * Operand2BitStream = applyShiftMask(*P.get(), readHexToBinary(*P.get(), "operand2FileDecriptor"));
-
-    StreamSet * ResultBitStream = P->CreateStreamSet(1, 1);
-
-    P->CreateKernelCall<IdisaBinaryOpTestKernel>(TestOperation, TestFieldWidth, Immediate
+    P.CreateKernelCall<IdisaBinaryOpTestKernel>(TestOperation, TestFieldWidth, Immediate
                                                  , Operand1BitStream, Operand2BitStream
                                                  , ResultBitStream);
 
-    StreamSet * ExpectedResultBitStream = P->CreateStreamSet(1, 1);
+    StreamSet * ExpectedResultBitStream = P.CreateStreamSet(1, 1);
 
-    P->CreateKernelCall<IdisaBinaryOpCheckKernel>(TestOperation, TestFieldWidth, Immediate
+    P.CreateKernelCall<IdisaBinaryOpCheckKernel>(TestOperation, TestFieldWidth, Immediate
                                                  , Operand1BitStream, Operand2BitStream, ResultBitStream
-                                                 , ExpectedResultBitStream, P->getOutputScalar("totalFailures"));
+                                                 , ExpectedResultBitStream, P.getOutputScalar("totalFailures"));
 
     if (!TestOutputFile.empty()) {
-        StreamSet * ResultHexStream = P->CreateStreamSet(1, 8);
-        P->CreateKernelCall<BinaryToHex>(ResultBitStream, ResultHexStream);
-        Scalar * outputFileName = P->getInputScalar("outputFileName");
-        P->CreateKernelCall<FileSink>(outputFileName, ResultHexStream);
+        StreamSet * ResultHexStream = P.CreateStreamSet(1, 8);
+        P.CreateKernelCall<BinaryToHex>(ResultBitStream, ResultHexStream);
+        Scalar * outputFileName = P.getInputScalar("outputFileName");
+        P.CreateKernelCall<FileSink>(outputFileName, ResultHexStream);
     }
 
-    return reinterpret_cast<IDISAtestFunctionType>(P->compile());
+    return P.compile();
 }
 
 int main(int argc, char *argv[]) {
@@ -463,7 +454,7 @@ int main(int argc, char *argv[]) {
 
     const int32_t fd1 = openFile(Operand1TestFile, llvm::outs());
     const int32_t fd2 = openFile(Operand2TestFile, llvm::outs());
-    const size_t failure_count = idisaTestFunction(fd1, fd2);
+    const size_t failure_count = idisaTestFunction(fd1, fd2, TestOutputFile.ValueStr.data());
     if (!QuietMode) {
         if (failure_count == 0) {
             llvm::outs() << "Test success: " << TestOperation << "<" << TestFieldWidth << ">\n";

@@ -27,8 +27,6 @@ namespace testing {
 
 namespace tc {
 
-using ProgramBuilderRef = kernel::ProgramBuilder &;
-
 /*
     Pipeline Return Type Deduction
 
@@ -142,64 +140,6 @@ template<typename... PipelineParameters>
 using runtime_type_pack_t = std::tuple<typename to_runtime_type<PipelineParameters>::type...>;
 
 
-
-/*
-    Input Binding Construction
-
-    Uses template specialization matching to construct a chain of calls at
-    compile time to generate the input bindings for a pipeline with specified
-    parameter types.
- */
-
-template<typename... Ts>
-struct binding_list_construct_iterator {};
-
-/// terminus case
-template<>
-struct binding_list_construct_iterator<> {
-    static void call(LLVMTypeSystemInterface & ts, kernel::Bindings & bindings) {
-        bindings.push_back({ts.getInt32Ty()->getPointerTo(), "output"});
-    }
-};
-
-/// scalar case
-template<typename I, typename... Rest>
-struct binding_list_construct_iterator<I, Rest...> {
-    static_assert(std::is_integral<I>::value, "`I` must be an integer type");
-    static void call(LLVMTypeSystemInterface & ts, kernel::Bindings & bindings) {
-        auto i = bindings.size();
-        auto name = "scalar-" + std::to_string(i);
-        auto type = ts.getIntNTy(streamgen::field_width<I>::value);
-        bindings.push_back({type, name});
-        binding_list_construct_iterator<Rest...>::call(ts, bindings);
-    }
-};
-
-/// stream case
-template<typename I, typename Decoder, typename... Rest>
-struct binding_list_construct_iterator<streamgen::basic_stream<I, Decoder>, Rest...> {
-    static void call(LLVMTypeSystemInterface & ts, kernel::Bindings & bindings) {
-        auto i = std::to_string(bindings.size());
-        auto ptr_name = "stream-ptr-" + i;
-        auto len_name = "stream-len-" + i;
-        auto buf_fw = streamgen::field_width<I>::value;
-        auto ptr_type = llvm::IntegerType::getIntNPtrTy(ts.getContext(), buf_fw);
-        bindings.push_back({ptr_type, ptr_name});
-        bindings.push_back({ts.getSizeTy(), len_name});
-        binding_list_construct_iterator<Rest...>::call(ts, bindings);
-    }
-};
-
-/// Constructs pipeline input bindings based on a set of `PipelineParameters`.
-template<typename... PipelineParameters>
-inline kernel::Bindings construct_bindings(LLVMTypeSystemInterface & ts) {
-    kernel::Bindings bindings{};
-    binding_list_construct_iterator<PipelineParameters...>::call(ts, bindings);
-    return bindings;
-}
-
-
-
 /*
     Pipeline Call Argument Construction
 
@@ -276,7 +216,7 @@ struct runtime_val_construct_iterator {};
 template<size_t Index>
 struct runtime_val_construct_iterator<Index> {
     template<typename Tuple>
-    static void call(Tuple &, ProgramBuilderRef, size_t) {}
+    static void call(Tuple &, kernel::ProgramBuilder &, size_t) {}
 };
 
 template<size_t Index, typename I, typename... Rest>
@@ -285,7 +225,7 @@ struct runtime_val_construct_iterator<Index, I, Rest...> {
 
     // copy over scalar values with no processing
     template<typename Tuple>
-    static void call(Tuple & out, ProgramBuilderRef P, size_t binding_idx) {
+    static void call(Tuple & out, kernel::ProgramBuilder & P, size_t binding_idx) {
         std::get<Index>(out) = P.getInputScalar(binding_idx);
         recursive_t::call(out, P, binding_idx + 1);
     }
@@ -298,7 +238,7 @@ struct runtime_val_construct_iterator<Index, streamgen::basic_stream<I, Decoder>
 
     // construct a streamset from the buffer pointer and size
     template<typename Tuple>
-    static void call(Tuple & out, ProgramBuilderRef P, size_t binding_idx) {
+    static void call(Tuple & out, kernel::ProgramBuilder & P, size_t binding_idx) {
         auto ptr = P.getInputScalar(binding_idx);
         auto len = P.getInputScalar(binding_idx + 1);
         auto fw = stream_t::field_width_v;
@@ -313,20 +253,94 @@ struct runtime_val_construct_iterator<Index, streamgen::basic_stream<I, Decoder>
 template<typename Tuple, typename... PipelineParameters>
 inline
 void
-construct_pipeline_input_values(Tuple & out, ProgramBuilderRef P) {
+construct_pipeline_input_values(Tuple & out, kernel::ProgramBuilder & P) {
     runtime_val_construct_iterator<0, PipelineParameters...>::call(out, P, 0);
 }
 
+namespace { /* anonymous namespace */
+
+template <typename T, typename U>
+struct tuple_cons {
+    using type = typename std::tuple<T, U>;
+};
+
+template <typename T, typename... Us>
+struct tuple_cons<T, std::tuple<Us...>> {
+    using type = typename std::tuple<T, Us...>;
+};
+
+template <typename T>
+struct tuple_cons<T, std::tuple<>> {
+    using type = T;
+};
+
+template<typename... Args>
+struct toKernelInput;
+
+template<typename T, typename... Args>
+struct toKernelInput<std::tuple<T, Args...>> {
+    static_assert(std::is_integral<T>::value, "`T` must be an integer type");
+    using type = typename tuple_cons<kernel::Input<T>, typename toKernelInput<std::tuple<Args...>>::type>::type;
+    constexpr static auto makeArgs(const size_t K = 0) {
+        auto arg = std::make_tuple(kernel::Input<T>("scalar-" + std::to_string(K)));
+        return std::tuple_cat(arg, toKernelInput<std::tuple<Args...>>::makeArgs(K + 1));
+    }
+};
+
+template<typename I, typename Decoder, typename... Args>
+struct toKernelInput<std::tuple<streamgen::basic_stream<I, Decoder>, Args...>> {
+    using trailing = typename tuple_cons<kernel::Input<size_t>, typename toKernelInput<std::tuple<Args...>>::type>::type;
+    using type = typename tuple_cons<kernel::Input<buffer_pointer_t<I>>, trailing>::type;
+    constexpr static auto makeArgs(const size_t K = 0) {
+        auto arg = std::make_tuple(kernel::Input<buffer_pointer_t<I>>("stream-ptr-" + std::to_string(K)),
+                                   kernel::Input<size_t>("stream-len-"+ std::to_string(K)));
+        return std::tuple_cat(arg, toKernelInput<std::tuple<Args...>>::makeArgs(K + 1));
+    }
+};
+
+template<>
+struct toKernelInput<std::tuple<>> {
+    using type = std::tuple<kernel::Input<int32_t*>>;
+    static auto makeArgs(const size_t K = 0) {
+        return std::make_tuple(kernel::Input<int32_t*>(std::string{"output"}));
+    }
+};
+
+
+template <typename ... Ts>
+struct TypedProgramBuilderType {
+    using type = typename kernel::TypedProgramBuilder<Ts...>;
+};
+
+template <typename ... Ts>
+struct TypedProgramBuilderType<std::tuple<Ts...>> {
+    using type = typename TypedProgramBuilderType<Ts...>::type;
+};
+
+} /* end of anonymous namespace */
 
 template<typename... PipelineParameters>
 class test_engine {
     using Self = test_engine<PipelineParameters...>;
+    using PipielineParamStruct = toKernelInput<std::tuple<PipelineParameters...>>;
+    using TestEngineProgramBuilder = typename TypedProgramBuilderType<typename PipielineParamStruct::type>::type;
+
+    template<typename ... Ts, size_t ... I>
+    inline static auto UnpackedConstructProgramBuilder(CPUDriver & driver, std::tuple<Ts...> args, std::index_sequence<I...>) {
+        return kernel::CreatePipeline(driver, std::get<I>(args)...);
+    }
+
+    template<typename ... Ts>
+    inline static auto ConstructProgramBuilder(CPUDriver & driver, std::tuple<Ts...> args) {
+        return UnpackedConstructProgramBuilder(driver, args, std::make_index_sequence<sizeof...(Ts)>{});
+    }
+
 public:
     using pipeline_input_pack_t = runtime_type_pack_t<PipelineParameters...>;
 
     test_engine()
     : mDriver("unit-test-framework")
-    , mPipelineBuilder(mDriver.makePipeline(construct_bindings<PipelineParameters...>(mDriver))) {
+    , mProgramBuilder(std::move(ConstructProgramBuilder(mDriver, PipielineParamStruct::makeArgs()))) {
         construct_pipeline_input_values<pipeline_input_pack_t, PipelineParameters...>(mPipelineInputs, pipeline());
     }
 
@@ -344,17 +358,17 @@ public:
     CPUDriver & driver() noexcept { return mDriver; }
 
     /// Returns a reference to the engine's internal `ProgramBuilder`.
-    ProgramBuilderRef pipeline() noexcept { return *mPipelineBuilder.get(); }
+    TestEngineProgramBuilder & pipeline() noexcept { return mProgramBuilder; }
 
     /// Implicit cast to `ProgramBuilder` reference.
-    operator ProgramBuilderRef () { return pipeline(); }
+    operator TestEngineProgramBuilder & () { return pipeline(); }
 
     /// Access to `ProgramBuilder`'s methods via the `->` operator.
-    ProgramBuilderRef operator -> () { return pipeline(); }
+    kernel::ProgramBuilder & operator -> () { return pipeline(); }
 
 private:
     CPUDriver                                   mDriver;
-    std::unique_ptr<kernel::ProgramBuilder>     mPipelineBuilder;
+    TestEngineProgramBuilder                    mProgramBuilder;
     pipeline_input_pack_t                       mPipelineInputs;
 };
 
@@ -366,7 +380,7 @@ public:
     using invocation_pack_t = pipeline_invocation_pack_t<PipelineParameters...>;
     using pipeline_fn_t = pipeline_return_t<PipelineParameters...>;
     using test_engine_t = test_engine<PipelineParameters...>;
-    using pipeline_body_t = void(*)(test_engine_t &, ProgramBuilderRef);
+    using pipeline_body_t = void(*)(test_engine_t &, kernel::ProgramBuilder &);
 
     explicit test_case(PipelineParameters &... argv)
     : result(new int32_t(0))
@@ -388,7 +402,7 @@ public:
         // populate pipline
         body(T, T.pipeline());
         // compile and invoke
-        auto fn = reinterpret_cast<pipeline_fn_t>(T.pipeline().compile());
+        auto fn = T.pipeline().compile();
         meta::apply(fn, std::move(invocation_pack));
     }
 
@@ -412,8 +426,6 @@ make_test_case(PipelineParameters &... argv) {
 } // namespace testing::tc
 
 } // namespace testing
-
-
 
 // --- Static Type Tests --- //
 

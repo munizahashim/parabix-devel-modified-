@@ -170,25 +170,25 @@ void ParabixIllustrator::registerIllustrator(Scalar * illustrator) {
 
 void ParabixIllustrator::captureByteData(ProgramBuilderRef P, std::string streamLabel, StreamSet * byteData, char nonASCIIsubstitute) {
     unsigned illustratedStreamNo = addStream(streamLabel);
-    StreamSet * basis = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(byteData, basis);
-    StreamSet * printableBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<PrintableASCII>(basis, printableBasis, nonASCIIsubstitute);
-    StreamSet * printableData = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(printableBasis, printableData);
-    Scalar * streamNo = P->CreateConstant(P->getDriver().getBuilder()->getSize(illustratedStreamNo));
-    Kernel * scK = P->CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
+    StreamSet * basis = P.CreateStreamSet(8);
+    P.CreateKernelCall<S2PKernel>(byteData, basis);
+    StreamSet * printableBasis = P.CreateStreamSet(8);
+    P.CreateKernelCall<PrintableASCII>(basis, printableBasis, nonASCIIsubstitute);
+    StreamSet * printableData = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(printableBasis, printableData);
+    Scalar * streamNo = P.CreateConstant(P.getDriver().getSize(illustratedStreamNo));
+    Kernel * scK = P.CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
     scK->link("appendStreamText_wrapper", appendStreamText_wrapper);
 }
 
 void ParabixIllustrator::captureBitstream(ProgramBuilderRef P, std::string streamLabel, StreamSet * bitstream, char zeroCh, char oneCh) {
     unsigned illustratedStreamNo = addStream(streamLabel);
-    StreamSet * printableBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<BitstreamIllustrator>(bitstream, printableBasis, zeroCh, oneCh);
-    StreamSet * printableData = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(printableBasis, printableData);
-    Scalar * streamNo = P->CreateConstant(P->getDriver().getBuilder()->getSize(illustratedStreamNo));
-    Kernel * scK = P->CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
+    StreamSet * printableBasis = P.CreateStreamSet(8);
+    P.CreateKernelCall<BitstreamIllustrator>(bitstream, printableBasis, zeroCh, oneCh);
+    StreamSet * printableData = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(printableBasis, printableData);
+    Scalar * streamNo = P.CreateConstant(P.getDriver().getSize(illustratedStreamNo));
+    Kernel * scK = P.CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
     scK->link("appendStreamText_wrapper", appendStreamText_wrapper);
 }
 
@@ -196,12 +196,12 @@ void ParabixIllustrator::captureBixNum(ProgramBuilderRef P, std::string streamLa
     auto bixBits = bixnum->getNumElements();
     if (bixBits <= 4) {
         unsigned illustratedStreamNo = addStream(streamLabel);
-        StreamSet * printableBasis = P->CreateStreamSet(8);
-        P->CreateKernelCall<PrintableBixNum>(bixnum, printableBasis, hexBase);
-        StreamSet * printableData = P->CreateStreamSet(1, 8);
-        P->CreateKernelCall<P2SKernel>(printableBasis, printableData);
-        Scalar * streamNo = P->CreateConstant(P->getDriver().getBuilder()->getSize(illustratedStreamNo));
-        Kernel * scK = P->CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
+        StreamSet * printableBasis = P.CreateStreamSet(8);
+        P.CreateKernelCall<PrintableBixNum>(bixnum, printableBasis, hexBase);
+        StreamSet * printableData = P.CreateStreamSet(1, 8);
+        P.CreateKernelCall<P2SKernel>(printableBasis, printableData);
+        Scalar * streamNo = P.CreateConstant(P.getDriver().getSize(illustratedStreamNo));
+        Kernel * scK = P.CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
         scK->link("appendStreamText_wrapper", appendStreamText_wrapper);
     } else {
         auto hexDigits = (bixBits + 3)/4;
@@ -209,7 +209,7 @@ void ParabixIllustrator::captureBixNum(ProgramBuilderRef P, std::string streamLa
             auto low = (i - 1) * 4;
             auto hi = bixBits;
             std::string lbl = streamLabel + "[" + std::to_string(low) + "-" + std::to_string(hi - 1) + "]";
-            StreamSet * hexBasis = streamutils::Select(*P.get(), bixnum, streamutils::Range(low, hi));
+            StreamSet * hexBasis = streamutils::Select(P, bixnum, streamutils::Range(low, hi));
             captureBixNum(P, lbl, hexBasis, hexBase);
             bixBits = low;
         }

@@ -287,6 +287,8 @@ public:
 
     }
 
+    TypedProgramBuilder(TypedProgramBuilder &&) = default;
+
 private:
 
     static PipelineKernel * constructKernel(BaseDriver & driver, Args &&... args) {
