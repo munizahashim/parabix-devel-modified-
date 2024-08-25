@@ -12,6 +12,7 @@
 #include <re/alphabet/alphabet.h>
 #include <re/cc/cc_compiler_target.h>
 #include <re/cc/cc_compiler.h>
+#include <re/alphabet/alphabet.h>
 #include <re/adt/re_name.h>
 #include <re/adt/re_cc.h>
 #include <unicode/core/unicode_set.h>
@@ -340,14 +341,14 @@ UCD::UnicodeSet computeEndpoints(const std::vector<const re::CC *> & CCs) {
     return endpoints;
 }
 
-re::CC * reduceCC(re::CC * cc, codepoint_t mask) {
+re::CC * reduceCC(re::CC * cc, codepoint_t mask, cc::Alphabet & a) {
     UCD::UnicodeSet reduced;
     for (const auto range : *cc) {
         const auto lo = re::lo_codepoint(range) & mask;
         const auto hi = re::hi_codepoint(range) & mask;
         reduced.insert_range(lo, hi);
     }
-    return re::makeCC(reduced);
+    return re::makeCC(reduced, &a);
 }
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateRange
@@ -786,15 +787,15 @@ unsigned Unicode_Range_Compiler::costModel(CC_List & ccs) {
     UCD::UnicodeSet endpoints = computeEndpoints(ccs);
     Range cc_span = CC_Set_Range(ccs);
     if (cc_span.is_empty()) return 0;
-    unsigned bits_to_test = ceil_log2(cc_span.hi - cc_span.lo + 1);
+    unsigned bits_to_test = cc_span.significant_bits();
     unsigned total_codepoints = endpoints.count();
     return total_codepoints * bits_to_test * BinaryLogicCostPerByte / 8;
 }
 
 
 void Unicode_Range_Compiler::subrangePartitioning(CC_List & ccs, Range & range, PabloAST * rangeTest, PabloBuilder & pb) {
-    unsigned high_differing_bit = range.significant_bits() - 1;
-    codepoint_t partition_size = (1U << high_differing_bit)/PartitioningFactor;
+    unsigned range_bits = range.significant_bits();
+    codepoint_t partition_size = (1U << (range_bits - 1))/PartitioningFactor;
     if (UTF_CompilationTracing) {
         llvm::errs() << "URC::subrangePartitioning(" << range.hex_string() << ")\n";
         llvm::errs() << "  partition_size = " << partition_size << "\n";
@@ -803,8 +804,15 @@ void Unicode_Range_Compiler::subrangePartitioning(CC_List & ccs, Range & range, 
         compileUnguardedSubrange(ccs, range, rangeTest, range, pb);
         return;
     }
-    codepoint_t mask = partition_size - 1;
-    codepoint_t base = range.lo & ~mask;
+    std::string range_alphabet = "Low" + std::to_string(range_bits);
+    cc::CodeUnitAlphabet CodeAlpha(range_alphabet, range_alphabet, range_bits);
+    pablo::BixNumCompiler bnc(pb);
+    BixNum rangeBasis = bnc.Truncate(mBasis, range_bits);
+    std::unique_ptr<cc::CC_Compiler> rangeCompiler;
+    rangeCompiler = std::make_unique<cc::Parabix_CC_Compiler_Builder>(rangeBasis);
+    codepoint_t range_mask = (1U << range_bits) - 1;
+    codepoint_t partition_mask = partition_size - 1;
+    codepoint_t base = range.lo & ~partition_mask;
     for (unsigned partition_lo = base; partition_lo < range.hi; partition_lo += partition_size) {
         unsigned partition_hi = std::min(partition_lo + partition_size - 1, range.hi);
         Range partition{partition_lo, partition_hi};
@@ -812,22 +820,35 @@ void Unicode_Range_Compiler::subrangePartitioning(CC_List & ccs, Range & range, 
         extract_CCs_by_range(partition, ccs, partitionCCs);
         Range actual_subrange = CC_Set_Range(partitionCCs);
         if (!actual_subrange.is_empty()) {
-            unsigned partition_bits = partition.significant_bits();
-            PabloAST * partitionTest = rangeTest;
+            unsigned subpartition_bits = actual_subrange.significant_bits();
+            codepoint_t mask = (1u << subpartition_bits) - 1;
+            Range subpartition{actual_subrange.lo & ~mask, actual_subrange.hi | mask};
+            if (UTF_CompilationTracing) {
+                llvm::errs() << "partition.significant_bits() = " << partition.significant_bits() << "\n";
+                llvm::errs() << "actual_subrange: " << actual_subrange.hex_string() << "\n";
+                llvm::errs() << "subpartition: " << subpartition.hex_string() << "\n";
+                llvm::errs() << "actual_subrange.significant_bits() = " << subpartition_bits << "\n";
+            }
+            re::CC * subpartitionCC = re::makeCC(subpartition.lo & range_mask, subpartition.hi & range_mask, &CodeAlpha);
+            PabloAST * subpartitionTest = rangeCompiler->compileCC(subpartitionCC, pb);
+/*
+            PabloAST * subpartitionTest = rangeTest;
             for (unsigned bit = partition_bits; bit <= high_differing_bit; bit++) {
                 PabloAST * bitTest;
-                if (((partition_lo >> bit) & 1) == 1) {
+                if (((subpartition.lo >> bit) & 1) == 1) {
                     bitTest = mBasis[bit];
                 } else {
                     bitTest = pb.createNot(mBasis[bit]);
                 }
                 if (bit == high_differing_bit) {
-                    partitionTest = pb.createAnd(partitionTest, bitTest, "Range_" + partition.hex_string());
+                    subpartitionTest = pb.createAnd(partitionTest, bitTest, "Range_" + subpartition.hex_string());
                 } else {
-                    partitionTest = pb.createAnd(partitionTest, bitTest);
+                    subpartitionTest = pb.createAnd(partitionTest, bitTest);
                 }
             }
-            compileSubrange(partitionCCs, partition, partitionTest, actual_subrange, pb);
+ */
+            subpartitionTest = pb.createAnd(rangeTest, subpartitionTest);
+            compileSubrange(partitionCCs, subpartition, subpartitionTest, actual_subrange, pb);
         }
     }
 }
@@ -879,13 +900,15 @@ void Unicode_Range_Compiler::compileUnguardedSubrange(CC_List & ccs, Range & enc
         }
     } else {
         unsigned significant_bits = enclosingRange.significant_bits();
+        std::string alphabet = "Low" + std::to_string(significant_bits);
+        cc::CodeUnitAlphabet CodeAlpha(alphabet, alphabet, significant_bits);
         codepoint_t mask = (1U << significant_bits) - 1;
         pablo::BixNumCompiler bnc(pb);
         BixNum truncated = bnc.Truncate(mBasis, significant_bits);
         std::unique_ptr<cc::CC_Compiler> truncatedCompiler;
-        truncatedCompiler = std::make_unique<cc::Parabix_CC_Compiler_Builder>(truncated); //(truncated);
+        truncatedCompiler = std::make_unique<cc::Parabix_CC_Compiler_Builder>(truncated);
         for (unsigned i = 0; i < subrangeCCs.size(); i++) {
-            re::CC * reducedCC = reduceCC(subrangeCCs[i], mask);
+            re::CC * reducedCC = reduceCC(subrangeCCs[i], mask, CodeAlpha);
             PabloAST * compiled = truncatedCompiler->compileCC(reducedCC, pb);
             pb.createAssign(mTargets[i], pb.createOr(mTargets[i], pb.createAnd(compiled, enclosingTest)));
         }
