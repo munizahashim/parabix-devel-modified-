@@ -103,27 +103,27 @@ void GrepCallBackObject::handle_signal(unsigned s) {
     }
 }
 
-extern "C" void accumulate_match_wrapper(intptr_t accum_addr, const size_t lineNum, char * line_start, char * line_end) {
+extern "C" void accumulate_match_wrapper(void *accum_addr, const size_t lineNum, char * line_start, char * line_end) {
     assert ("passed a null accumulator" && accum_addr);
     reinterpret_cast<MatchAccumulator *>(accum_addr)->accumulate_match(lineNum, line_start, line_end);
 }
 
-extern "C" void finalize_match_wrapper(intptr_t accum_addr, char * buffer_end) {
+extern "C" void finalize_match_wrapper(void *accum_addr, char * buffer_end) {
     assert ("passed a null accumulator" && accum_addr);
     reinterpret_cast<MatchAccumulator *>(accum_addr)->finalize_match(buffer_end);
 }
 
-extern "C" unsigned get_file_count_wrapper(intptr_t accum_addr) {
+extern "C" unsigned get_file_count_wrapper(void *accum_addr) {
     assert ("passed a null accumulator" && accum_addr);
     return reinterpret_cast<MatchAccumulator *>(accum_addr)->getFileCount();
 }
 
-extern "C" size_t get_file_start_pos_wrapper(intptr_t accum_addr, unsigned fileNo) {
+extern "C" size_t get_file_start_pos_wrapper(void *accum_addr, unsigned fileNo) {
     assert ("passed a null accumulator" && accum_addr);
     return reinterpret_cast<MatchAccumulator *>(accum_addr)->getFileStartPos(fileNo);
 }
 
-extern "C" void set_batch_line_number_wrapper(intptr_t accum_addr, unsigned fileNo, size_t batchLine) {
+extern "C" void set_batch_line_number_wrapper(void *accum_addr, unsigned fileNo, size_t batchLine) {
     assert ("passed a null accumulator" && accum_addr);
     reinterpret_cast<MatchAccumulator *>(accum_addr)->setBatchLineNumber(fileNo, batchLine);
 }
@@ -148,6 +148,7 @@ GrepEngine::GrepEngine(BaseDriver &driver) :
     mNullMode(NullCharMode::Data),
     mGrepDriver(driver),
     mMainMethod(nullptr),
+    mBatchMethod(nullptr),
     mNextFileToGrep(0),
     mNextFileToPrint(0),
     grepMatchFound(false),
@@ -724,8 +725,8 @@ StreamSet * GrepEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * In
 void GrepEngine::grepCodeGen() {
 
     auto P = CreatePipeline(mGrepDriver,
-                            Input<size_t>{"useMMap"}, Input<uint32_t>{"fileDescriptor"},
-                            Input<uintptr_t>{"callbackObject"}, Input<size_t>{"maxCount"},
+                            Input<uint32_t>{"useMMap"}, Input<uint32_t>{"fileDescriptor"},
+                            Input<GrepCallBackObject &>{"callbackObject"}, Input<size_t>{"maxCount"},
                             Output<uint64_t>{"countResult"});
 
     Scalar * const useMMap = P.getInputScalar("useMMap");
@@ -734,7 +735,7 @@ void GrepEngine::grepCodeGen() {
     P.CreateKernelCall<FDSourceKernel>(useMMap, fileDescriptor, ByteStream);
     StreamSet * const Matches = grepPipeline(P, ByteStream);
     P.CreateKernelCall<PopcountKernel>(Matches, P.getOutputScalar("countResult"));
-    mMainMethod = (void*)P.compile();
+    mMainMethod = P.compile();
 }
 
 //
@@ -846,7 +847,7 @@ public:
                          // stream outputs
                          , {}
                          // input scalars
-                         , {Binding{driver.getIntAddrTy(), "callbackObject", callbackObject}}
+                         , {Binding{TypeBuilder<grep::GrepCallBackObject &, false>::get(driver.getContext()), "callbackObject", callbackObject}}
                          // output scalars
                          , {}
                          // internally generated streamsets
@@ -879,6 +880,7 @@ protected:
                 colorEscapeBytes.push_back(static_cast<uint64_t>(ch));
             }
         }
+
 
         StreamSet * const MatchSpans = getInputStreamSet(1);
         StreamSet * const InsertMarks = E.CreateStreamSet(2, 1);
@@ -1099,8 +1101,8 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & E, StreamSet * By
 void EmitMatchesEngine::grepCodeGen() {
 
     auto P = CreatePipeline(mGrepDriver,
-                            Input<uint8_t*>{"buffer"}, Input<size_t>{"length"},
-                            Input<uintptr_t>{"callbackObject"}, Input<size_t>{"maxCount"},
+                            Input<const char*>{"buffer"}, Input<size_t>{"length"},
+                            Input<EmitMatch &>{"callbackObject"}, Input<size_t>{"maxCount"},
                             Output<uint64_t>{"countResult"});
 
     Scalar * const buffer = P.getInputScalar("buffer");
@@ -1110,7 +1112,7 @@ void EmitMatchesEngine::grepCodeGen() {
     P.CreateKernelCall<MemorySourceKernel>(buffer, length, InternalBytes);
     grepPipeline(P, InternalBytes);
     P.setOutputScalar("countResult", P.CreateConstant(mGrepDriver.getInt64(0)));
-    mBatchMethod = (void*)P.compile();
+    mBatchMethod = P.compile();
 }
 
 bool canMMap(const std::string & fileName) {
@@ -1124,8 +1126,7 @@ bool canMMap(const std::string & fileName) {
 
 
 uint64_t GrepEngine::doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm) {
-    typedef uint64_t (*GrepFunctionType)(bool useMMap, int32_t fileDescriptor, GrepCallBackObject *, size_t maxCount);
-    auto f = reinterpret_cast<GrepFunctionType>(mMainMethod);
+    auto f = mMainMethod;
     uint64_t resultTotal = 0;
 
     for (auto fileName : fileNames) {
@@ -1133,7 +1134,7 @@ uint64_t GrepEngine::doGrep(const std::vector<std::string> & fileNames, std::ost
         bool useMMap = mPreferMMap && canMMap(fileName);
         int32_t fileDescriptor = openFile(fileName, strm);
         if (fileDescriptor == -1) return 0;
-        uint64_t grepResult = f(useMMap, fileDescriptor, &handler, mMaxCount);
+        uint64_t grepResult = f(useMMap, fileDescriptor, handler, mMaxCount);
         close(fileDescriptor);
         if (handler.binaryFileSignalled()) {
             llvm::errs() << "Binary file " << fileName << "\n";
@@ -1173,8 +1174,7 @@ void MatchOnlyEngine::showResult(uint64_t grepResult, const std::string & fileNa
 }
 
 uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm) {
-    typedef uint64_t (*GrepBatchFunctionType)(char * buffer, size_t length, EmitMatch *, size_t maxCount);
-    auto f = reinterpret_cast<GrepBatchFunctionType>(mBatchMethod);
+    auto f = mBatchMethod;
     EmitMatch accum(mShowFileNames, mShowLineNumbers, ((mBeforeContext > 0) || (mAfterContext > 0)), mInitialTab);
     accum.setStringStream(&strm);
     std::vector<int32_t> fileDescriptor(fileNames.size());
@@ -1247,7 +1247,7 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
         for (unsigned i = 0; i < accum.mFileStartLineNumbers.size(); i++) {
             accum.mFileStartLineNumbers[i] = ~static_cast<size_t>(0);
         }
-        f(accum.mBatchBuffer, cumulativeSize, &accum, mMaxCount);
+        f(accum.mBatchBuffer, cumulativeSize, accum, mMaxCount);
     }
     if (singleFileMMapMode) {
         munmap(reinterpret_cast<void *>(accum.mBatchBuffer), fileSize[lastOpened]);
@@ -1415,7 +1415,7 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
 
     auto E = CreatePipeline(mGrepDriver,
                             Input<uint8_t*>{"buffer"}, Input<size_t>{"length"},
-                            Input<uintptr_t>{"accumulator"});
+                            Input<void *>{"accumulator"});
 
     Scalar * const buffer = E.getInputScalar(0);
     Scalar * const length = E.getInputScalar(1);
@@ -1491,7 +1491,7 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
 
     auto E = CreatePipeline(mGrepDriver,
                             Input<uint8_t*>{"buffer"}, Input<size_t>{"length"},
-                            Input<uintptr_t>{"accumulator"});
+                            Input<void *>{"accumulator"});
 
     Scalar * const buffer = E.getInputScalar(0);
     Scalar * const length = E.getInputScalar(1);

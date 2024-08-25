@@ -41,790 +41,791 @@ using CommandLineScalarVec = std::array<Relationship *, (unsigned)CommandLineSca
 
 using RedundantStreamSetMap = PipelineAnalysis::RedundantStreamSetMap;
 
-//TODO: change enum tag to distinguish relationships and streamsets
-
-struct RelationshipGraphBuilder {
-
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief addProducerRelationships
+ * @brief generateInitialPipelineGraph
  ** ------------------------------------------------------------------------------------------------------------- */
-void addProducerStreamSets(const PortType portType, const unsigned producer, const Bindings & array) {
-    const auto n = array.size();
-    for (unsigned i = 0; i < n; ++i) {
-        const Binding & item = array[i];
-        const auto binding = G.add(RelationshipNode::IsBinding, &item);
-        add_edge(producer, binding, RelationshipType{portType, i}, G);
-        const auto rel = item.getRelationship();
-        assert (isa<StreamSet>(rel) || isa<TruncatedStreamSet>(rel));
-        const auto relationship = G.addOrFind(RelationshipNode::IsStreamSet, rel);
-        add_edge(binding, relationship, RelationshipType{portType, i}, G);
-        if (isa<TruncatedStreamSet>(rel)) {
-            const Relationship * d = rel;
-            for (;;) {
-                d = cast<TruncatedStreamSet>(d)->getData();
-                if (LLVM_LIKELY(!isa<TruncatedStreamSet>(d))) {
-                    break;
+void PipelineAnalysis::generateInitialPipelineGraph(KernelBuilder & b) {
+
+    //TODO: change enum tag to distinguish relationships and streamsets
+
+    struct RelationshipGraphBuilder {
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief addProducerRelationships
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void addProducerStreamSets(const PortType portType, const unsigned producer, const Bindings & array) {
+        const auto n = array.size();
+        for (unsigned i = 0; i < n; ++i) {
+            const Binding & item = array[i];
+            const auto binding = G.add(RelationshipNode::IsBinding, &item);
+            add_edge(producer, binding, RelationshipType{portType, i}, G);
+            const auto rel = item.getRelationship();
+            assert (isa<StreamSet>(rel) || isa<TruncatedStreamSet>(rel));
+            const auto relationship = G.addOrFind(RelationshipNode::IsStreamSet, rel);
+            add_edge(binding, relationship, RelationshipType{portType, i}, G);
+            if (isa<TruncatedStreamSet>(rel)) {
+                const Relationship * d = rel;
+                for (;;) {
+                    d = cast<TruncatedStreamSet>(d)->getData();
+                    if (LLVM_LIKELY(!isa<TruncatedStreamSet>(d))) {
+                        break;
+                    }
                 }
+                assert (isa<StreamSet>(d) || isa<RepeatingStreamSet>(d));
+                const auto s = static_cast<const StreamSet *>(d);
+                TruncatedStreamSets.emplace_back(producer, binding, const_cast<StreamSet *>(s), relationship);
             }
-            assert (isa<StreamSet>(d) || isa<RepeatingStreamSet>(d));
-            const auto s = static_cast<const StreamSet *>(d);
-            TruncatedStreamSets.emplace_back(producer, binding, const_cast<StreamSet *>(s), relationship);
         }
     }
-}
 
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief canonicalizeAnyCommandLineScalar
- ** ------------------------------------------------------------------------------------------------------------- */
-inline Relationship * canonicalizeAnyCommandLineScalar(Relationship * const rel) { assert (rel);
-    if (isa<CommandLineScalar>(rel)) {
-        const unsigned k = (unsigned)cast<CommandLineScalar>(rel)->getCLType();
-        if (CommandLineScalars[k] == nullptr) {
-            CommandLineScalars[k] = rel;
-        } else {
-            return CommandLineScalars[k];
-        }
-    }
-    return rel;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief addProducerRelationships
- ** ------------------------------------------------------------------------------------------------------------- */
-void addProducerScalars(const PortType portType, const unsigned producer, const Bindings & array) {
-    const auto n = array.size();
-    for (unsigned i = 0; i < n; ++i) {
-        Relationship * const r = canonicalizeAnyCommandLineScalar(array[i].getRelationship());
-        assert (isa<Scalar>(r) || isa<CommandLineScalar>(r));
-        const auto relationship = G.addOrFind(RelationshipNode::IsScalar, r);
-        add_edge(producer, relationship, RelationshipType{portType, i}, G);
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief addConsumerRelationships
- ** ------------------------------------------------------------------------------------------------------------- */
-void addConsumerStreamSets(const PortType portType, const unsigned consumer, const Bindings & array, const bool addRelationship) {
-    const auto n = array.size();
-    for (unsigned i = 0; i < n; ++i) {
-        const Binding & item = array[i];
-        const auto binding = G.add(RelationshipNode::IsBinding, &item);
-        add_edge(binding, consumer, RelationshipType{portType, i}, G);
-        const auto rel = item.getRelationship();
-        assert (isa<RepeatingStreamSet>(rel) || isa<StreamSet>(rel) || isa<TruncatedStreamSet>(rel));
-        auto relationship = G.addOrFind(RelationshipNode::IsStreamSet, rel, addRelationship || isa<RepeatingStreamSet>(rel));
-        add_edge(relationship, binding, RelationshipType{portType, i}, G);
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief addConsumerRelationships
- ** ------------------------------------------------------------------------------------------------------------- */
-void addConsumerScalars(const PortType portType, const unsigned consumer, const Bindings & array, const bool addRelationship) {
-    const auto n = array.size();
-    for (unsigned i = 0; i < n; ++i) {
-        Relationship * const rel = canonicalizeAnyCommandLineScalar(array[i].getRelationship());
-        assert (isa<Scalar>(rel) || isa<ScalarConstant>(rel) || isa<CommandLineScalar>(rel));
-        const auto relationship = G.addOrFind(RelationshipNode::IsScalar, rel, addRelationship);
-        add_edge(relationship, consumer, RelationshipType{portType, i}, G);
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief addConsumerRelationships
- ** ------------------------------------------------------------------------------------------------------------- */
-void addConsumerCalls(const PortType portType, const CallBinding & call) {
-    const auto & array = call.Args;
-    const auto n = array.size();
-    if (LLVM_UNLIKELY(n == 0)) {
-        return;
-    }
-    const auto callFunc = G.addOrFind(RelationshipNode::IsCallee, &call);
-    for (unsigned i = 0; i < n; ++i) {
-        const auto relationship = G.find(RelationshipNode::IsScalar, array[i]);
-        add_edge(relationship, callFunc, RelationshipType{portType, i}, G);
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief getReferencePort
- ** ------------------------------------------------------------------------------------------------------------- */
-StreamSetPort getReferencePort(const Kernel * const kernel, const StringRef ref) {
-    const Bindings & inputs = kernel->getInputStreamSetBindings();
-    const auto n = inputs.size();
-    for (unsigned i = 0; i != n; ++i) {
-        if (ref.equals(inputs[i].getName())) {
-            return StreamSetPort{PortType::Input, i};
-        }
-    }
-    const Bindings & outputs = kernel->getOutputStreamSetBindings();
-    const auto m = outputs.size();
-    for (unsigned i = 0; i != m; ++i) {
-        if (ref.equals(outputs[i].getName())) {
-            return StreamSetPort{PortType::Output, i};
-        }
-    }
-    SmallVector<char, 256> tmp;
-    raw_svector_ostream msg(tmp);
-    msg << "Invalid reference name: "
-        << kernel->getName()
-        << " does not contain a StreamSet called "
-        << ref;
-    report_fatal_error(StringRef(msg.str()));
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief getReferenceBinding
- ** ------------------------------------------------------------------------------------------------------------- */
-inline const Binding & getReferenceBinding(const Kernel * const kernel, const StreamSetPort port) {
-    if (port.Type == PortType::Input) {
-        return kernel->getInputStreamSetBinding(port.Number);
-    } else if (port.Type == PortType::Output) {
-        return kernel->getOutputStreamSetBinding(port.Number);
-    }
-    llvm_unreachable("unknown port type?");
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief addReferenceRelationships
- ** ------------------------------------------------------------------------------------------------------------- */
-void addReferenceRelationships(const PortType portType, const unsigned index, const Bindings & array) {
-    const auto n = array.size();
-    if (LLVM_UNLIKELY(n == 0)) {
-        return;
-    }
-    for (unsigned i = 0; i != n; ++i) {
-        const Binding & item = array[i];
-        const ProcessingRate & rate = item.getRate();
-        if (LLVM_UNLIKELY(rate.hasReference())) {
-            const Kernel * const kernel = G[index].Kernel;
-            const StreamSetPort refPort = getReferencePort(kernel, rate.getReference());
-            if (LLVM_UNLIKELY(portType == PortType::Input && refPort.Type == PortType::Output)) {
-                SmallVector<char, 256> tmp;
-                raw_svector_ostream msg(tmp);
-                msg << "Reference of input stream "
-                    << kernel->getName()
-                    << "."
-                    << item.getName()
-                    << " cannot refer to an output stream";
-                report_fatal_error(StringRef(msg.str()));
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief canonicalizeAnyCommandLineScalar
+     ** ------------------------------------------------------------------------------------------------------------- */
+    inline Relationship * canonicalizeAnyCommandLineScalar(Relationship * const rel) { assert (rel);
+        if (isa<CommandLineScalar>(rel)) {
+            const unsigned k = (unsigned)cast<CommandLineScalar>(rel)->getCLType();
+            if (CommandLineScalars[k] == nullptr) {
+                CommandLineScalars[k] = rel;
+            } else {
+                return CommandLineScalars[k];
             }
-            const Binding & ref = getReferenceBinding(kernel, refPort);
-            assert (ref.getRelationship()->isStreamSet());
-            if (LLVM_UNLIKELY(rate.isRelative() && ref.getRate().isFixed())) {
-                SmallVector<char, 256> tmp;
-                raw_svector_ostream msg(tmp);
-                msg << "Reference of a Relative-rate stream "
-                    << kernel->getName()
-                    << "."
-                    << item.getName()
-                    << " cannot refer to a Fixed-rate stream";
-                report_fatal_error(StringRef(msg.str()));
-            }
-            // To preserve acyclicity, reference bindings always point to the binding that refers to it.
-            // To simplify later I/O lookup, the edge stores the info of the reference port.
-            auto I = G.find(RelationshipNode::IsBinding, &item);
-            assert (in_degree(I, G) == 1);
-            add_edge(G.find(RelationshipNode::IsBinding, &ref), I, RelationshipType{refPort, ReasonType::Reference}, G);
-            assert (G[first_in_edge(I, G)].Reason != ReasonType::Reference);
-            assert (in_degree(I, G) == 2);
+        }
+        return rel;
+    }
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief addProducerRelationships
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void addProducerScalars(const PortType portType, const unsigned producer, const Bindings & array) {
+        const auto n = array.size();
+        for (unsigned i = 0; i < n; ++i) {
+            Relationship * const r = canonicalizeAnyCommandLineScalar(array[i].getRelationship());
+            assert (isa<Scalar>(r) || isa<CommandLineScalar>(r));
+            const auto relationship = G.addOrFind(RelationshipNode::IsScalar, r);
+            add_edge(producer, relationship, RelationshipType{portType, i}, G);
         }
     }
-}
 
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief addTruncatedStreamSetContraints
- ** ------------------------------------------------------------------------------------------------------------- */
-void addTruncatedStreamSetContraints() {
-    for (const auto & c : TruncatedStreamSets) {
-        const auto src = G.find(RelationshipNode::IsStreamSet, c.SourceData);
-        const auto dst = c.TruncatedStreamSetVertex;
-        assert (in_degree(dst, G) > 0);
-        add_edge(src, dst, RelationshipType{ReasonType::Reference}, G);
-        assert (G[first_in_edge(dst, G)].Reason != ReasonType::Reference);
-
-        assert (G[c.Binding].Type == RelationshipNode::IsBinding);
-        const Binding & output = G[c.Binding].Binding;
-        const auto producer = c.Producer;
-        assert (G[producer].Type == RelationshipNode::IsKernel);
-
-        // TODO: if we take this as an input with an equivalent rate, do not add it as a check?
-        // Or make general check to prevent that for any port drawing from the same streamset?
-
-        Binding * const trunc = new Binding("#trunc", c.SourceData, output.getRate());
-        mInternalBindings.emplace_back(trunc);
-        const auto truncBinding = G.add(RelationshipNode::IsBinding, trunc, RelationshipNodeFlag::ImplicitlyAdded);
-
-        const unsigned portNum = in_degree(producer, G);
-        add_edge(src, truncBinding, RelationshipType{PortType::Input, portNum, ReasonType::ImplicitTruncatedSource}, G);
-        add_edge(truncBinding, producer, RelationshipType{PortType::Input, portNum, ReasonType::ImplicitTruncatedSource}, G);
-
-
-
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief addConsumerRelationships
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void addConsumerStreamSets(const PortType portType, const unsigned consumer, const Bindings & array, const bool addRelationship) {
+        const auto n = array.size();
+        for (unsigned i = 0; i < n; ++i) {
+            const Binding & item = array[i];
+            const auto binding = G.add(RelationshipNode::IsBinding, &item);
+            add_edge(binding, consumer, RelationshipType{portType, i}, G);
+            const auto rel = item.getRelationship();
+            assert (isa<RepeatingStreamSet>(rel) || isa<StreamSet>(rel) || isa<TruncatedStreamSet>(rel));
+            auto relationship = G.addOrFind(RelationshipNode::IsStreamSet, rel, addRelationship || isa<RepeatingStreamSet>(rel));
+            add_edge(relationship, binding, RelationshipType{portType, i}, G);
+        }
     }
-}
 
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief addPopCountKernels
- ** ------------------------------------------------------------------------------------------------------------- */
-void addPopCountKernels(KernelBuilder & b, Kernels & kernels, KernelVertexVec & vertex) {
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief addConsumerRelationships
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void addConsumerScalars(const PortType portType, const unsigned consumer, const Bindings & array, const bool addRelationship) {
+        const auto n = array.size();
+        for (unsigned i = 0; i < n; ++i) {
+            Relationship * const rel = canonicalizeAnyCommandLineScalar(array[i].getRelationship());
+            assert (isa<Scalar>(rel) || isa<ScalarConstant>(rel) || isa<CommandLineScalar>(rel));
+            const auto relationship = G.addOrFind(RelationshipNode::IsScalar, rel, addRelationship);
+            add_edge(relationship, consumer, RelationshipType{portType, i}, G);
+        }
+    }
 
-    struct Edge {
-        CountingType    Type;
-        StreamSetPort   Port;
-        size_t          StrideLength;
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief addConsumerRelationships
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void addConsumerCalls(const PortType portType, const CallBinding & call) {
+        const auto & array = call.Args;
+        const auto n = array.size();
+        if (LLVM_UNLIKELY(n == 0)) {
+            return;
+        }
+        const auto callFunc = G.addOrFind(RelationshipNode::IsCallee, &call);
+        for (unsigned i = 0; i < n; ++i) {
+            const auto relationship = G.find(RelationshipNode::IsScalar, array[i]);
+            add_edge(relationship, callFunc, RelationshipType{portType, i}, G);
+        }
+    }
 
-        Edge() : Type(Unknown), Port(), StrideLength() { }
-        Edge(const CountingType type, const StreamSetPort port, size_t stepFactor) : Type(type), Port(port), StrideLength(stepFactor) { }
-    };
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief getReferencePort
+     ** ------------------------------------------------------------------------------------------------------------- */
+    StreamSetPort getReferencePort(const Kernel * const kernel, const StringRef ref) {
+        const Bindings & inputs = kernel->getInputStreamSetBindings();
+        const auto n = inputs.size();
+        for (unsigned i = 0; i != n; ++i) {
+            if (ref.equals(inputs[i].getName())) {
+                return StreamSetPort{PortType::Input, i};
+            }
+        }
+        const Bindings & outputs = kernel->getOutputStreamSetBindings();
+        const auto m = outputs.size();
+        for (unsigned i = 0; i != m; ++i) {
+            if (ref.equals(outputs[i].getName())) {
+                return StreamSetPort{PortType::Output, i};
+            }
+        }
+        SmallVector<char, 256> tmp;
+        raw_svector_ostream msg(tmp);
+        msg << "Invalid reference name: "
+            << kernel->getName()
+            << " does not contain a StreamSet called "
+            << ref;
+        report_fatal_error(StringRef(msg.str()));
+    }
 
-    using Graph = adjacency_list<vecS, vecS, directedS, Relationship *, Edge>;
-    using Vertex = Graph::vertex_descriptor;
-    using Map = flat_map<Relationship *, Vertex>;
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief getReferenceBinding
+     ** ------------------------------------------------------------------------------------------------------------- */
+    inline const Binding & getReferenceBinding(const Kernel * const kernel, const StreamSetPort port) {
+        if (port.Type == PortType::Input) {
+            return kernel->getInputStreamSetBinding(port.Number);
+        } else if (port.Type == PortType::Output) {
+            return kernel->getOutputStreamSetBinding(port.Number);
+        }
+        llvm_unreachable("unknown port type?");
+    }
 
-    const auto numOfKernels = kernels.size();
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief addReferenceRelationships
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void addReferenceRelationships(const PortType portType, const unsigned index, const Bindings & array) {
+        const auto n = array.size();
+        if (LLVM_UNLIKELY(n == 0)) {
+            return;
+        }
+        for (unsigned i = 0; i != n; ++i) {
+            const Binding & item = array[i];
+            const ProcessingRate & rate = item.getRate();
+            if (LLVM_UNLIKELY(rate.hasReference())) {
+                const Kernel * const kernel = G[index].Kernel;
+                const StreamSetPort refPort = getReferencePort(kernel, rate.getReference());
+                if (LLVM_UNLIKELY(portType == PortType::Input && refPort.Type == PortType::Output)) {
+                    SmallVector<char, 256> tmp;
+                    raw_svector_ostream msg(tmp);
+                    msg << "Reference of input stream "
+                        << kernel->getName()
+                        << "."
+                        << item.getName()
+                        << " cannot refer to an output stream";
+                    report_fatal_error(StringRef(msg.str()));
+                }
+                const Binding & ref = getReferenceBinding(kernel, refPort);
+                assert (ref.getRelationship()->isStreamSet());
+                if (LLVM_UNLIKELY(rate.isRelative() && ref.getRate().isFixed())) {
+                    SmallVector<char, 256> tmp;
+                    raw_svector_ostream msg(tmp);
+                    msg << "Reference of a Relative-rate stream "
+                        << kernel->getName()
+                        << "."
+                        << item.getName()
+                        << " cannot refer to a Fixed-rate stream";
+                    report_fatal_error(StringRef(msg.str()));
+                }
+                // To preserve acyclicity, reference bindings always point to the binding that refers to it.
+                // To simplify later I/O lookup, the edge stores the info of the reference port.
+                auto I = G.find(RelationshipNode::IsBinding, &item);
+                assert (in_degree(I, G) == 1);
+                add_edge(G.find(RelationshipNode::IsBinding, &ref), I, RelationshipType{refPort, ReasonType::Reference}, G);
+                assert (G[first_in_edge(I, G)].Reason != ReasonType::Reference);
+                assert (in_degree(I, G) == 2);
+            }
+        }
+    }
 
-    Graph H(numOfKernels);
-    Map M;
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief addTruncatedStreamSetContraints
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void addTruncatedStreamSetContraints() {
+        for (const auto & c : TruncatedStreamSets) {
+            const auto src = G.find(RelationshipNode::IsStreamSet, c.SourceData);
+            const auto dst = c.TruncatedStreamSetVertex;
+            assert (in_degree(dst, G) > 0);
+            add_edge(src, dst, RelationshipType{ReasonType::Reference}, G);
+            assert (G[first_in_edge(dst, G)].Reason != ReasonType::Reference);
 
-    for (unsigned i = 0; i < numOfKernels; ++i) {
+            assert (G[c.Binding].Type == RelationshipNode::IsBinding);
+            const Binding & output = G[c.Binding].Binding;
+            const auto producer = c.Producer;
+            assert (G[producer].Type == RelationshipNode::IsKernel);
 
-        const Kernel * const kernel = kernels[i].Object;
+            // TODO: if we take this as an input with an equivalent rate, do not add it as a check?
+            // Or make general check to prevent that for any port drawing from the same streamset?
 
-        auto addPopCountDependency = [&](const ProgramGraph::vertex_descriptor bindingVertex,
-                                         const RelationshipType & port) {
+            Binding * const trunc = new Binding("#trunc", c.SourceData, output.getRate());
+            mInternalBindings.emplace_back(trunc);
+            const auto truncBinding = G.add(RelationshipNode::IsBinding, trunc, RelationshipNodeFlag::ImplicitlyAdded);
 
-            const RelationshipNode & rn = G[bindingVertex];
-            assert (rn.Type == RelationshipNode::IsBinding);
-            const Binding & binding = rn.Binding;
-            const ProcessingRate & rate = binding.getRate();
-            if (LLVM_UNLIKELY(rate.isPopCount() || rate.isNegatedPopCount())) {
-                // determine which port this I/O port refers to
-                for (const auto e : make_iterator_range(in_edges(bindingVertex, G))) {
-                    const RelationshipType & rt = G[e];
-                    if (rt.Reason == ReasonType::Reference) {
-                        const auto refStreamVertex = source(e, G);
-                        const RelationshipNode & rn = G[refStreamVertex];
-                        assert (rn.Type == RelationshipNode::IsBinding);
-                        const Binding & refBinding = rn.Binding;
-                        const ProcessingRate & refRate = refBinding.getRate();
-                        Relationship * const refStream = refBinding.getRelationship();
-                        const auto f = M.find(refStream);
-                        Vertex refVertex = 0;
-                        if (LLVM_UNLIKELY(f != M.end())) {
-                            refVertex = f->second;
-                        } else {
-                            if (LLVM_UNLIKELY(refBinding.isDeferred() || !refRate.isFixed())) {
+            const unsigned portNum = in_degree(producer, G);
+            add_edge(src, truncBinding, RelationshipType{PortType::Input, portNum, ReasonType::ImplicitTruncatedSource}, G);
+            add_edge(truncBinding, producer, RelationshipType{PortType::Input, portNum, ReasonType::ImplicitTruncatedSource}, G);
+
+
+
+        }
+    }
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief addPopCountKernels
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void addPopCountKernels(KernelBuilder & b, Kernels & kernels, KernelVertexVec & vertex) {
+
+        struct Edge {
+            CountingType    Type;
+            StreamSetPort   Port;
+            size_t          StrideLength;
+
+            Edge() : Type(Unknown), Port(), StrideLength() { }
+            Edge(const CountingType type, const StreamSetPort port, size_t stepFactor) : Type(type), Port(port), StrideLength(stepFactor) { }
+        };
+
+        using Graph = adjacency_list<vecS, vecS, directedS, Relationship *, Edge>;
+        using Vertex = Graph::vertex_descriptor;
+        using Map = flat_map<Relationship *, Vertex>;
+
+        const auto numOfKernels = kernels.size();
+
+        Graph H(numOfKernels);
+        Map M;
+
+        for (unsigned i = 0; i < numOfKernels; ++i) {
+
+            const Kernel * const kernel = kernels[i].Object;
+
+            auto addPopCountDependency = [&](const ProgramGraph::vertex_descriptor bindingVertex,
+                                             const RelationshipType & port) {
+
+                const RelationshipNode & rn = G[bindingVertex];
+                assert (rn.Type == RelationshipNode::IsBinding);
+                const Binding & binding = rn.Binding;
+                const ProcessingRate & rate = binding.getRate();
+                if (LLVM_UNLIKELY(rate.isPopCount() || rate.isNegatedPopCount())) {
+                    // determine which port this I/O port refers to
+                    for (const auto e : make_iterator_range(in_edges(bindingVertex, G))) {
+                        const RelationshipType & rt = G[e];
+                        if (rt.Reason == ReasonType::Reference) {
+                            const auto refStreamVertex = source(e, G);
+                            const RelationshipNode & rn = G[refStreamVertex];
+                            assert (rn.Type == RelationshipNode::IsBinding);
+                            const Binding & refBinding = rn.Binding;
+                            const ProcessingRate & refRate = refBinding.getRate();
+                            Relationship * const refStream = refBinding.getRelationship();
+                            const auto f = M.find(refStream);
+                            Vertex refVertex = 0;
+                            if (LLVM_UNLIKELY(f != M.end())) {
+                                refVertex = f->second;
+                            } else {
+                                if (LLVM_UNLIKELY(refBinding.isDeferred() || !refRate.isFixed())) {
+                                    SmallVector<char, 0> tmp;
+                                    raw_svector_ostream msg(tmp);
+                                    msg << kernel->getName();
+                                    msg << ": pop count reference ";
+                                    msg << refBinding.getName();
+                                    msg << " must refer to a non-deferred Fixed rate stream";
+                                    report_fatal_error(StringRef(msg.str()));
+                                }
+                                refVertex = add_vertex(refStream, H);
+                                M.emplace(refStream, refVertex);
+                            }
+                            const Rational strideLength = refRate.getRate() * kernel->getStride();
+                            if (LLVM_UNLIKELY(strideLength.denominator() != 1)) {
                                 SmallVector<char, 0> tmp;
                                 raw_svector_ostream msg(tmp);
                                 msg << kernel->getName();
                                 msg << ": pop count reference ";
                                 msg << refBinding.getName();
-                                msg << " must refer to a non-deferred Fixed rate stream";
+                                msg << " cannot have a rational rate";
                                 report_fatal_error(StringRef(msg.str()));
                             }
-                            refVertex = add_vertex(refStream, H);
-                            M.emplace(refStream, refVertex);
+                            const auto type = rate.isPopCount() ? CountingType::Positive : CountingType::Negative;
+                            add_edge(refVertex, i, Edge{type, port, strideLength.numerator()}, H);
+                            return;
                         }
-                        const Rational strideLength = refRate.getRate() * kernel->getStride();
-                        if (LLVM_UNLIKELY(strideLength.denominator() != 1)) {
-                            SmallVector<char, 0> tmp;
-                            raw_svector_ostream msg(tmp);
-                            msg << kernel->getName();
-                            msg << ": pop count reference ";
-                            msg << refBinding.getName();
-                            msg << " cannot have a rational rate";
-                            report_fatal_error(StringRef(msg.str()));
+                    }
+                    llvm_unreachable("could not find reference for popcount rate?");
+                }
+            };
+
+            const auto j = G.find(RelationshipNode::IsKernel, kernel);
+
+            for (const auto e : make_iterator_range(in_edges(j, G))) {
+                addPopCountDependency(source(e, G), G[e]);
+            }
+            for (const auto e : make_iterator_range(out_edges(j, G))) {
+                addPopCountDependency(target(e, G), G[e]);
+            }
+        }
+
+        const auto n = num_vertices(H);
+        if (LLVM_LIKELY(n == numOfKernels)) {
+            return;
+        }
+
+        BaseDriver & driver = reinterpret_cast<BaseDriver &>(b.getDriver());
+
+        IntegerType * const sizeTy = b.getSizeTy();
+
+        assert (n > numOfKernels);
+
+        kernels.reserve(n - numOfKernels);
+
+        for (auto i = numOfKernels; i < n; ++i) {
+
+            size_t strideLength = 0;
+            #ifdef FORCE_POP_COUNTS_TO_BE_BITBLOCK_STEPS
+            strideLength = b.getBitBlockWidth();
+            #endif
+            CountingType type = CountingType::Unknown;
+            for (const auto e : make_iterator_range(out_edges(i, H))) {
+                const Edge & ed = H[e];
+                type |= ed.Type;
+                if (strideLength == 0) {
+                    strideLength = ed.StrideLength;
+                } else {
+                    strideLength = boost::gcd(strideLength, ed.StrideLength);
+                }
+            }
+            assert (strideLength != 1);
+            assert (type != CountingType::Unknown);
+
+            StreamSet * positive = nullptr;
+            if (LLVM_LIKELY(type & CountingType::Positive)) {
+                positive = driver.CreateStreamSet(1, sizeTy->getBitWidth());
+            }
+
+            StreamSet * negative = nullptr;
+            if (LLVM_UNLIKELY(type & CountingType::Negative)) {
+                negative = driver.CreateStreamSet(1, sizeTy->getBitWidth());
+            }
+            assert (H[i]->isStreamSet());
+            StreamSet * const input = static_cast<StreamSet *>(H[i]); assert (input);
+            PopCountKernel * popCountKernel = nullptr;
+            switch (type) {
+                case CountingType::Positive:
+                    popCountKernel = new PopCountKernel(b.getDriver(), PopCountKernel::POSITIVE, strideLength, input, positive);
+                    break;
+                case CountingType::Negative:
+                    popCountKernel = new PopCountKernel(b.getDriver(), PopCountKernel::NEGATIVE, strideLength, input, negative);
+                    break;
+                case CountingType::Both:
+                    popCountKernel = new PopCountKernel(b.getDriver(), PopCountKernel::BOTH, strideLength, input, positive, negative);
+                    break;
+                default: llvm_unreachable("unknown counting type?");
+            }
+            // Add the popcount kernel to the pipeline
+            kernels.emplace_back(popCountKernel, 0U);
+            mInternalKernels.emplace_back(popCountKernel);
+
+            const auto k = G.add(RelationshipNode::IsKernel, popCountKernel, RelationshipNodeFlag::ImplicitlyAdded);
+            vertex.push_back(k);
+            addConsumerStreamSets(PortType::Input, k, popCountKernel->getInputStreamSetBindings(), false);
+            addProducerStreamSets(PortType::Output, k, popCountKernel->getOutputStreamSetBindings());
+
+            // subsitute the popcount relationships
+            for (const auto e : make_iterator_range(out_edges(i, H))) {
+                const Edge & ed = H[e];
+                const Kernel * const kernel = kernels[target(e, H)].Object;
+                const auto consumer = G.find(RelationshipNode::IsKernel, kernel);
+                assert (ed.Type == CountingType::Positive || ed.Type == CountingType::Negative);
+                StreamSet * const stream = ed.Type == CountingType::Positive ? positive : negative; assert (stream);
+                const auto streamVertex = G.find(RelationshipNode::IsStreamSet, stream);
+
+                // append the popcount rate stream to the kernel
+                Rational stepRate{ed.StrideLength, strideLength * kernel->getStride()};
+                Binding * const popCount = new Binding("#popcount" + std::to_string(ed.Port.Number), stream, FixedRate(stepRate));
+                mInternalBindings.emplace_back(popCount);
+                const auto popCountBinding = G.add(RelationshipNode::IsBinding, popCount, RelationshipNodeFlag::ImplicitlyAdded);
+
+                const unsigned portNum = in_degree(consumer, G);
+                add_edge(streamVertex, popCountBinding, RelationshipType{PortType::Input, portNum, ReasonType::ImplicitPopCount}, G);
+                add_edge(popCountBinding, consumer, RelationshipType{PortType::Input, portNum, ReasonType::ImplicitPopCount}, G);
+
+                auto rebind_reference = [&](const unsigned binding) {
+
+                    RelationshipNode & rn = G[binding];
+                    assert (rn.Type == RelationshipNode::IsBinding);
+
+                    graph_traits<ProgramGraph>::in_edge_iterator ei, ei_end;
+                    std::tie(ei, ei_end) = in_edges(binding, G);
+                    assert (std::distance(ei, ei_end) == 2);
+
+                    for (;;) {
+                        const RelationshipType & type = G[*ei];
+                        if (type.Reason == ReasonType::Reference) {
+                            remove_edge(*ei, G);
+                            break;
                         }
-                        const auto type = rate.isPopCount() ? CountingType::Positive : CountingType::Negative;
-                        add_edge(refVertex, i, Edge{type, port, strideLength.numerator()}, H);
-                        return;
+                        ++ei;
+                        assert (ei != ei_end);
+                    }
+
+                    // create a new binding with the partial sum rate.
+                    const Binding & orig = rn.Binding;
+                    assert (orig.getRate().isPopCount() || orig.getRate().isNegatedPopCount());
+                    Binding * const replacement = new Binding(orig, PartialSum(popCount->getName()));
+                    mInternalBindings.emplace_back(replacement);
+                    rn.Binding = replacement;
+
+                    assert (in_degree(binding, G) > 0);
+                    add_edge(popCountBinding, binding, RelationshipType{PortType::Input, portNum, ReasonType::Reference}, G);
+                    assert (G[first_in_edge(binding, G)].Reason != ReasonType::Reference);
+                };
+
+                bool notFound = true;
+                if (ed.Port.Type == PortType::Input) {
+                    for (const auto e : make_iterator_range(in_edges(consumer, G))) {
+                        const RelationshipType & type = G[e];
+                        if (type.Number == ed.Port.Number) {
+                            assert (type.Type == PortType::Input);
+                            rebind_reference(source(e, G));
+                            notFound = false;
+                            break;
+                        }
+                    }
+                } else { // if (ed.Port.Type == PortType::Output) {
+                    for (const auto e : make_iterator_range(out_edges(consumer, G))) {
+                        const RelationshipType & type = G[e];
+                        if (type.Number == ed.Port.Number) {
+                            assert (type.Type == PortType::Output);
+                            rebind_reference(target(e, G));
+                            notFound = false;
+                            break;
+                        }
                     }
                 }
-                llvm_unreachable("could not find reference for popcount rate?");
+                if (LLVM_UNLIKELY(notFound)) {
+                    report_fatal_error("Internal error: failed to locate PopCount binding.");
+                }
+            }
+        }
+    }
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief combineDuplicateKernels
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void combineDuplicateKernels(KernelBuilder & /* b */) {
+
+        using StreamSetVector = std::vector<std::pair<unsigned, StreamSetPort>>;
+        using ScalarVector = std::vector<unsigned>;
+
+        struct KernelId {
+            const std::string Id;
+            const StreamSetVector Streams;
+            const ScalarVector Scalars;
+
+            KernelId(const std::string & id, const StreamSetVector & streams, const ScalarVector & scalars)
+            : Id(id), Streams(streams), Scalars(scalars) {
+
+            }
+            bool operator<(const KernelId & other) const {
+                const auto diff = Id.compare(other.Id);
+                if (LLVM_LIKELY(diff != 0)) {
+                    return diff < 0;
+                } else {
+                    return (Scalars < other.Scalars) || (Streams < other.Streams);
+                }
             }
         };
 
-        const auto j = G.find(RelationshipNode::IsKernel, kernel);
-
-        for (const auto e : make_iterator_range(in_edges(j, G))) {
-            addPopCountDependency(source(e, G), G[e]);
+        std::vector<unsigned> kernelList;
+        for (const auto & K : mKernels) {
+            kernelList.push_back(G.addOrFind(RelationshipNode::IsKernel, K.Object));
         }
-        for (const auto e : make_iterator_range(out_edges(j, G))) {
-            addPopCountDependency(target(e, G), G[e]);
+
+        std::map<KernelId, unsigned> Ids;
+
+        ScalarVector scalars;
+        StreamSetVector inputs;
+        ScalarVector outputs;
+
+        for (;;) {
+            bool unmodified = true;
+            Ids.clear();
+
+            for (const auto i : kernelList) {
+
+                RelationshipNode & bn = G[i];
+                if (bn.Type == RelationshipNode::IsKernel) {
+                    const Kernel * const kernel = bn.Kernel;
+                    // We cannot reason about a family of kernels nor safely combine two
+                    // side-effecting kernels.
+                    if ((bn.Flags & RelationshipNodeFlag::IndirectFamily) || kernel->hasAttribute(AttrId::SideEffecting)) {
+                        continue;
+                    }
+
+                    const auto n = in_degree(i, G);
+                    inputs.resize(n);
+                    scalars.resize(n);
+                    unsigned numOfStreams = 0;
+
+                    for (const auto e : make_iterator_range(in_edges(i, G))) {
+                        const RelationshipType & port = G[e];
+                        const auto input = source(e, G);
+                        const RelationshipNode & node = G[input];
+                        if (node.Type == RelationshipNode::IsBinding) {
+                            unsigned relationship = 0;
+                            StreamSetPort ref{};
+                            for (const auto e : make_iterator_range(in_edges(input, G))) {
+                                RelationshipType & rt = G[e];
+                                if (rt.Reason == ReasonType::Reference) {
+                                    ref = rt;
+                                    assert (G[source(e, G)].Type == RelationshipNode::IsBinding);
+                                } else {
+                                    relationship = source(e, G);
+                                    assert (G[relationship].Type == RelationshipNode::IsStreamSet);
+                                }
+                            }
+                            inputs[port.Number] = std::make_pair(relationship, ref);
+                            ++numOfStreams;
+                        } else if (node.Type == RelationshipNode::IsScalar) {
+                            scalars[port.Number] = input;
+                        }
+                    }
+
+                    inputs.resize(numOfStreams);
+                    scalars.resize(n - numOfStreams);
+
+                    KernelId id(kernel->getName(), inputs, scalars);
+
+                    const auto f = Ids.emplace(std::move(id), i);
+                    if (LLVM_UNLIKELY(!f.second)) {
+                        // We already have an identical kernel; replace kernel i with kernel j
+                        bool error = false;
+                        const auto j = f.first->second;
+                        const auto m = out_degree(j, G);
+                        if (LLVM_UNLIKELY(out_degree(i, G) != m)) {
+                            error = true;
+                        } else {
+
+                            // Collect all of the output information from kernel j.
+                            outputs.resize(m);
+                            scalars.resize(m);
+                            unsigned numOfStreams = 0;
+                            for (const auto e : make_iterator_range(out_edges(j, G))) {
+
+                                const RelationshipType & port = G[e];
+                                const auto output = target(e, G);
+                                const RelationshipNode & node = G[output];
+                                if (node.Type == RelationshipNode::IsBinding) {
+                                    const auto relationship = child(output, G);
+                                    assert (G[relationship].Type == RelationshipNode::IsStreamSet);
+                                    assert (isa<StreamSet>(G[relationship].Relationship));
+                                    outputs[port.Number] = relationship;
+                                    ++numOfStreams;
+                                } else if (node.Type == RelationshipNode::IsScalar) {
+                                    assert (isa<Scalar>(G[output].Relationship));
+                                    scalars[port.Number] = output;
+                                }
+                            }
+                            outputs.resize(numOfStreams);
+                            scalars.resize(m - numOfStreams);
+
+                            // Replace the consumers of kernel i's outputs with j's.
+                            for (const auto e : make_iterator_range(out_edges(i, G))) {
+                                const StreamSetPort & port = G[e];
+                                const auto output = target(e, G);
+                                const RelationshipNode & node = G[output];
+                                unsigned original = 0;
+                                if (node.Type == RelationshipNode::IsBinding) {
+                                    const auto relationship = child(output, G);
+                                    assert (G[relationship].Type == RelationshipNode::IsStreamSet);
+                                    assert (isa<StreamSet>(G[relationship].Relationship));
+                                    original = relationship;
+                                } else if (node.Type == RelationshipNode::IsScalar) {
+                                    original = output;
+                                }
+
+                                unsigned replacement = 0;
+                                if (node.Type == RelationshipNode::IsBinding) {
+                                    assert (port.Number < outputs.size());
+                                    replacement = outputs[port.Number];
+                                } else {
+                                    assert (port.Number < scalars.size());
+                                    replacement = scalars[port.Number];
+                                }
+                                assert (G[replacement].Type == G[original].Type);
+
+                                Relationship * const a = G[original].Relationship;
+                                Relationship * const b = G[replacement].Relationship;
+                                if (LLVM_UNLIKELY(a->getType() != b->getType())) {
+                                    error = true;
+                                    break;
+                                }
+
+                                RedundantStreamSets.emplace(cast<StreamSet>(a), cast<StreamSet>(b));
+
+                                struct EdgeReplacement {
+                                    ProgramGraph::vertex_descriptor Source;
+                                    ProgramGraph::vertex_descriptor Target;
+                                    ProgramGraph::edge_property_type EdgeType;
+
+                                    EdgeReplacement(ProgramGraph::vertex_descriptor s, ProgramGraph::vertex_descriptor t, ProgramGraph::edge_property_type et)
+                                    : Source(s), Target(t), EdgeType(et) {
+
+                                    }
+                                };
+
+                                SmallVector<EdgeReplacement, 16> toCopy;
+
+                                for (const auto e : make_iterator_range(out_edges(original, G))) {
+                                    const auto t = target(e, G);
+                                    assert (G[t].Type == RelationshipNode::IsBinding);
+                                    assert (G[e].Reason != ReasonType::Reference);
+                                    assert (in_degree(t, G) == 1 || in_degree(t, G) == 2);
+                                    toCopy.emplace_back(replacement, t, G[e]);
+                                    // we need to ensure a canonical ordering. since boost won't let me insert
+                                    // edges at a specific position using their exposed API, we remove the ref
+                                    // edge and reinsert it in the correct position.
+                                    if (LLVM_UNLIKELY(in_degree(t, G) == 2)) {
+                                        auto ei = *(++in_edges(t, G).first);
+                                        assert (G[ei].Reason == ReasonType::Reference);
+                                        const auto s = source(ei, G);
+                                        assert (G[s].Type == RelationshipNode::IsBinding);
+                                        toCopy.emplace_back(s, t, G[ei]);
+                                        remove_edge(s, t, G);
+                                    }
+                                }
+
+                                clear_vertex(original, G);
+                                RelationshipNode & rn = G[original];
+                                rn.Type = RelationshipNode::IsNil;
+                                rn.Relationship = nullptr;
+
+                                for (auto & E : toCopy) {
+                                    add_edge(E.Source, E.Target, E.EdgeType, G);
+                                }
+
+                            }
+                            clear_vertex(i, G);
+                            RelationshipNode & rn = G[i];
+                            rn.Type = RelationshipNode::IsNil;
+                            rn.Kernel = nullptr;
+                            unmodified = false;
+                        }
+
+                        if (LLVM_UNLIKELY(error)) {
+                            report_fatal_error(StringRef(kernel->getName()) + " is ambiguous: multiple I/O layouts have the same signature");
+                        }
+                    }
+                }
+            }
+            if (unmodified) {
+                break;
+            }
         }
     }
 
-    const auto n = num_vertices(H);
-    if (LLVM_LIKELY(n == numOfKernels)) {
-        return;
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief removeUnusedKernels
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void removeUnusedKernels(const unsigned p_in, const unsigned p_out) {
+
+        flat_set<unsigned> visited;
+        std::queue<unsigned> pending;
+        pending.push(p_out);
+        assert (p_in < p_out);
+        visited.insert_unique(p_in);
+        visited.insert_unique(p_out);
+
+        // identify all nodes that must be in the final pipeline
+        for (const Binding & output : mPipelineKernel->getOutputScalarBindings()) {
+            const auto p = G.find(RelationshipNode::IsScalar, output.getRelationship());
+            pending.push(p);
+            visited.insert_unique(p);
+        }
+        for (const CallBinding & C : mPipelineKernel->getCallBindings()) {
+            const auto c = G.find(RelationshipNode::IsCallee, &C);
+            pending.push(c);
+            visited.insert_unique(c);
+        }
+        for (const auto & K : mKernels) {
+            const Kernel * kernel = K.Object;
+            if (LLVM_UNLIKELY(kernel->hasAttribute(AttrId::SideEffecting))) {
+                const auto k = G.find(RelationshipNode::IsKernel, kernel);
+                pending.push(k);
+                visited.insert_unique(k);
+            }
+        }
+
+        // determine the inputs for each of the required nodes
+        for (;;) {
+            const auto v = pending.front(); pending.pop();
+            for (const auto e : make_iterator_range(in_edges(v, G))) {
+                const auto input = source(e, G);
+                if (visited.insert(input).second) {
+                    pending.push(input);
+                }
+            }
+            if (pending.empty()) {
+                break;
+            }
+        }
+
+        // To cut any non-required kernel from G, we cannot simply
+        // remove every unvisited node as we still need to keep the
+        // unused outputs of a kernel in G. Instead we make two
+        // passes: (1) marks the outputs of all used kernels as
+        // live. (2) deletes every dead node.
+
+        for (const auto v : make_iterator_range(vertices(G))) {
+            const RelationshipNode & rn = G[v];
+            if (rn.Type == RelationshipNode::IsKernel) {
+                if (LLVM_LIKELY(visited.count(v) != 0)) {
+                    for (const auto e : make_iterator_range(out_edges(v, G))) {
+                        const auto b = target(e, G);
+                        const RelationshipNode & rb = G[b];
+                        assert (rb.Type == RelationshipNode::IsBinding || rb.Type == RelationshipNode::IsScalar);
+                        visited.insert(b); // output binding/scalar
+                        if (LLVM_LIKELY(rb.Type == RelationshipNode::IsBinding)) {
+                            if (LLVM_LIKELY(out_degree(b, G) > 0)) {
+                                const auto f = first_out_edge(b, G);
+                                assert (G[f].Reason != ReasonType::Reference);
+                                visited.insert(target(f, G)); // output stream
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        for (const auto v : make_iterator_range(vertices(G))) {
+            if (LLVM_UNLIKELY(visited.count(v) == 0)) {
+                RelationshipNode & rn = G[v];
+                clear_vertex(v, G);
+                rn.Type = RelationshipNode::IsNil;
+                rn.Kernel = nullptr;
+            }
+        }
+
     }
 
-    BaseDriver & driver = reinterpret_cast<BaseDriver &>(b.getDriver());
 
-    IntegerType * const sizeTy = b.getSizeTy();
-
-    assert (n > numOfKernels);
-
-    kernels.reserve(n - numOfKernels);
-
-    for (auto i = numOfKernels; i < n; ++i) {
-
-        size_t strideLength = 0;
-        #ifdef FORCE_POP_COUNTS_TO_BE_BITBLOCK_STEPS
-        strideLength = b.getBitBlockWidth();
-        #endif
-        CountingType type = CountingType::Unknown;
-        for (const auto e : make_iterator_range(out_edges(i, H))) {
-            const Edge & ed = H[e];
-            type |= ed.Type;
-            if (strideLength == 0) {
-                strideLength = ed.StrideLength;
-            } else {
-                strideLength = boost::gcd(strideLength, ed.StrideLength);
-            }
-        }
-        assert (strideLength != 1);
-        assert (type != CountingType::Unknown);
-
-        StreamSet * positive = nullptr;
-        if (LLVM_LIKELY(type & CountingType::Positive)) {
-            positive = driver.CreateStreamSet(1, sizeTy->getBitWidth());
-        }
-
-        StreamSet * negative = nullptr;
-        if (LLVM_UNLIKELY(type & CountingType::Negative)) {
-            negative = driver.CreateStreamSet(1, sizeTy->getBitWidth());
-        }
-        assert (H[i]->isStreamSet());
-        StreamSet * const input = static_cast<StreamSet *>(H[i]); assert (input);
-        PopCountKernel * popCountKernel = nullptr;
-        switch (type) {
-            case CountingType::Positive:
-                popCountKernel = new PopCountKernel(b.getDriver(), PopCountKernel::POSITIVE, strideLength, input, positive);
-                break;
-            case CountingType::Negative:
-                popCountKernel = new PopCountKernel(b.getDriver(), PopCountKernel::NEGATIVE, strideLength, input, negative);
-                break;
-            case CountingType::Both:
-                popCountKernel = new PopCountKernel(b.getDriver(), PopCountKernel::BOTH, strideLength, input, positive, negative);
-                break;
-            default: llvm_unreachable("unknown counting type?");
-        }
-        // Add the popcount kernel to the pipeline
-        kernels.emplace_back(popCountKernel, 0U);
-        mInternalKernels.emplace_back(popCountKernel);
-
-        const auto k = G.add(RelationshipNode::IsKernel, popCountKernel, RelationshipNodeFlag::ImplicitlyAdded);
-        vertex.push_back(k);
-        addConsumerStreamSets(PortType::Input, k, popCountKernel->getInputStreamSetBindings(), false);
-        addProducerStreamSets(PortType::Output, k, popCountKernel->getOutputStreamSetBindings());
-
-        // subsitute the popcount relationships
-        for (const auto e : make_iterator_range(out_edges(i, H))) {
-            const Edge & ed = H[e];
-            const Kernel * const kernel = kernels[target(e, H)].Object;
-            const auto consumer = G.find(RelationshipNode::IsKernel, kernel);
-            assert (ed.Type == CountingType::Positive || ed.Type == CountingType::Negative);
-            StreamSet * const stream = ed.Type == CountingType::Positive ? positive : negative; assert (stream);
-            const auto streamVertex = G.find(RelationshipNode::IsStreamSet, stream);
-
-            // append the popcount rate stream to the kernel
-            Rational stepRate{ed.StrideLength, strideLength * kernel->getStride()};
-            Binding * const popCount = new Binding("#popcount" + std::to_string(ed.Port.Number), stream, FixedRate(stepRate));
-            mInternalBindings.emplace_back(popCount);
-            const auto popCountBinding = G.add(RelationshipNode::IsBinding, popCount, RelationshipNodeFlag::ImplicitlyAdded);
-
-            const unsigned portNum = in_degree(consumer, G);
-            add_edge(streamVertex, popCountBinding, RelationshipType{PortType::Input, portNum, ReasonType::ImplicitPopCount}, G);
-            add_edge(popCountBinding, consumer, RelationshipType{PortType::Input, portNum, ReasonType::ImplicitPopCount}, G);
-
-            auto rebind_reference = [&](const unsigned binding) {
-
-                RelationshipNode & rn = G[binding];
-                assert (rn.Type == RelationshipNode::IsBinding);
-
-                graph_traits<ProgramGraph>::in_edge_iterator ei, ei_end;
-                std::tie(ei, ei_end) = in_edges(binding, G);
-                assert (std::distance(ei, ei_end) == 2);
-
-                for (;;) {
-                    const RelationshipType & type = G[*ei];
-                    if (type.Reason == ReasonType::Reference) {
-                        remove_edge(*ei, G);
-                        break;
-                    }
-                    ++ei;
-                    assert (ei != ei_end);
-                }
-
-                // create a new binding with the partial sum rate.
-                const Binding & orig = rn.Binding;
-                assert (orig.getRate().isPopCount() || orig.getRate().isNegatedPopCount());
-                Binding * const replacement = new Binding(orig, PartialSum(popCount->getName()));
-                mInternalBindings.emplace_back(replacement);
-                rn.Binding = replacement;
-
-                assert (in_degree(binding, G) > 0);
-                add_edge(popCountBinding, binding, RelationshipType{PortType::Input, portNum, ReasonType::Reference}, G);
-                assert (G[first_in_edge(binding, G)].Reason != ReasonType::Reference);
-            };
-
-            bool notFound = true;
-            if (ed.Port.Type == PortType::Input) {
-                for (const auto e : make_iterator_range(in_edges(consumer, G))) {
-                    const RelationshipType & type = G[e];
-                    if (type.Number == ed.Port.Number) {
-                        assert (type.Type == PortType::Input);
-                        rebind_reference(source(e, G));
-                        notFound = false;
-                        break;
-                    }
-                }
-            } else { // if (ed.Port.Type == PortType::Output) {
-                for (const auto e : make_iterator_range(out_edges(consumer, G))) {
-                    const RelationshipType & type = G[e];
-                    if (type.Number == ed.Port.Number) {
-                        assert (type.Type == PortType::Output);
-                        rebind_reference(target(e, G));
-                        notFound = false;
-                        break;
-                    }
-                }
-            }
-            if (LLVM_UNLIKELY(notFound)) {
-                report_fatal_error("Internal error: failed to locate PopCount binding.");
-            }
-        }
+    RelationshipGraphBuilder(ProgramGraph & G, PipelineAnalysis & P)
+    : G(G)
+    , mPipelineKernel(P.mPipelineKernel)
+    , mKernels(P.mKernels)
+    , mInternalKernels(P.mInternalKernels)
+    , mInternalBindings(P.mInternalBindings)
+    , mInternalBuffers(P.mInternalBuffers)
+    , RedundantStreamSets(P.RedundantStreamSets) {
+        std::fill_n(CommandLineScalars.begin(), CommandLineScalars.size(), nullptr);
     }
-}
 
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief combineDuplicateKernels
- ** ------------------------------------------------------------------------------------------------------------- */
-void combineDuplicateKernels(KernelBuilder & /* b */) {
-
-    using StreamSetVector = std::vector<std::pair<unsigned, StreamSetPort>>;
-    using ScalarVector = std::vector<unsigned>;
-
-    struct KernelId {
-        const std::string Id;
-        const StreamSetVector Streams;
-        const ScalarVector Scalars;
-
-        KernelId(const std::string & id, const StreamSetVector & streams, const ScalarVector & scalars)
-        : Id(id), Streams(streams), Scalars(scalars) {
-
-        }
-        bool operator<(const KernelId & other) const {
-            const auto diff = Id.compare(other.Id);
-            if (LLVM_LIKELY(diff != 0)) {
-                return diff < 0;
-            } else {
-                return (Scalars < other.Scalars) || (Streams < other.Streams);
-            }
-        }
+    ProgramGraph & G;
+    PipelineKernel * const mPipelineKernel;
+    Kernels & mKernels;
+    OwningVector<Kernel> &          mInternalKernels;
+    OwningVector<Binding> &         mInternalBindings;
+    OwningVector<StreamSetBuffer> & mInternalBuffers;
+    RedundantStreamSetMap &         RedundantStreamSets;
+    CommandLineScalarVec            CommandLineScalars;
+    TruncatedStreamSetVec           TruncatedStreamSets;
     };
 
-    std::vector<unsigned> kernelList;
-    for (const auto & K : mKernels) {
-        kernelList.push_back(G.addOrFind(RelationshipNode::IsKernel, K.Object));
-    }
-
-    std::map<KernelId, unsigned> Ids;
-
-    ScalarVector scalars;
-    StreamSetVector inputs;
-    ScalarVector outputs;
-
-    for (;;) {
-        bool unmodified = true;
-        Ids.clear();
-
-        for (const auto i : kernelList) {
-
-            RelationshipNode & bn = G[i];
-            if (bn.Type == RelationshipNode::IsKernel) {
-                const Kernel * const kernel = bn.Kernel;
-                // We cannot reason about a family of kernels nor safely combine two
-                // side-effecting kernels.
-                if ((bn.Flags & RelationshipNodeFlag::IndirectFamily) || kernel->hasAttribute(AttrId::SideEffecting)) {
-                    continue;
-                }
-
-                const auto n = in_degree(i, G);
-                inputs.resize(n);
-                scalars.resize(n);
-                unsigned numOfStreams = 0;
-
-                for (const auto e : make_iterator_range(in_edges(i, G))) {
-                    const RelationshipType & port = G[e];
-                    const auto input = source(e, G);
-                    const RelationshipNode & node = G[input];
-                    if (node.Type == RelationshipNode::IsBinding) {
-                        unsigned relationship = 0;
-                        StreamSetPort ref{};
-                        for (const auto e : make_iterator_range(in_edges(input, G))) {
-                            RelationshipType & rt = G[e];
-                            if (rt.Reason == ReasonType::Reference) {
-                                ref = rt;
-                                assert (G[source(e, G)].Type == RelationshipNode::IsBinding);
-                            } else {
-                                relationship = source(e, G);
-                                assert (G[relationship].Type == RelationshipNode::IsStreamSet);
-                            }
-                        }
-                        inputs[port.Number] = std::make_pair(relationship, ref);
-                        ++numOfStreams;
-                    } else if (node.Type == RelationshipNode::IsScalar) {
-                        scalars[port.Number] = input;
-                    }
-                }
-
-                inputs.resize(numOfStreams);
-                scalars.resize(n - numOfStreams);
-
-                KernelId id(kernel->getName(), inputs, scalars);
-
-                const auto f = Ids.emplace(std::move(id), i);
-                if (LLVM_UNLIKELY(!f.second)) {
-                    // We already have an identical kernel; replace kernel i with kernel j
-                    bool error = false;
-                    const auto j = f.first->second;
-                    const auto m = out_degree(j, G);
-                    if (LLVM_UNLIKELY(out_degree(i, G) != m)) {
-                        error = true;
-                    } else {
-
-                        // Collect all of the output information from kernel j.
-                        outputs.resize(m);
-                        scalars.resize(m);
-                        unsigned numOfStreams = 0;
-                        for (const auto e : make_iterator_range(out_edges(j, G))) {
-
-                            const RelationshipType & port = G[e];
-                            const auto output = target(e, G);
-                            const RelationshipNode & node = G[output];
-                            if (node.Type == RelationshipNode::IsBinding) {
-                                const auto relationship = child(output, G);
-                                assert (G[relationship].Type == RelationshipNode::IsStreamSet);
-                                assert (isa<StreamSet>(G[relationship].Relationship));
-                                outputs[port.Number] = relationship;
-                                ++numOfStreams;
-                            } else if (node.Type == RelationshipNode::IsScalar) {
-                                assert (isa<Scalar>(G[output].Relationship));
-                                scalars[port.Number] = output;
-                            }
-                        }
-                        outputs.resize(numOfStreams);
-                        scalars.resize(m - numOfStreams);
-
-                        // Replace the consumers of kernel i's outputs with j's.
-                        for (const auto e : make_iterator_range(out_edges(i, G))) {
-                            const StreamSetPort & port = G[e];
-                            const auto output = target(e, G);
-                            const RelationshipNode & node = G[output];
-                            unsigned original = 0;
-                            if (node.Type == RelationshipNode::IsBinding) {
-                                const auto relationship = child(output, G);
-                                assert (G[relationship].Type == RelationshipNode::IsStreamSet);
-                                assert (isa<StreamSet>(G[relationship].Relationship));
-                                original = relationship;
-                            } else if (node.Type == RelationshipNode::IsScalar) {
-                                original = output;
-                            }
-
-                            unsigned replacement = 0;
-                            if (node.Type == RelationshipNode::IsBinding) {
-                                assert (port.Number < outputs.size());
-                                replacement = outputs[port.Number];
-                            } else {
-                                assert (port.Number < scalars.size());
-                                replacement = scalars[port.Number];
-                            }
-                            assert (G[replacement].Type == G[original].Type);
-
-                            Relationship * const a = G[original].Relationship;
-                            Relationship * const b = G[replacement].Relationship;
-                            if (LLVM_UNLIKELY(a->getType() != b->getType())) {
-                                error = true;
-                                break;
-                            }
-
-                            RedundantStreamSets.emplace(cast<StreamSet>(a), cast<StreamSet>(b));
-
-                            struct EdgeReplacement {
-                                ProgramGraph::vertex_descriptor Source;
-                                ProgramGraph::vertex_descriptor Target;
-                                ProgramGraph::edge_property_type EdgeType;
-
-                                EdgeReplacement(ProgramGraph::vertex_descriptor s, ProgramGraph::vertex_descriptor t, ProgramGraph::edge_property_type et)
-                                : Source(s), Target(t), EdgeType(et) {
-
-                                }
-                            };
-
-                            SmallVector<EdgeReplacement, 16> toCopy;
-
-                            for (const auto e : make_iterator_range(out_edges(original, G))) {
-                                const auto t = target(e, G);
-                                assert (G[t].Type == RelationshipNode::IsBinding);
-                                assert (G[e].Reason != ReasonType::Reference);
-                                assert (in_degree(t, G) == 1 || in_degree(t, G) == 2);
-                                toCopy.emplace_back(replacement, t, G[e]);
-                                // we need to ensure a canonical ordering. since boost won't let me insert
-                                // edges at a specific position using their exposed API, we remove the ref
-                                // edge and reinsert it in the correct position.
-                                if (LLVM_UNLIKELY(in_degree(t, G) == 2)) {
-                                    auto ei = *(++in_edges(t, G).first);
-                                    assert (G[ei].Reason == ReasonType::Reference);
-                                    const auto s = source(ei, G);
-                                    assert (G[s].Type == RelationshipNode::IsBinding);
-                                    toCopy.emplace_back(s, t, G[ei]);
-                                    remove_edge(s, t, G);
-                                }
-                            }
-
-                            clear_vertex(original, G);
-                            RelationshipNode & rn = G[original];
-                            rn.Type = RelationshipNode::IsNil;
-                            rn.Relationship = nullptr;
-
-                            for (auto & E : toCopy) {
-                                add_edge(E.Source, E.Target, E.EdgeType, G);
-                            }
-
-                        }
-                        clear_vertex(i, G);
-                        RelationshipNode & rn = G[i];
-                        rn.Type = RelationshipNode::IsNil;
-                        rn.Kernel = nullptr;
-                        unmodified = false;
-                    }
-
-                    if (LLVM_UNLIKELY(error)) {
-                        report_fatal_error(StringRef(kernel->getName()) + " is ambiguous: multiple I/O layouts have the same signature");
-                    }
-                }
-            }
-        }
-        if (unmodified) {
-            break;
-        }
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief removeUnusedKernels
- ** ------------------------------------------------------------------------------------------------------------- */
-void removeUnusedKernels(const unsigned p_in, const unsigned p_out) {
-
-    flat_set<unsigned> visited;
-    std::queue<unsigned> pending;
-    pending.push(p_out);
-    assert (p_in < p_out);
-    visited.insert_unique(p_in);
-    visited.insert_unique(p_out);
-
-    // identify all nodes that must be in the final pipeline
-    for (const Binding & output : mPipelineKernel->getOutputScalarBindings()) {
-        const auto p = G.find(RelationshipNode::IsScalar, output.getRelationship());
-        pending.push(p);
-        visited.insert_unique(p);
-    }
-    for (const CallBinding & C : mPipelineKernel->getCallBindings()) {
-        const auto c = G.find(RelationshipNode::IsCallee, &C);
-        pending.push(c);
-        visited.insert_unique(c);
-    }
-    for (const auto & K : mKernels) {
-        const Kernel * kernel = K.Object;
-        if (LLVM_UNLIKELY(kernel->hasAttribute(AttrId::SideEffecting))) {
-            const auto k = G.find(RelationshipNode::IsKernel, kernel);
-            pending.push(k);
-            visited.insert_unique(k);
-        }
-    }
-
-    // determine the inputs for each of the required nodes
-    for (;;) {
-        const auto v = pending.front(); pending.pop();
-        for (const auto e : make_iterator_range(in_edges(v, G))) {
-            const auto input = source(e, G);
-            if (visited.insert(input).second) {
-                pending.push(input);
-            }
-        }
-        if (pending.empty()) {
-            break;
-        }
-    }
-
-    // To cut any non-required kernel from G, we cannot simply
-    // remove every unvisited node as we still need to keep the
-    // unused outputs of a kernel in G. Instead we make two
-    // passes: (1) marks the outputs of all used kernels as
-    // live. (2) deletes every dead node.
-
-    for (const auto v : make_iterator_range(vertices(G))) {
-        const RelationshipNode & rn = G[v];
-        if (rn.Type == RelationshipNode::IsKernel) {
-            if (LLVM_LIKELY(visited.count(v) != 0)) {
-                for (const auto e : make_iterator_range(out_edges(v, G))) {
-                    const auto b = target(e, G);
-                    const RelationshipNode & rb = G[b];
-                    assert (rb.Type == RelationshipNode::IsBinding || rb.Type == RelationshipNode::IsScalar);
-                    visited.insert(b); // output binding/scalar
-                    if (LLVM_LIKELY(rb.Type == RelationshipNode::IsBinding)) {
-                        if (LLVM_LIKELY(out_degree(b, G) > 0)) {
-                            const auto f = first_out_edge(b, G);
-                            assert (G[f].Reason != ReasonType::Reference);
-                            visited.insert(target(f, G)); // output stream
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    for (const auto v : make_iterator_range(vertices(G))) {
-        if (LLVM_UNLIKELY(visited.count(v) == 0)) {
-            RelationshipNode & rn = G[v];
-            clear_vertex(v, G);
-            rn.Type = RelationshipNode::IsNil;
-            rn.Kernel = nullptr;
-        }
-    }
-
-}
-
-
-RelationshipGraphBuilder(ProgramGraph & G, PipelineAnalysis & P)
-: G(G)
-, mPipelineKernel(P.mPipelineKernel)
-, mKernels(P.mKernels)
-, mInternalKernels(P.mInternalKernels)
-, mInternalBindings(P.mInternalBindings)
-, mInternalBuffers(P.mInternalBuffers)
-, RedundantStreamSets(P.RedundantStreamSets) {
-    std::fill_n(CommandLineScalars.begin(), CommandLineScalars.size(), nullptr);
-}
-
-ProgramGraph & G;
-PipelineKernel * const mPipelineKernel;
-Kernels & mKernels;
-OwningVector<Kernel> &          mInternalKernels;
-OwningVector<Binding> &         mInternalBindings;
-OwningVector<StreamSetBuffer> & mInternalBuffers;
-RedundantStreamSetMap &         RedundantStreamSets;
-CommandLineScalarVec            CommandLineScalars;
-TruncatedStreamSetVec           TruncatedStreamSets;
-};
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief generateInitialPipelineGraph
- ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineAnalysis::generateInitialPipelineGraph(KernelBuilder & b) {
 
     RelationshipGraphBuilder B(Relationships, *this);
 

@@ -3,8 +3,8 @@
 namespace grep {
 
 class NestedInternalSearchEngine {
+    typedef void (*GrepFunctionType)(const char * buffer, const size_t length, MatchAccumulator &);
 public:
-    using MainMethodTy = void *;
 
     NestedInternalSearchEngine(BaseDriver & driver);
 
@@ -33,7 +33,7 @@ private:
     kernel::StreamSet * mU8index;
     kernel::StreamSet * mBreaks;
     kernel::StreamSet * mMatches;
-    std::vector<void *>             mMainMethod;
+    std::vector<GrepFunctionType>   mMainMethod;
     std::vector<kernel::Kernel *>   mNested;
 
 };

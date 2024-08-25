@@ -44,6 +44,17 @@ struct streamset_t {
 template <typename T>
 struct Input {
 
+    Input(std::string && name)
+    : Name(std::move(name)) {
+
+    }
+
+    std::string Name;
+};
+
+template <>
+struct Input<streamset_t> {
+
     template<typename ... ValueArgs>
     Input(std::string && name, ValueArgs &&... args)
     : Name(std::move(name))
@@ -52,11 +63,23 @@ struct Input {
     }
 
     std::string Name;
-    T Value;
+    streamset_t Value;
 };
+
 
 template <typename T>
 struct Output {
+
+    explicit Output(std::string name)
+    : Name(std::move(name)) {
+
+    }
+
+    std::string Name;
+};
+
+template <>
+struct Output<streamset_t>  {
 
     template<typename ... ValueArgs>
     explicit Output(std::string name, ValueArgs &&... args)
@@ -66,60 +89,10 @@ struct Output {
     }
 
     std::string Name;
-    T Value;
+    streamset_t Value;
 };
 
 namespace { /* anonymous */
-template<typename ... Rest>
-struct extract_args {
-    using ReturnType = void;
-    using ParamsType = void;
-    static constexpr auto InputScalarCount = 0;
-    static constexpr auto OutputScalarCount = 0;
-    static constexpr auto InputStreamSetCount = 0;
-    static constexpr auto OutputStreamSetCount = 0;
-};
-
-template<typename InputType>
-struct extract_args<Input<InputType>> {
-    using ReturnType = void;
-    using ParamsType = const InputType;
-    static constexpr auto InputScalarCount = 1;
-    static constexpr auto OutputScalarCount = 0;
-    static constexpr auto InputStreamSetCount = 0;
-    static constexpr auto OutputStreamSetCount = 0;
-};
-
-template<typename OutputType>
-struct extract_args<Output<OutputType>> {
-    using Type = OutputType;
-    using ReturnType = OutputType;
-    using ParamsType = void;
-    static constexpr auto InputScalarCount = 0;
-    static constexpr auto OutputScalarCount = 1;
-    static constexpr auto InputStreamSetCount = 0;
-    static constexpr auto OutputStreamSetCount = 0;
-};
-
-template<>
-struct extract_args<Input<streamset_t>> {
-    using ReturnType = void;
-    using ParamsType = const StreamSetPtr &;
-    static constexpr auto InputScalarCount = 0;
-    static constexpr auto OutputScalarCount = 0;
-    static constexpr auto InputStreamSetCount = 1;
-    static constexpr auto OutputStreamSetCount = 0;
-};
-
-template<>
-struct extract_args<Output<streamset_t>> {
-    using ReturnType = void;
-    using ParamsType = StreamSetPtr &;
-    static constexpr auto InputScalarCount = 0;
-    static constexpr auto OutputScalarCount = 0;
-    static constexpr auto InputStreamSetCount = 0;
-    static constexpr auto OutputStreamSetCount = 1;
-};
 
 template <typename T, typename U>
 struct tuple_cons {
@@ -163,108 +136,6 @@ struct make_function_decl<R, std::tuple<Ts...>> {
     using type = R(Ts...);
 };
 
-template<typename InputType, typename ... Rest>
-struct extract_args<Input<InputType>, Rest...> {
-    using Type = InputType;
-    using ReturnType = typename extract_args<Rest...>::ReturnType;
-    using ParamsType = typename tuple_cons<Type, typename extract_args<Rest...>::ParamsType>::type;
-    static constexpr auto InputScalarCount = extract_args<Rest...>::InputScalarCount + 1;
-    static constexpr auto OutputScalarCount = extract_args<Rest...>::OutputScalarCount;
-    static constexpr auto InputStreamSetCount = extract_args<Rest...>::InputStreamSetCount;
-    static constexpr auto OutputStreamSetCount = extract_args<Rest...>::OutputStreamSetCount;
-};
-
-template<typename OutputType, typename ... Rest>
-struct extract_args<Output<OutputType>, Rest...> {
-    using Type = OutputType;
-    using ReturnType = typename tuple_cons<Type, typename extract_args<Rest...>::ReturnType>::type;
-    using ParamsType = typename extract_args<Rest...>::ParamsType;
-    static constexpr auto InputScalarCount = extract_args<Rest...>::InputScalarCount;
-    static constexpr auto OutputScalarCount = extract_args<Rest...>::OutputScalarCount + 1;
-    static constexpr auto InputStreamSetCount = extract_args<Rest...>::InputStreamSetCount;
-    static constexpr auto OutputStreamSetCount = extract_args<Rest...>::OutputStreamSetCount;
-};
-
-template<typename ... Rest>
-struct extract_args<Input<streamset_t>, Rest...> {
-    using Type = const StreamSetPtr &;
-    using ReturnType = typename extract_args<Rest...>::ReturnType;
-    using ParamsType = typename tuple_cons<Type, typename extract_args<Rest...>::ParamsType>::type;
-    static constexpr auto InputScalarCount = extract_args<Rest...>::InputScalarCount;
-    static constexpr auto OutputScalarCount = extract_args<Rest...>::OutputScalarCount;
-    static constexpr auto InputStreamSetCount = extract_args<Rest...>::InputStreamSetCount + 1;
-    static constexpr auto OutputStreamSetCount = extract_args<Rest...>::OutputStreamSetCount;
-};
-
-template<typename ... Rest>
-struct extract_args<Output<streamset_t>, Rest...> {
-    using Type = StreamSetPtr &;
-    // despite being an output argument, references to the output streamset
-    // values are passed as input arguments
-    using ReturnType = typename extract_args<Rest...>::ReturnType;
-    using ParamsType = typename tuple_cons<Type, typename extract_args<Rest...>::ParamsType>::type;
-    static constexpr auto InputScalarCount = extract_args<Rest...>::InputScalarCount;
-    static constexpr auto OutputScalarCount = extract_args<Rest...>::OutputScalarCount;
-    static constexpr auto InputStreamSetCount = extract_args<Rest...>::InputStreamSetCount;
-    static constexpr auto OutputStreamSetCount = extract_args<Rest...>::OutputStreamSetCount + 1;
-};
-
-template<typename InputType>
-inline void append_arg(BaseDriver & driver,
-                       Bindings & inputScalars, Bindings & outputScalars,
-                       Bindings & inputStreamSets, Bindings & outputStreamSets,
-                       Input<InputType> && f) {
-    llvm::Type * const ty = llvm::TypeBuilder<InputType, false>::get(driver.getContext());
-    inputScalars.emplace_back(ty, f.Name, driver.CreateScalar(ty));
-}
-
-template<typename OutputType>
-inline void append_arg(BaseDriver & driver,
-                       Bindings & inputScalars, Bindings & outputScalars,
-                       Bindings & inputStreamSets, Bindings & outputStreamSets,
-                       Output<OutputType> && f) {
-    llvm::Type * const ty = llvm::TypeBuilder<OutputType, false>::get(driver.getContext());
-    outputScalars.emplace_back(ty, f.Name, driver.CreateScalar(ty));
-}
-
-template<>
-inline void append_arg(BaseDriver & driver,
-                       Bindings & inputScalars, Bindings & outputScalars,
-                       Bindings & inputStreamSets, Bindings & outputStreamSets,
-                       Input<streamset_t> && f) {
-    inputStreamSets.emplace_back(std::move(f.Name), driver.CreateStreamSet(f.Value.ElementCount, f.Value.FieldWidth), std::move(f.Value.AnnotatedProcessingRate));
-}
-
-template<>
-inline void append_arg(BaseDriver & driver,
-                       Bindings & inputScalars, Bindings & outputScalars,
-                       Bindings & inputStreamSets, Bindings & outputStreamSets,
-                       Output<streamset_t> && f) {
-    outputStreamSets.emplace_back(std::move(f.Name), driver.CreateStreamSet(f.Value.ElementCount, f.Value.FieldWidth), std::move(f.Value.AnnotatedProcessingRate));
-}
-
-template<typename... Fs>
-inline void append_args(BaseDriver & driver,
-                        Bindings & inputScalars, Bindings & outputScalars,
-                        Bindings & inputStreamSets, Bindings & outputStreamSets,
-                        Fs &&... fs);
-
-template<>
-inline void append_args(BaseDriver & driver,
-                        Bindings & inputScalars, Bindings & outputScalars,
-                        Bindings & inputStreamSets, Bindings & outputStreamSets) {
-    /* do nothing */
-}
-
-template<typename F, typename... Fs>
-inline void append_args(BaseDriver & driver,
-                        Bindings & inputScalars, Bindings & outputScalars,
-                        Bindings & inputStreamSets, Bindings & outputStreamSets,
-                        F f, Fs &&... fs) {
-    append_arg(driver, inputScalars, outputScalars, inputStreamSets, outputStreamSets, std::forward<F>(f));
-    append_args(driver, inputScalars, outputScalars, inputStreamSets, outputStreamSets, std::forward<Fs>(fs)...);
-}
-
 } /* end of anonymous namespace */
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -273,7 +144,166 @@ inline void append_args(BaseDriver & driver,
 template<typename ... Args>
 class TypedProgramBuilder final : public ProgramBuilder {
     friend class ::BaseDriver;
+
+    template<typename ... Rest>
+    struct extract_args {
+        using ReturnType = void;
+        using ParamsType = void;
+        static constexpr auto InputScalarCount = 0;
+        static constexpr auto OutputScalarCount = 0;
+        static constexpr auto InputStreamSetCount = 0;
+        static constexpr auto OutputStreamSetCount = 0;
+    };
+
+    template<typename InputType>
+    struct extract_args<Input<InputType>> {
+        using ReturnType = void;
+        using ParamsType = const InputType;
+        static constexpr auto InputScalarCount = 1;
+        static constexpr auto OutputScalarCount = 0;
+        static constexpr auto InputStreamSetCount = 0;
+        static constexpr auto OutputStreamSetCount = 0;
+    };
+
+    template<typename OutputType>
+    struct extract_args<Output<OutputType>> {
+        using Type = OutputType;
+        using ReturnType = OutputType;
+        using ParamsType = void;
+        static constexpr auto InputScalarCount = 0;
+        static constexpr auto OutputScalarCount = 1;
+        static constexpr auto InputStreamSetCount = 0;
+        static constexpr auto OutputStreamSetCount = 0;
+    };
+
+    template<>
+    struct extract_args<Input<streamset_t>> {
+        using ReturnType = void;
+        using ParamsType = const StreamSetPtr &;
+        static constexpr auto InputScalarCount = 0;
+        static constexpr auto OutputScalarCount = 0;
+        static constexpr auto InputStreamSetCount = 1;
+        static constexpr auto OutputStreamSetCount = 0;
+    };
+
+    template<>
+    struct extract_args<Output<streamset_t>> {
+        using ReturnType = void;
+        using ParamsType = StreamSetPtr &;
+        static constexpr auto InputScalarCount = 0;
+        static constexpr auto OutputScalarCount = 0;
+        static constexpr auto InputStreamSetCount = 0;
+        static constexpr auto OutputStreamSetCount = 1;
+    };
+
+    template<typename InputType, typename ... Rest>
+    struct extract_args<Input<InputType>, Rest...> {
+        using Type = InputType;
+        using ReturnType = typename extract_args<Rest...>::ReturnType;
+        using ParamsType = typename tuple_cons<Type, typename extract_args<Rest...>::ParamsType>::type;
+        static constexpr auto InputScalarCount = extract_args<Rest...>::InputScalarCount + 1;
+        static constexpr auto OutputScalarCount = extract_args<Rest...>::OutputScalarCount;
+        static constexpr auto InputStreamSetCount = extract_args<Rest...>::InputStreamSetCount;
+        static constexpr auto OutputStreamSetCount = extract_args<Rest...>::OutputStreamSetCount;
+    };
+
+    template<typename OutputType, typename ... Rest>
+    struct extract_args<Output<OutputType>, Rest...> {
+        using Type = OutputType;
+        using ReturnType = typename tuple_cons<Type, typename extract_args<Rest...>::ReturnType>::type;
+        using ParamsType = typename extract_args<Rest...>::ParamsType;
+        static constexpr auto InputScalarCount = extract_args<Rest...>::InputScalarCount;
+        static constexpr auto OutputScalarCount = extract_args<Rest...>::OutputScalarCount + 1;
+        static constexpr auto InputStreamSetCount = extract_args<Rest...>::InputStreamSetCount;
+        static constexpr auto OutputStreamSetCount = extract_args<Rest...>::OutputStreamSetCount;
+    };
+
+    template<typename ... Rest>
+    struct extract_args<Input<streamset_t>, Rest...> {
+        using Type = const StreamSetPtr &;
+        using ReturnType = typename extract_args<Rest...>::ReturnType;
+        using ParamsType = typename tuple_cons<Type, typename extract_args<Rest...>::ParamsType>::type;
+        static constexpr auto InputScalarCount = extract_args<Rest...>::InputScalarCount;
+        static constexpr auto OutputScalarCount = extract_args<Rest...>::OutputScalarCount;
+        static constexpr auto InputStreamSetCount = extract_args<Rest...>::InputStreamSetCount + 1;
+        static constexpr auto OutputStreamSetCount = extract_args<Rest...>::OutputStreamSetCount;
+    };
+
+    template<typename ... Rest>
+    struct extract_args<Output<streamset_t>, Rest...> {
+        using Type = StreamSetPtr &;
+        // despite being an output argument, references to the output streamset
+        // values are passed as input arguments
+        using ReturnType = typename extract_args<Rest...>::ReturnType;
+        using ParamsType = typename tuple_cons<Type, typename extract_args<Rest...>::ParamsType>::type;
+        static constexpr auto InputScalarCount = extract_args<Rest...>::InputScalarCount;
+        static constexpr auto OutputScalarCount = extract_args<Rest...>::OutputScalarCount;
+        static constexpr auto InputStreamSetCount = extract_args<Rest...>::InputStreamSetCount;
+        static constexpr auto OutputStreamSetCount = extract_args<Rest...>::OutputStreamSetCount + 1;
+    };
+
     using ParamsType = typename extract_args<Args...>::ParamsType;
+
+    template<typename InputType>
+    inline static void append_arg(BaseDriver & driver,
+                           Bindings & inputScalars, Bindings & outputScalars,
+                           Bindings & inputStreamSets, Bindings & outputStreamSets,
+                           Input<InputType> && f) {
+        llvm::Type * const ty = llvm::TypeBuilder<InputType, false>::get(driver.getContext());
+        inputScalars.emplace_back(ty, f.Name, driver.CreateScalar(ty));
+    }
+
+    template<typename OutputType>
+    inline static void append_arg(BaseDriver & driver,
+                           Bindings & inputScalars, Bindings & outputScalars,
+                           Bindings & inputStreamSets, Bindings & outputStreamSets,
+                           Output<OutputType> && f) {
+        llvm::Type * const ty = llvm::TypeBuilder<OutputType, false>::get(driver.getContext());
+        outputScalars.emplace_back(ty, f.Name, driver.CreateScalar(ty));
+    }
+
+    template<>
+    inline static void append_arg(BaseDriver & driver,
+                           Bindings & inputScalars, Bindings & outputScalars,
+                           Bindings & inputStreamSets, Bindings & outputStreamSets,
+                           Input<streamset_t> && f) {
+        inputStreamSets.emplace_back(std::move(f.Name),
+                                     driver.CreateStreamSet(f.Value.ElementCount, f.Value.FieldWidth),
+                                     std::move(f.Value.AnnotatedProcessingRate));
+    }
+
+    template<>
+    inline static void append_arg(BaseDriver & driver,
+                           Bindings & inputScalars, Bindings & outputScalars,
+                           Bindings & inputStreamSets, Bindings & outputStreamSets,
+                           Output<streamset_t> && f) {
+        outputStreamSets.emplace_back(std::move(f.Name),
+                                      driver.CreateStreamSet(f.Value.ElementCount, f.Value.FieldWidth),
+                                      std::move(f.Value.AnnotatedProcessingRate));
+    }
+
+    template<typename... Fs>
+    inline static void append_args(BaseDriver & driver,
+                            Bindings & inputScalars, Bindings & outputScalars,
+                            Bindings & inputStreamSets, Bindings & outputStreamSets,
+                            Fs &&... fs);
+
+    template<>
+    inline static void append_args(BaseDriver & driver,
+                            Bindings & inputScalars, Bindings & outputScalars,
+                            Bindings & inputStreamSets, Bindings & outputStreamSets) {
+        /* do nothing */
+    }
+
+    template<typename F, typename... Fs>
+    inline static void append_args(BaseDriver & driver,
+                            Bindings & inputScalars, Bindings & outputScalars,
+                            Bindings & inputStreamSets, Bindings & outputStreamSets,
+                            F f, Fs &&... fs) {
+        append_arg(driver, inputScalars, outputScalars, inputStreamSets, outputStreamSets, std::forward<F>(f));
+        append_args(driver, inputScalars, outputScalars, inputStreamSets, outputStreamSets, std::forward<Fs>(fs)...);
+    }
+
 public:
     using ReturnType = typename extract_args<Args...>::ReturnType;
     using FunctionDeclType =  typename make_function_decl<ReturnType, ParamsType>::type *;

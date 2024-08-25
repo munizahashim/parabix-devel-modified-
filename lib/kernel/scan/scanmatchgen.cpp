@@ -237,9 +237,9 @@ void ScanMatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
     Value * const startPtr = b.getRawInputPointer("InputStream", matchStart);
     Value * const endPtr = b.getRawInputPointer("InputStream", matchEndPos);
 
-    auto argi = dispatcher->arg_begin();
-    const auto matchRecNumArg = &*(argi++);
-    Value * const matchRecNum = b.CreateZExtOrTrunc(matchRecordNum, matchRecNumArg->getType());
+    Type * expectedMatchRecNumTy = dispatcher->getFunctionType()->getParamType(1);
+    assert (expectedMatchRecNumTy->isIntegerTy());
+    Value * const matchRecNum = b.CreateZExtOrTrunc(matchRecordNum, expectedMatchRecNumTy);
     b.CreateCall(dispatcher->getFunctionType(), dispatcher, {accumulator, matchRecNum, startPtr, endPtr});
 
     //  We've dealt with the match, now prepare for the next one, if any.
@@ -559,9 +559,9 @@ void ScanBatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
 //        b.CreateAssert(b.CreateICmpEQ(A, B), "InputStream is not contiguous");
 //    }
 
-    auto argi = dispatcher->arg_begin();
-    const auto matchRecNumArg = &*(argi++);
-    Value * const matchRecNum = b.CreateZExtOrTrunc(matchRecordNum, matchRecNumArg->getType());
+    Type * expectedMatchRecNumTy = dispatcher->getFunctionType()->getParamType(1);
+    assert (expectedMatchRecNumTy->isIntegerTy());
+    Value * const matchRecNum = b.CreateZExtOrTrunc(matchRecordNum, expectedMatchRecNumTy);
     b.CreateCall(dispatcher->getFunctionType(), dispatcher, {accumulator, matchRecNum, startPtr, endPtr});
 
     //  We've dealt with the match, now prepare for the next one, if any.
@@ -1309,9 +1309,9 @@ void MatchReporter::generateDoSegmentMethod(KernelBuilder & b) {
     Function * const dispatcher = m->getFunction("accumulate_match_wrapper"); assert (dispatcher);
     Value * const startPtr = b.getRawInputPointer("InputStream", matchRecordStart);
     Value * const endPtr = b.getRawInputPointer("InputStream", matchRecordEnd);
-    auto argi = dispatcher->arg_begin();
-    const auto matchRecNumArg = &*(argi++);
-    Value * const matchRecNum = b.CreateZExtOrTrunc(matchRecordNum, matchRecNumArg->getType());
+    Type * expectedMatchRecNumTy = dispatcher->getFunctionType()->getParamType(1);
+    assert (expectedMatchRecNumTy->isIntegerTy());
+    Value * const matchRecNum = b.CreateZExtOrTrunc(matchRecordNum, expectedMatchRecNumTy);
     b.CreateCall(dispatcher->getFunctionType(), dispatcher, {accumulator, matchRecNum, startPtr, endPtr});
     Value * haveMoreMatches = b.CreateICmpNE(nextMatchNum, matchesAvail);
     phiMatchNum->addIncoming(nextMatchNum, b.GetInsertBlock());
@@ -1616,11 +1616,14 @@ void ColorizedReporter::generateDoSegmentMethod(KernelBuilder & b) {
 
     b.SetInsertPoint(dispatch);
     Function * const dispatcher = m->getFunction("accumulate_match_wrapper"); assert (dispatcher);
+
+
+
     Value * const startPtr = b.getRawInputPointer("InputStream", matchRecordStart);
     Value * const endPtr = b.getRawInputPointer("InputStream", matchRecordEnd);
-    auto argi = dispatcher->arg_begin();
-    const auto matchRecNumArg = &*(argi++);
-    Value * const matchRecNum = b.CreateZExtOrTrunc(matchRecordNum, matchRecNumArg->getType());
+    Type * expectedMatchRecNumTy = dispatcher->getFunctionType()->getParamType(1);
+    assert (expectedMatchRecNumTy->isIntegerTy());
+    Value * const matchRecNum = b.CreateZExtOrTrunc(matchRecordNum, expectedMatchRecNumTy);
     b.CreateCall(dispatcher->getFunctionType(), dispatcher, {accumulator, matchRecNum, startPtr, endPtr});
     Value * haveMoreMatches = b.CreateICmpNE(nextMatchNum, matchesAvail);
     BasicBlock * const dispatchEnd = b.GetInsertBlock();

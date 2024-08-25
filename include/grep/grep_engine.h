@@ -58,21 +58,24 @@ public:
     virtual void setBatchLineNumber(unsigned fileNo, size_t batchLine) {}  // default: no op
 };
 
-extern "C" void accumulate_match_wrapper(intptr_t accum_addr, const size_t lineNum, char * line_start, char * line_end);
+extern "C" void accumulate_match_wrapper(void * accum_addr, const size_t lineNum, char * line_start, char * line_end);
 
-extern "C" void finalize_match_wrapper(intptr_t accum_addr, char * buffer_end);
+extern "C" void finalize_match_wrapper(void * accum_addr, char * buffer_end);
 
-extern "C" unsigned get_file_count_wrapper(intptr_t accum_addr);
+extern "C" unsigned get_file_count_wrapper(void * accum_addr);
 
-extern "C" size_t get_file_start_pos_wrapper(intptr_t accum_addr, unsigned fileNo);
+extern "C" size_t get_file_start_pos_wrapper(void * accum_addr, unsigned fileNo);
 
-extern "C" void set_batch_line_number_wrapper(intptr_t accum_addr, unsigned fileNo, size_t batchLine);
+extern "C" void set_batch_line_number_wrapper(void * accum_addr, unsigned fileNo, size_t batchLine);
 
+class EmitMatch;
 
 class GrepEngine {
     enum class FileStatus {Pending, GrepComplete, PrintComplete};
     friend class InternalSearchEngine;
     friend class InternalMultiSearchEngine;
+    typedef uint64_t (*GrepFunctionType)(uint32_t useMMap, uint32_t fileDescriptor, GrepCallBackObject &, size_t maxCount);
+    typedef uint64_t (*GrepBatchFunctionType)(const char * buffer, size_t length, EmitMatch &, size_t maxCount);
 public:
 
     enum class EngineKind {QuietMode, MatchOnly, CountOnly, EmitMatches};
@@ -165,8 +168,8 @@ protected:
     bool mGrepStdIn;
     NullCharMode mNullMode;
     BaseDriver & mGrepDriver;
-    void * mMainMethod;
-    void * mBatchMethod;
+    GrepFunctionType mMainMethod;
+    GrepBatchFunctionType mBatchMethod;
 
     std::atomic<unsigned> mNextFileToGrep;
     std::atomic<unsigned> mNextFileToPrint;

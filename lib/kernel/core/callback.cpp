@@ -9,7 +9,7 @@
 using namespace kernel;
 
 
-extern "C" void signal_dispatcher(intptr_t callback_object_addr, unsigned signal) {
+extern "C" void signal_dispatcher(void * callback_object_addr, unsigned signal) {
     reinterpret_cast<SignallingObject *>(callback_object_addr)->handle_signal(signal);
 }
 

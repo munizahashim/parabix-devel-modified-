@@ -299,7 +299,7 @@ u8u16FunctionType generatePipeline(CPUDriver & driver, cc::ByteNumbering byteNum
         P.CreateKernelCall<SwizzleGenerator>(u16Swizzles, std::vector<StreamSet *>{u16bits});
         P.CreateKernelCall<P2S16Kernel>(u16bits, u16bytes);
     } else {
-        const auto fieldWidth = driver.getBitBlockWidth() / 16;
+        const auto fieldWidth = P.getBitBlockWidth() / 16;
         P.CreateKernelCall<FieldCompressKernel>(Select(selectors, {0}),
                                                  SelectOperationList{Select(u8bits, streamutils::Range(0, 16))},
                                                  u16bits,

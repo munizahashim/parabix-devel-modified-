@@ -16,7 +16,6 @@ namespace llvm { class Function; }
 namespace kernel { class KernelBuilder; }
 namespace kernel { class PipelineBuilder; }
 namespace kernel { class ProgramBuilder; }
-
 class CBuilder;
 class ParabixObjectCache;
 
@@ -33,7 +32,27 @@ public:
     using KernelSet = std::vector<std::unique_ptr<Kernel>>;
     using KernelMap = llvm::StringMap<std::unique_ptr<Kernel>>;
 
-    std::unique_ptr<kernel::ProgramBuilder> makePipeline(Bindings scalar_inputs = {}, Bindings scalar_outputs = {});
+    void addKernel(not_null<Kernel *> kernel);
+
+    virtual bool hasExternalFunction(const llvm::StringRef functionName) const = 0;
+
+    virtual void generateUncachedKernels() = 0;
+
+    virtual void * finalizeObject(kernel::Kernel * pipeline) = 0;
+
+    virtual ~BaseDriver();
+
+    llvm::LLVMContext & getContext() const final {
+        return *mContext.get();
+    }
+
+    bool getPreservesKernels() const {
+        return mPreservesKernels;
+    }
+
+    void setPreserveKernels(const bool value = true) {
+        mPreservesKernels = value;
+    }
 
     kernel::StreamSet * CreateStreamSet(const unsigned NumElements = 1, const unsigned FieldWidth = 1) noexcept;
 
@@ -49,32 +68,6 @@ public:
 
     kernel::Scalar * CreateCommandLineScalar(kernel::CommandLineScalarType type) noexcept;
 
-    void addKernel(not_null<Kernel *> kernel);
-
-    virtual bool hasExternalFunction(const llvm::StringRef functionName) const = 0;
-
-    virtual void generateUncachedKernels() = 0;
-
-    virtual void * finalizeObject(kernel::Kernel * pipeline) = 0;
-
-    virtual ~BaseDriver();
-
-    llvm::LLVMContext & getContext() const final {
-        return *mContext.get();
-    }
-
-    llvm::Module * getMainModule() const {
-        return mMainModule;
-    }
-
-    bool getPreservesKernels() const {
-        return mPreservesKernels;
-    }
-
-    void setPreserveKernels(const bool value = true) {
-        mPreservesKernels = value;
-    }
-
     unsigned getBitBlockWidth() const final;
 
     llvm::VectorType * getBitBlockType() const final;
@@ -82,8 +75,6 @@ public:
     llvm::VectorType * getStreamTy(const unsigned FieldWidth = 1) final;
 
     llvm::ArrayType * getStreamSetTy(const unsigned NumElements = 1, const unsigned FieldWidth = 1) final;
-
-
 
 protected:
 

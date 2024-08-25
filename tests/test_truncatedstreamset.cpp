@@ -305,9 +305,6 @@ bool runRepeatingStreamSetTest(CPUDriver & driver,
                                uint64_t passCountVal,
                                std::default_random_engine & rng) {
 
-    IntegerType * const int64Ty = driver.getInt64Ty();
-    PointerType * const int32PtrTy = driver.getInt32Ty()->getPointerTo();
-
     auto P = CreatePipeline(driver, Input<uint64_t>{"copyCount"}, Input<uint64_t>{"passCount"}, Input<uint32_t*>{"output"});
 
     const auto maxVal = (1ULL << static_cast<uint64_t>(fieldWidth)) - 1ULL;

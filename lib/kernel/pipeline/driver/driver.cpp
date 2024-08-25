@@ -13,17 +13,6 @@ using namespace llvm;
 using RelationshipAllocator = Relationship::Allocator;
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief makePipeline
- ** ------------------------------------------------------------------------------------------------------------- */
-std::unique_ptr<ProgramBuilder> BaseDriver::makePipeline(Bindings scalar_inputs, Bindings scalar_outputs) {
-    PipelineKernel * const pipeline =
-        new PipelineKernel(*this,
-                           {}, {},
-                           std::move(scalar_inputs), std::move(scalar_outputs));
-    return std::make_unique<ProgramBuilder>(*this, pipeline);
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief CreateStreamSet
  ** ------------------------------------------------------------------------------------------------------------- */
 StreamSet * BaseDriver::CreateStreamSet(const unsigned NumElements, const unsigned FieldWidth) noexcept {

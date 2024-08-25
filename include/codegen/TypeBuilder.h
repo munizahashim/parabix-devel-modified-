@@ -108,17 +108,6 @@ template<typename T, bool cross> class TypeBuilder<volatile T, cross>
 template<typename T, bool cross> class TypeBuilder<const volatile T, cross>
   : public TypeBuilder<T, cross> {};
 
-// Pointers
-template<typename T, bool cross> class TypeBuilder<T*, cross> {
-public:
-  static PointerType *get(LLVMContext &Context) {
-    return PointerType::getUnqual(TypeBuilder<T,cross>::get(Context));
-  }
-};
-
-/// There is no support for references
-template<typename T, bool cross> class TypeBuilder<T&, cross> {};
-
 // Arrays
 template<typename T, size_t N, bool cross> class TypeBuilder<T[N], cross> {
 public:
@@ -243,14 +232,72 @@ public:
 
 /// void* is disallowed in LLVM types, but it occurs often enough in C code that
 /// we special case it.
-template<> class TypeBuilder<void*, false>
-  : public TypeBuilder<types::i<8>*, false> {};
-template<> class TypeBuilder<const void*, false>
-  : public TypeBuilder<types::i<8>*, false> {};
-template<> class TypeBuilder<volatile void*, false>
-  : public TypeBuilder<types::i<8>*, false> {};
-template<> class TypeBuilder<const volatile void*, false>
-  : public TypeBuilder<types::i<8>*, false> {};
+template<> class TypeBuilder<void*, false> {
+public:
+    static PointerType * get(LLVMContext &Context) {
+        return PointerType::getInt8PtrTy(Context);
+    }
+};
+
+template<> class TypeBuilder<const void*, false> {
+public:
+    static PointerType * get(LLVMContext &Context) {
+        return PointerType::getInt8PtrTy(Context);
+    }
+};
+
+template<> class TypeBuilder<volatile void*, false> {
+public:
+    static PointerType * get(LLVMContext &Context) {
+        return PointerType::getInt8PtrTy(Context);
+    }
+};
+
+template<> class TypeBuilder<const volatile void*, false> {
+public:
+    static PointerType * get(LLVMContext &Context) {
+        return PointerType::getInt8PtrTy(Context);
+    }
+};
+
+namespace {
+
+// primary template handles types that have no nested ::type member:
+template<class, class = void>
+struct is_known_type : std::false_type {};
+
+// specialization recognizes types that do have a nested ::type member:
+template<class T>
+struct is_known_type<T, std::void_t<decltype(T::get)>> : std::true_type {};
+
+}
+
+// typename std::enable_if<has_c_str<StringType>::value, StringType>::type* = nullptr
+
+// Pointers
+template<typename T, bool cross>
+class TypeBuilder<T*, cross> {
+public:
+  static PointerType * get(LLVMContext &Context) {
+      if constexpr (is_known_type<TypeBuilder<T, cross>>::value) {
+            return PointerType::getUnqual(TypeBuilder<T,cross>::get(Context));
+      } else {
+          return PointerType::getInt8PtrTy(Context);
+      }
+  }
+};
+
+// References
+template<typename T, bool cross> class TypeBuilder<T&, cross> {
+public:
+    static PointerType * get(LLVMContext &Context) {
+        if constexpr (is_known_type<TypeBuilder<T, cross>>::value) {
+              return PointerType::getUnqual(TypeBuilder<T,cross>::get(Context));
+        } else {
+            return PointerType::getInt8PtrTy(Context);
+        }
+    }
+};
 
 template<typename R, bool cross> class TypeBuilder<R(), cross> {
 public:

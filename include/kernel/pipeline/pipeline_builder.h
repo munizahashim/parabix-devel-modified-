@@ -10,7 +10,7 @@ namespace kernel {
 
 class OptimizationBranchBuilder;
 
-class PipelineBuilder {
+class PipelineBuilder { // : public LLVMTypeSystemInterface
     friend class PipelineKernel;
     friend class PipelineAnalysis;
     friend class PipelineCompiler;
@@ -324,6 +324,26 @@ public:
 
     llvm::IntegerType * LLVM_READNONE getIntAddrTy() const {
         return mDriver.getIntAddrTy();
+    }
+
+    llvm::LLVMContext & getContext() {
+        return mDriver.getContext();
+    }
+
+    unsigned getBitBlockWidth() const {
+        return mDriver.getBitBlockWidth();
+    }
+
+    llvm::VectorType * getBitBlockType() const {
+        return mDriver.getBitBlockType();
+    }
+
+    llvm::VectorType * getStreamTy(const unsigned FieldWidth = 1) {
+        return mDriver.getStreamTy(FieldWidth);
+    }
+
+    llvm::ArrayType * getStreamSetTy(const unsigned NumElements = 1, const unsigned FieldWidth = 1) {
+        return mDriver.getStreamSetTy(NumElements, FieldWidth);
     }
 
 protected:

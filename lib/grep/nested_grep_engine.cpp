@@ -56,7 +56,7 @@ class NestedGrepPipelineKernel : public PipelineKernel {
 public:
 
 
-    NestedGrepPipelineKernel(BaseDriver & ts,
+    NestedGrepPipelineKernel(BaseDriver & driver,
 
                              StreamSet * const BasisBits,
                              StreamSet * const u8index,
@@ -67,7 +67,7 @@ public:
                              const re::PatternVector & patterns,
                              const bool caseInsensitive,
                              re::CC * const breakCC)
-: NestedGrepPipelineKernel(ts,
+: NestedGrepPipelineKernel(driver,
      BasisBits, u8index, breaks, matches
      // make kernel list
      , [&]() -> Kernels {
@@ -83,11 +83,11 @@ public:
 
          if (LLVM_LIKELY(outerKernel != nullptr)) {
              // assert (outerKernel->hasFamilyName());
-             resultSoFar = ts.CreateStreamSet();
+             resultSoFar = driver.CreateStreamSet();
              outerKernel->setOutputStreamSetAt(0, resultSoFar);
              // if we already constructed the outer kernel through nesting,
              // it may not be necessary to add it back to the execution engine.
-             ts.addKernel(outerKernel);
+             driver.addKernel(outerKernel);
              kernels.emplace_back(outerKernel, PipelineKernel::Family);
          }
 
@@ -96,7 +96,7 @@ public:
              if (LLVM_UNLIKELY(i == (n - 1UL))) {
                  MatchResults = matches;
              } else {
-                 MatchResults = ts.CreateStreamSet();
+                 MatchResults = driver.CreateStreamSet();
              }
 
              auto options = std::make_unique<GrepKernelOptions>();
@@ -117,13 +117,13 @@ public:
                  options->setCombiningStream(exclude ? GrepCombiningType::Exclude : GrepCombiningType::Include, resultSoFar);
              }
              options->addExternal("UTF8_index", u8index);
-             ICGrepKernel * const matcher = new ICGrepKernel(ts, std::move(options));
-             ts.addKernel(matcher);
+             ICGrepKernel * const matcher = new ICGrepKernel(driver, std::move(options));
+             driver.addKernel(matcher);
              kernels.emplace_back(matcher, PipelineKernel::KernelBindingFlag::Family);
              resultSoFar = MatchResults;
          }
          assert (resultSoFar == matches);
-         ts.generateUncachedKernels();
+         driver.generateUncachedKernels();
          return kernels;
      }()) {
 
@@ -131,13 +131,13 @@ public:
 
 private:
 
-    NestedGrepPipelineKernel(BaseDriver & ts,
+    NestedGrepPipelineKernel(BaseDriver & driver,
                              StreamSet * const BasisBits,
                              StreamSet * const u8index,
                              StreamSet * const breaks,
                              StreamSet * const matches,
                              Kernels && kernels)
-        : PipelineKernel(ts
+        : PipelineKernel(driver
                          // signature
                          , [&]() -> std::string {
                             std::string tmp;
@@ -260,7 +260,7 @@ void NestedInternalSearchEngine::grepCodeGen() {
     const auto preserve = mGrepDriver.getPreservesKernels();
     mGrepDriver.setPreserveKernels(true);
 
-    auto E = CreatePipeline(mGrepDriver, Input<uint8_t*>{"buffer"}, Input<size_t>{"length"}, Input<uintptr_t>{"accumulator"} );
+    auto E = CreatePipeline(mGrepDriver, Input<const char *>{"buffer"}, Input<size_t>{"length"}, Input<MatchAccumulator &>{"accumulator"} );
 
     Scalar * const buffer = E.getInputScalar("buffer");
     Scalar * const length = E.getInputScalar("length");
@@ -288,15 +288,14 @@ void NestedInternalSearchEngine::grepCodeGen() {
         scanMatchK->link("finalize_match_wrapper", finalize_match_wrapper);
     }
 
-    mMainMethod.push_back((void*)E.compile());
+    mMainMethod.push_back(E.compile());
     assert (mMainMethod.size() + 1 == mNested.size());
     mGrepDriver.setPreserveKernels(preserve);
 }
 
 void NestedInternalSearchEngine::doGrep(const char * search_buffer, size_t bufferLength, MatchAccumulator & accum) {
-    typedef void (*GrepFunctionType)(const char * buffer, const size_t length, MatchAccumulator *);
-    auto f = reinterpret_cast<GrepFunctionType>(mMainMethod.back());
-    f(search_buffer, bufferLength, &accum);
+    auto f = mMainMethod.back();
+    f(search_buffer, bufferLength, accum);
 }
 
 NestedInternalSearchEngine::~NestedInternalSearchEngine() { }

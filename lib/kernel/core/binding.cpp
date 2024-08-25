@@ -6,11 +6,11 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/IR/DerivedTypes.h>
 
-const auto NULL_RELATIONSHIP_ERROR = "cannot set binding relationship to null without a fixed binding type";
+const auto NULL_RELATIONSHIP_ERROR = ": cannot set binding relationship to null without a fixed binding type";
 
-const auto NON_MATCHING_TYPE_ERROR = "value type did not match the given binding type";
+const auto NON_MATCHING_TYPE_ERROR = ": value type did not match the given binding type";
 
-const auto NOT_STREAM_SET = "binding relationship does not refer to a stream set type";
+const auto NOT_STREAM_SET = ": binding relationship does not refer to a stream set type";
 
 namespace kernel {
 
@@ -94,10 +94,10 @@ Binding::Binding(llvm::Type * const type, std::string name, Relationship * const
 , mRelationship(value)
 , mDistribution(UniformDistribution()) {
     if (LLVM_UNLIKELY(value == nullptr && type == nullptr)) {
-        llvm::report_fatal_error(NULL_RELATIONSHIP_ERROR);
+        llvm::report_fatal_error(name + NULL_RELATIONSHIP_ERROR);
     }
     if (LLVM_UNLIKELY(type && value && value->getType() != type)) {
-        llvm::report_fatal_error(NON_MATCHING_TYPE_ERROR);
+        assert (false); llvm::report_fatal_error(name + NON_MATCHING_TYPE_ERROR);
     }
 }
 
@@ -108,10 +108,10 @@ Binding::Binding(llvm::Type * const type, std::string name, Relationship * const
 , mRelationship(value)
 , mDistribution(UniformDistribution()) {
     if (LLVM_UNLIKELY(value == nullptr && type == nullptr)) {
-        llvm::report_fatal_error(NULL_RELATIONSHIP_ERROR);
+        llvm::report_fatal_error(name + NULL_RELATIONSHIP_ERROR);
     }
     if (LLVM_UNLIKELY(type && value && value->getType() != type)) {
-        llvm::report_fatal_error(NON_MATCHING_TYPE_ERROR);
+       assert (false); llvm::report_fatal_error(name + NON_MATCHING_TYPE_ERROR);
     }
 }
 
@@ -122,10 +122,10 @@ Binding::Binding(llvm::Type * const type, std::string name, Relationship * const
 , mRelationship(value)
 , mDistribution(UniformDistribution()) {
     if (LLVM_UNLIKELY(value == nullptr && type == nullptr)) {
-        llvm::report_fatal_error(NULL_RELATIONSHIP_ERROR);
+        llvm::report_fatal_error(name + NULL_RELATIONSHIP_ERROR);
     }
     if (LLVM_UNLIKELY(type && value && value->getType() != type)) {
-        llvm::report_fatal_error(NON_MATCHING_TYPE_ERROR);
+        assert (false); llvm::report_fatal_error(name + NON_MATCHING_TYPE_ERROR);
     }
 }
 
@@ -136,10 +136,10 @@ Binding::Binding(llvm::Type * const type, std::string && name, Relationship * co
 , mRelationship(value)
 , mDistribution(UniformDistribution()) {
     if (LLVM_UNLIKELY(value == nullptr && type == nullptr)) {
-        llvm::report_fatal_error(NULL_RELATIONSHIP_ERROR);
+        llvm::report_fatal_error(name + NULL_RELATIONSHIP_ERROR);
     }
     if (LLVM_UNLIKELY(type && value && value->getType() != type)) {
-        llvm::report_fatal_error(NON_MATCHING_TYPE_ERROR);
+        assert (false); llvm::report_fatal_error(name + NON_MATCHING_TYPE_ERROR);
     }
 }
 
@@ -154,24 +154,24 @@ Binding::Binding(const Binding & original, ProcessingRate r)
 
 void Binding::setRelationship(Relationship * const value) {
     if (LLVM_UNLIKELY(value == nullptr && mType == nullptr)) {
-        llvm::report_fatal_error(NULL_RELATIONSHIP_ERROR);
+        llvm::report_fatal_error(mName + NULL_RELATIONSHIP_ERROR);
     }
     if (LLVM_UNLIKELY(mType && value && value->getType() != mType)) {
-        llvm::report_fatal_error(NON_MATCHING_TYPE_ERROR);
+        assert (false); llvm::report_fatal_error(mName + NON_MATCHING_TYPE_ERROR);
     }
     mRelationship = value;
 }
 
 unsigned Binding::getNumElements() const {
     if (LLVM_UNLIKELY(mRelationship->isScalar())) {
-        llvm::report_fatal_error(NOT_STREAM_SET);
+        llvm::report_fatal_error(mName + NOT_STREAM_SET);
     }
     return static_cast<const StreamSet *>(mRelationship)->getNumElements();
 }
 
 unsigned Binding::getFieldWidth() const {
     if (LLVM_UNLIKELY(mRelationship->isScalar())) {
-        llvm::report_fatal_error(NOT_STREAM_SET);
+        llvm::report_fatal_error(mName + NOT_STREAM_SET);
     }
     return static_cast<const StreamSet *>(mRelationship)->getFieldWidth();
 }
