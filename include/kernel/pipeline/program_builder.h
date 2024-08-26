@@ -354,8 +354,41 @@ private:
 
 };
 
+namespace {
+
+// For compilation simplicity, we still require that the generated "main" function provided by
+// the TypedProgramBuilder compile method matches the standard binding ordering, the following
+// constraints report a simple compile error if ordering is invalid. This is eliminated at C++
+// compile time.
+
+// accept any 0 or 1 arg cases
+template<typename T, bool = false>
+struct ordering_constraints : std::true_type {};
+// by default, everything is valid ...
+template<typename U, typename V, typename ...Rest, bool E>
+struct ordering_constraints<std::tuple<U, V, Rest...>, E> : ordering_constraints<std::tuple<V, Rest...>, E> {};
+// except when outputs are ordered before inputs
+template<typename U,  typename V, typename ...Rest, bool E>
+struct ordering_constraints<std::tuple<Output<U>, Input<V>, Rest...>, E> :  std::false_type {};
+// but we do want the output streamsets to be before the input scalars
+template<typename V, typename ...Rest, typename std::enable_if_t<!std::is_same_v<V, streamset_t>, bool> E>
+struct ordering_constraints<std::tuple<Output<streamset_t>, Input<V>, Rest...>, E> : ordering_constraints<std::tuple<V, Rest...>, E> {};
+// and cannot allow any scalars before streamsets
+template<typename V, typename ...Rest, typename std::enable_if_t<!std::is_same_v<V, streamset_t>, bool> E>
+struct ordering_constraints<std::tuple<Input<V>, Input<streamset_t>, Rest...>, E> : std::false_type {};
+template<typename V, typename ...Rest, typename std::enable_if_t<!std::is_same_v<V, streamset_t>, bool> E>
+struct ordering_constraints<std::tuple<Input<V>, Output<streamset_t>, Rest...>, E> : std::false_type {};
+template<typename V, typename ...Rest, typename std::enable_if_t<!std::is_same_v<V, streamset_t>, bool> E>
+struct ordering_constraints<std::tuple<Output<V>, Input<streamset_t>, Rest...>, E> : std::false_type {};
+template<typename V, typename ...Rest, typename std::enable_if_t<!std::is_same_v<V, streamset_t>, bool> E>
+struct ordering_constraints<std::tuple<Output<V>, Output<streamset_t>, Rest...>, E> : std::false_type {};
+
+} /* end of anonymous namespace */
+
 template<typename ... Args>
 TypedProgramBuilder<Args...> CreatePipeline(BaseDriver & driver, Args... args) {
+    static_assert(ordering_constraints<std::tuple<Args...>>::value,
+    "Program I/O orderings must have streamsets before scalars and inputs before outputs.");
     return TypedProgramBuilder<Args...>{driver, std::forward<Args>(args)...};
 }
 

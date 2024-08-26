@@ -9,8 +9,8 @@
 using namespace kernel;
 
 
-extern "C" void signal_dispatcher(void * callback_object_addr, unsigned signal) {
-    reinterpret_cast<SignallingObject *>(callback_object_addr)->handle_signal(signal);
+extern "C" void signal_dispatcher(SignallingObject * callback_object_addr, unsigned signal) {
+    callback_object_addr->handle_signal(signal);
 }
 
 void SignallingObject::handle_signal(unsigned s) {

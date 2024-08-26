@@ -103,29 +103,29 @@ void GrepCallBackObject::handle_signal(unsigned s) {
     }
 }
 
-extern "C" void accumulate_match_wrapper(void *accum_addr, const size_t lineNum, char * line_start, char * line_end) {
+extern "C" void accumulate_match_wrapper(MatchAccumulator * accum_addr, const size_t lineNum, char * line_start, char * line_end) {
     assert ("passed a null accumulator" && accum_addr);
-    reinterpret_cast<MatchAccumulator *>(accum_addr)->accumulate_match(lineNum, line_start, line_end);
+    accum_addr->accumulate_match(lineNum, line_start, line_end);
 }
 
-extern "C" void finalize_match_wrapper(void *accum_addr, char * buffer_end) {
+extern "C" void finalize_match_wrapper(MatchAccumulator * accum_addr, char * buffer_end) {
     assert ("passed a null accumulator" && accum_addr);
-    reinterpret_cast<MatchAccumulator *>(accum_addr)->finalize_match(buffer_end);
+    accum_addr->finalize_match(buffer_end);
 }
 
-extern "C" unsigned get_file_count_wrapper(void *accum_addr) {
+extern "C" unsigned get_file_count_wrapper(MatchAccumulator * accum_addr) {
     assert ("passed a null accumulator" && accum_addr);
-    return reinterpret_cast<MatchAccumulator *>(accum_addr)->getFileCount();
+    return accum_addr->getFileCount();
 }
 
-extern "C" size_t get_file_start_pos_wrapper(void *accum_addr, unsigned fileNo) {
+extern "C" size_t get_file_start_pos_wrapper(MatchAccumulator *accum_addr, unsigned fileNo) {
     assert ("passed a null accumulator" && accum_addr);
-    return reinterpret_cast<MatchAccumulator *>(accum_addr)->getFileStartPos(fileNo);
+    return accum_addr->getFileStartPos(fileNo);
 }
 
-extern "C" void set_batch_line_number_wrapper(void *accum_addr, unsigned fileNo, size_t batchLine) {
+extern "C" void set_batch_line_number_wrapper(MatchAccumulator *accum_addr, unsigned fileNo, size_t batchLine) {
     assert ("passed a null accumulator" && accum_addr);
-    reinterpret_cast<MatchAccumulator *>(accum_addr)->setBatchLineNumber(fileNo, batchLine);
+    accum_addr->setBatchLineNumber(fileNo, batchLine);
 }
 
 // Grep Engine construction and initialization.
@@ -1414,8 +1414,8 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
     matchingRE = toUTF8(matchingRE);
 
     auto E = CreatePipeline(mGrepDriver,
-                            Input<uint8_t*>{"buffer"}, Input<size_t>{"length"},
-                            Input<void *>{"accumulator"});
+                            Input<const char*>{"buffer"}, Input<size_t>{"length"},
+                            Input<MatchAccumulator *>{"accumulator"});
 
     Scalar * const buffer = E.getInputScalar(0);
     Scalar * const length = E.getInputScalar(1);
@@ -1454,7 +1454,7 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
         scanMatchK->link("finalize_match_wrapper", finalize_match_wrapper);
     }
 
-    mMainMethod = (void*)E.compile();
+    mMainMethod = E.compile();
 }
 
 InternalSearchEngine::InternalSearchEngine(const std::unique_ptr<grep::GrepEngine> & engine)
@@ -1464,9 +1464,7 @@ InternalSearchEngine::~InternalSearchEngine() { }
 
 
 void InternalSearchEngine::doGrep(const char * search_buffer, size_t bufferLength, MatchAccumulator & accum) {
-    typedef void (*GrepFunctionType)(const char * buffer, const size_t length, MatchAccumulator *);
-    auto f = reinterpret_cast<GrepFunctionType>(mMainMethod);
-    f(search_buffer, bufferLength, &accum);
+    mMainMethod(search_buffer, bufferLength, &accum);
 }
 
 InternalMultiSearchEngine::InternalMultiSearchEngine(BaseDriver &driver) :
@@ -1490,8 +1488,8 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
     }
 
     auto E = CreatePipeline(mGrepDriver,
-                            Input<uint8_t*>{"buffer"}, Input<size_t>{"length"},
-                            Input<void *>{"accumulator"});
+                            Input<const char*>{"buffer"}, Input<size_t>{"length"},
+                            Input<MatchAccumulator *>{"accumulator"});
 
     Scalar * const buffer = E.getInputScalar(0);
     Scalar * const length = E.getInputScalar(1);
@@ -1547,13 +1545,11 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
         scanMatchK->link("finalize_match_wrapper", finalize_match_wrapper);
     }
 
-    mMainMethod = (void*)E.compile();
+    mMainMethod = E.compile();
 }
 
 void InternalMultiSearchEngine::doGrep(const char * search_buffer, size_t bufferLength, MatchAccumulator & accum) {
-    typedef void (*GrepFunctionType)(const char * buffer, const size_t length, MatchAccumulator *);
-    auto f = reinterpret_cast<GrepFunctionType>(mMainMethod);
-    f(search_buffer, bufferLength, &accum);
+    mMainMethod(search_buffer, bufferLength, &accum);
 }
 
 class LineNumberAccumulator : public grep::MatchAccumulator {

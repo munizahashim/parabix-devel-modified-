@@ -184,10 +184,10 @@ private:
 
 };
 
-NestedInternalSearchEngine::NestedInternalSearchEngine(BaseDriver & ts)
+NestedInternalSearchEngine::NestedInternalSearchEngine(BaseDriver & driver)
 : mGrepRecordBreak(GrepRecordBreakKind::LF)
 , mCaseInsensitive(false)
-, mGrepDriver(ts)
+, mGrepDriver(driver)
 , mBreakCC(nullptr)
 , mNested(1, nullptr) {
 

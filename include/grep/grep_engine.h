@@ -58,15 +58,15 @@ public:
     virtual void setBatchLineNumber(unsigned fileNo, size_t batchLine) {}  // default: no op
 };
 
-extern "C" void accumulate_match_wrapper(void * accum_addr, const size_t lineNum, char * line_start, char * line_end);
+extern "C" void accumulate_match_wrapper(MatchAccumulator * accum_addr, const size_t lineNum, char * line_start, char * line_end);
 
-extern "C" void finalize_match_wrapper(void * accum_addr, char * buffer_end);
+extern "C" void finalize_match_wrapper(MatchAccumulator * accum_addr, char * buffer_end);
 
-extern "C" unsigned get_file_count_wrapper(void * accum_addr);
+extern "C" unsigned get_file_count_wrapper(MatchAccumulator * accum_addr);
 
-extern "C" size_t get_file_start_pos_wrapper(void * accum_addr, unsigned fileNo);
+extern "C" size_t get_file_start_pos_wrapper(MatchAccumulator * accum_addr, unsigned fileNo);
 
-extern "C" void set_batch_line_number_wrapper(void * accum_addr, unsigned fileNo, size_t batchLine);
+extern "C" void set_batch_line_number_wrapper(MatchAccumulator *accum_addr, unsigned fileNo, size_t batchLine);
 
 class EmitMatch;
 
@@ -274,6 +274,7 @@ public:
 
 
 class InternalSearchEngine {
+    typedef void (*GrepFunctionType)(const char * buffer, const size_t length, MatchAccumulator *);
 public:
     InternalSearchEngine(BaseDriver & driver);
 
@@ -292,11 +293,12 @@ private:
     GrepRecordBreakKind mGrepRecordBreak;
     bool mCaseInsensitive;
     BaseDriver & mGrepDriver;
-    void * mMainMethod;
+    GrepFunctionType mMainMethod;
 };
 
 enum class PatternKind {Include, Exclude};
 class InternalMultiSearchEngine {
+    typedef void (*GrepFunctionType)(const char * buffer, const size_t length, MatchAccumulator *);
 public:
     InternalMultiSearchEngine(BaseDriver & driver);
 
@@ -315,7 +317,7 @@ private:
     GrepRecordBreakKind mGrepRecordBreak;
     bool mCaseInsensitive;
     BaseDriver & mGrepDriver;
-    void * mMainMethod;
+    GrepFunctionType mMainMethod;
 };
 
 /**

@@ -128,7 +128,7 @@ re::PatternVector getIncludeExcludePatterns() {
         re::RE * excludeRE = re::RE_Parser::parse(path, re::DEFAULT_MODE, re::RE_Syntax::FileGLOB);
         signedPatterns.push_back(std::make_pair(Pattern::Exclude, anchorToFullFileName(excludeRE)));
     }
-    if (ExcludeFromFlag != "") {
+    if (ExcludeFromFlag.getNumOccurrences()) {
         std::ifstream globFile(ExcludeFromFlag.c_str());
         std::string r;
         if (globFile.is_open()) {

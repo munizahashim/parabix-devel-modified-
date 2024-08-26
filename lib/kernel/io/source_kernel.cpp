@@ -15,17 +15,6 @@
 #include <llvm/Support/raw_ostream.h>
 #include <unistd.h>
 
-#ifdef __APPLE__
-
-#else
-
-
-#endif
-
-#if !defined(__APPLE__) && _POSIX_C_SOURCE >= 200809L
-#define PREAD pread64
-#endif
-
 using namespace llvm;
 
 inline unsigned getPageSize() {
@@ -39,19 +28,6 @@ extern "C" uint64_t file_size(const uint32_t fd) {
     }
     return st.st_size;
 }
-extern "C" void *mmap(void *addr, size_t len, int prot, int flags,
-           int fildes, off_t off);
-extern "C" int munmap(void *addr, size_t len);
-extern "C" int madvise(void *addr, size_t length, int advice);
-
-//int madvise_wrapper(void * addr, size_t length, int flags) {
-//    const auto r = madvise(addr, length, flags);
-//    if (r) {
-//        const auto e = errno;
-//        errs() << "MADV:" << strerror(e) << "\n";
-//    }
-//    return r;
-//}
 
 namespace kernel {
 
@@ -202,11 +178,7 @@ constexpr char __MAKE_CIRCULAR_BUFFER[] = "__make_circular_buffer";
 constexpr char __DESTROY_CIRCULAR_BUFFER[] = "__destroy_circular_buffer";
 
 void ReadSourceKernel::generatLinkExternalFunctions(KernelBuilder & b) {
-    #ifdef PREAD
-    b.LinkFunction("pread64", PREAD);
-    #else
     b.LinkFunction("read", read);
-    #endif
     b.LinkFunction("file_size", file_size);
     b.LinkFunction(__MAKE_CIRCULAR_BUFFER, make_circular_buffer);
     b.LinkFunction(__DESTROY_CIRCULAR_BUFFER, destroy_circular_buffer);
@@ -345,20 +317,12 @@ void ReadSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
 
     Value * const sourceBuffer = b.CreatePointerCast(b.getRawOutputPointer("sourceBuffer", producedSoFar), b.getInt8PtrTy());
 
-    #ifdef PREAD
-    Function *  const preadFunc = b.getModule()->getFunction("pread64");
-    FixedArray<Value *, 4> args;
-    args[0] = fd;
-    args[1] = sourceBuffer;
-    args[2] = bytesToRead;
-    args[3] = b.CreateMul(producedSoFar, codeUnitBytes);
-    #else
     Function *  const preadFunc = b.getModule()->getFunction("read");
     FixedArray<Value *, 3> args;
     args[0] = fd;
     args[1] = sourceBuffer;
     args[2] = bytesToRead;
-    #endif
+
     Value * const bytesRead = b.CreateCall(preadFunc, args);
 
     // There are 4 possibile results from read:
