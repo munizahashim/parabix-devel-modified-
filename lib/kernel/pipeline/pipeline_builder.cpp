@@ -26,6 +26,9 @@ inline IntTy round_up_to(const IntTy x, const IntTy y) {
     return (x + y - 1) & -y;
 }
 
+#define ADD_CL_SCALAR(Id,Type) \
+    mTarget->mInputScalars.emplace_back(Id, mDriver.CreateCommandLineScalar(CommandLineScalarType::Type))
+
 namespace kernel {
 
 using Scalars = PipelineKernel::Scalars;

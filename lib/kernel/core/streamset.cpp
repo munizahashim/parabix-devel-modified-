@@ -270,12 +270,12 @@ Type * StreamSetBuffer::resolveType(kernel::KernelBuilder & b, Type * const stre
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief linkFunctions
  ** ------------------------------------------------------------------------------------------------------------- */
-constexpr char __MAKE_CIRCULAR_BUFFER[] = "__make_circular_buffer";
-constexpr char __DESTROY_CIRCULAR_BUFFER[] = "__destroy_circular_buffer";
+constexpr const char __MAKE_CIRCULAR_BUFFER[] =    "__make_circular_buffer";
+constexpr const char __DESTROY_CIRCULAR_BUFFER[] = "__destroy_circular_buffer";
 
 void StreamSetBuffer::linkFunctions(kernel::KernelBuilder & b) {
-b.LinkFunction(__MAKE_CIRCULAR_BUFFER, make_circular_buffer);
-b.LinkFunction(__DESTROY_CIRCULAR_BUFFER, destroy_circular_buffer);
+    b.LinkFunction(StringRef{__MAKE_CIRCULAR_BUFFER, strlen(__MAKE_CIRCULAR_BUFFER)}, make_circular_buffer);
+    b.LinkFunction(StringRef{__DESTROY_CIRCULAR_BUFFER, strlen(__DESTROY_CIRCULAR_BUFFER)}, destroy_circular_buffer);
 }
 
 // External Buffer

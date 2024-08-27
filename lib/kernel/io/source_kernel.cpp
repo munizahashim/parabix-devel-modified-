@@ -14,6 +14,7 @@
 #include <boost/interprocess/mapped_region.hpp>
 #include <llvm/Support/raw_ostream.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
 using namespace llvm;
 
