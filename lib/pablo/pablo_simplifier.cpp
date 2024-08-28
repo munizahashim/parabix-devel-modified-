@@ -53,19 +53,15 @@ inline bool lessThan(const PabloAST * a, const PabloAST * b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 struct VariableTable {
 
-    using MapValueType = flat_map<const Var *, PabloAST *, std::less<const Var *>>::value_type;
-    using MapAllocator = ProxyAllocator<MapValueType>;
-    using Map = flat_map<const Var *, PabloAST *, std::less<const Var *>, MapAllocator>;
+    using Map = llvm::DenseMap<const Var *, PabloAST *>;
 
     VariableTable(Allocator & allocator) noexcept
-    : mOuter(nullptr)
-    , mMap(MapAllocator{allocator}) {
+    : mOuter(nullptr) {
 
     }
 
     VariableTable(VariableTable & outer) noexcept
-    : mOuter(&outer)
-    , mMap(MapAllocator{outer.mMap.get_allocator()}) {
+    : mOuter(&outer) {
 
     }
 
@@ -80,19 +76,14 @@ struct VariableTable {
     void put(const Var * const var, PabloAST * value) noexcept {
         const auto f = mMap.find(var);
         if (LLVM_LIKELY(f == mMap.end())) {
-            mMap.emplace(var, value);
+            mMap.insert(std::make_pair(var, value));
         } else {
             f->second = value;
         }
     }
 
     size_t depth(const Var * const a) const {
-        const Var * v = a;
-//        if (LLVM_UNLIKELY(isa<Extract>(a))) {
-//            v = cast<Extract>(a)->getArray();
-//            assert (!isa<Extract>(v));
-//        }
-        return __depth(v);
+        return __depth(a);
     }
 
     void clear() {
@@ -171,16 +162,18 @@ SimplifierPassContainer()
  * @brief run
  ** ------------------------------------------------------------------------------------------------------------- */
 void run(PabloKernel * const kernel) {
-    for (;;) {
+    deadCodeElimination(kernel);
+    size_t iterations = 0;
+    do {
         redundancyElimination(kernel);
-        if (LLVM_LIKELY(deadCodeElimination(kernel))) {
-            break;
-        }
-    }
+        deadCodeElimination(kernel);
+    } while (reevaluateRedundancyElimination && ++iterations < 3);
     strengthReduction(kernel->getEntryScope());
 }
 
 protected:
+
+bool reevaluateRedundancyElimination = false;
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief redundancyElimination
@@ -197,10 +190,13 @@ void redundancyElimination(PabloKernel * const kernel) {
         variables.put(input, input);
     }
     PabloBlock * const entryScope = kernel->getEntryScope();
+
     mSideEffecting.clear();
     assert (mNonZero.empty());
+    reevaluateRedundancyElimination = false;
     redundancyElimination(entryScope, expressions, variables);
     assert (mNonZero.empty());
+
 }
 
 #ifndef NDEBUG
@@ -218,6 +214,8 @@ bool safe_replacement(const PabloAST * repl, const Statement * expr) {
     return dominates(repl, expr);
 }
 #endif
+
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief redundancyElimination
@@ -375,25 +373,19 @@ Statement * evaluateBranch(Branch * const br, ExpressionTable & expressions, Var
     }
 
     // Process the Branch body
-    ExpressionTable nestedExpressions(&expressions);
-
     bool hasSideEffects = false;
 
-    auto processBranchBody = [&]() {
-        mNonZero.push_back(cond); // mark the cond as non-zero prior to processing the inner scope.
-        hasSideEffects = redundancyElimination(br->getBody(), nestedExpressions, nestedVariables);
-        assert (mNonZero.back() == cond);
-        mNonZero.pop_back();
-    };
+    ExpressionTable nestedExpressions(&expressions);
+    mNonZero.push_back(cond); // mark the cond as non-zero prior to processing the inner scope.
+    hasSideEffects = redundancyElimination(br->getBody(), nestedExpressions, nestedVariables);
+    assert (mNonZero.back() == cond);
+    mNonZero.pop_back();
 
-    processBranchBody();
     // If this block has a branch statement leading into it, we can verify whether an escaped value
     // was updated within this block and update the preceeding block's variable state appropriately.
     if (phiEscapedVars(br, escaped, nestedVariables, variables)) {
-        // If we modified the escaped vars, reevaluate the branch.
-        nestedExpressions.clear();
         subsituteCondValue();
-        processBranchBody();
+        reevaluateRedundancyElimination = true;
     }
 
     // Check whether the cost of testing the condition and taking the branch with
@@ -1263,14 +1255,16 @@ bool deadCodeElimination(PabloBlock * const block, LiveVarSet & liveSet, const b
                 }
             } else if (LLVM_UNLIKELY(isa<Assign>(stmt))) {
                 Var * const var = cast<Assign>(stmt)->getVariable();
-                // Since we are reading the AST in reverse, an assignment to a var marks the
-                // "end" of a local var's life.
-                if (LLVM_LIKELY(liveSet.remove(var))) {
-                    PabloAST * const value = cast<Assign>(stmt)->getValue();
-                    if (LLVM_UNLIKELY(isa<Var>(value))) {
-                        liveSet.put(cast<Var>(value));
+                PabloAST * const value = cast<Assign>(stmt)->getValue();
+                if (LLVM_LIKELY(value != var)) {
+                    // Since we are reading the AST in reverse, an assignment to a var marks the
+                    // "end" of a local var's life.
+                    if (LLVM_LIKELY(liveSet.remove(var))) {
+                        if (LLVM_UNLIKELY(isa<Var>(value))) {
+                            liveSet.put(cast<Var>(value));
+                        }
+                        continue;
                     }
-                    continue;
                 }
             }
             if (LLVM_LIKELY(!inspect && !sideEffecting)) {
