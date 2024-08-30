@@ -171,17 +171,6 @@ Kernel * PipelineBuilder::makeKernel() {
     const auto numOfKernels = kernels.size();
     const auto numOfCalls = calls.size();
 
-    // TODO: optimization must be able to synchronize non-InternallySynchronized kernels to
-    // allow the following.
-
-//    if (LLVM_UNLIKELY(numOfKernels <= 1 && numOfCalls == 0 && !mRequiresPipeline)) {
-//        if (numOfKernels == 0) {
-//            return nullptr;
-//        } else {
-//            return mKernels.back();
-//        }
-//    }
-
     auto & signature = mTarget->mSignature;
 
     unsigned numOfNestedKernelFamilyCalls = 0;
@@ -635,6 +624,7 @@ PipelineBuilder::PipelineBuilder(BaseDriver & driver, PipelineKernel * const ker
     auto & A = mTarget->mInputScalars;
     for (unsigned i = 0; i < A.size(); i++) {
         Binding & input = A[i];
+        assert (input.getRelationship());
         if (input.getRelationship() == nullptr) {
             input.setRelationship(driver.CreateScalar(input.getType()));
         }
@@ -642,6 +632,7 @@ PipelineBuilder::PipelineBuilder(BaseDriver & driver, PipelineKernel * const ker
     auto & B = mTarget->mInputStreamSets;
     for (unsigned i = 0; i < B.size(); i++) {
         Binding & input = B[i];
+        assert (input.getRelationship());
         if (LLVM_UNLIKELY(input.getRelationship() == nullptr)) {
             report_fatal_error(StringRef(input.getName()) + " must be set upon construction");
         }
@@ -649,6 +640,7 @@ PipelineBuilder::PipelineBuilder(BaseDriver & driver, PipelineKernel * const ker
     auto & C = mTarget->mOutputStreamSets;
     for (unsigned i = 0; i < C.size(); i++) {
         Binding & output = C[i];
+        assert (output.getRelationship());
         if (LLVM_UNLIKELY(output.getRelationship() == nullptr)) {
             report_fatal_error(StringRef(output.getName()) + " must be set upon construction");
         }
@@ -656,6 +648,7 @@ PipelineBuilder::PipelineBuilder(BaseDriver & driver, PipelineKernel * const ker
     auto & D = mTarget->mOutputScalars;
     for (unsigned i = 0; i < D.size(); i++) {
         Binding & output = D[i];
+        assert (output.getRelationship());
         if (output.getRelationship() == nullptr) {
             output.setRelationship(driver.CreateScalar(output.getType()));
         }
@@ -697,17 +690,17 @@ std::shared_ptr<OptimizationBranchBuilder> PipelineBuilder::CreateOptimizationBr
     auto allZeroScalarOutputs = nonZeroScalarOutputs;
 
     PipelineKernel * const allZero =
-        new PipelineKernel(mDriver,
+        new PipelineKernel(mDriver, {},
                            std::move(allZeroStreamInputs), std::move(allZeroStreamOutputs),
                            std::move(allZeroScalarInputs), std::move(allZeroScalarOutputs));
 
     PipelineKernel * const nonZero =
-        new PipelineKernel(mDriver,
+        new PipelineKernel(mDriver, {},
                            std::move(nonZeroStreamInputs), std::move(nonZeroStreamOutputs),
                            std::move(nonZeroScalarInputs), std::move(nonZeroScalarOutputs));
 
     PipelineKernel * const branch =
-        new PipelineKernel(mDriver,
+        new PipelineKernel(mDriver, {},
                            std::move(stream_inputs), std::move(stream_outputs),
                            std::move(scalar_inputs), std::move(scalar_outputs));
 

@@ -1537,11 +1537,13 @@ Kernel::Kernel(LLVMTypeSystemInterface & ts,
 
 Kernel::Kernel(LLVMTypeSystemInterface & ts,
                const TypeId typeId,
+               AttributeSet && attributes,
                Bindings && stream_inputs,
                Bindings && stream_outputs,
                Bindings && scalar_inputs,
                Bindings && scalar_outputs)
-: mTypeId(typeId)
+: AttributeSet(std::move(attributes))
+, mTypeId(typeId)
 , mStride(ts.getBitBlockWidth())
 , mInputStreamSets(std::move(stream_inputs))
 , mOutputStreamSets(std::move(stream_outputs))

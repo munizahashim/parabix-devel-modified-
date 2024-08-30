@@ -212,10 +212,9 @@ preprocessFunctionType preprocessPipeline(CPUDriver & driver) {
 }
 
 StreamSetPtr preprocess(preprocessFunctionType preprocess) {
-    std::string fileName = inputFiles[0];
     const auto fd = open(inputFiles[0].c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
-        std::cerr << "Error: cannot open " << fileName << " for processing.\n";
+        std::cerr << "Error: cannot open " << inputFiles[0] << " for processing.\n";
         exit(-1);
     }
     StreamSetPtr chStream;

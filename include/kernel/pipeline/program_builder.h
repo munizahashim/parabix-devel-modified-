@@ -29,15 +29,26 @@ private:
 struct streamset_t {
 
     template<typename... Attrs>
-    constexpr streamset_t(int elementCount, int fieldWidth, Attrs &&... attrs)
+    explicit constexpr streamset_t(int elementCount, int fieldWidth, Attrs &&... attrs)
     : ElementCount(elementCount)
     , FieldWidth(fieldWidth)
+    , StreamSet(nullptr)
+    , AnnotatedProcessingRate(kernel::detail::annotateProcessingRate<Attrs...>(std::forward<Attrs>(attrs)...)) {
+
+    }
+
+    template<typename... Attrs>
+    explicit constexpr streamset_t(kernel::StreamSet * streamSet, Attrs &&... attrs)
+    : ElementCount(0)
+    , FieldWidth(0)
+    , StreamSet(streamSet)
     , AnnotatedProcessingRate(kernel::detail::annotateProcessingRate<Attrs...>(std::forward<Attrs>(attrs)...)) {
 
     }
 
     const int ElementCount;
     const int FieldWidth;
+    kernel::StreamSet * const StreamSet;
     kernel::detail::AnnotatedProcessingRate AnnotatedProcessingRate;
 };
 
@@ -53,19 +64,17 @@ struct Input {
 };
 
 template <>
-struct Input<streamset_t> {
+struct Input<streamset_t> : public streamset_t {
 
     template<typename ... ValueArgs>
     Input(std::string && name, ValueArgs &&... args)
-    : Name(std::move(name))
-    , Value(std::forward<ValueArgs>(args)...) {
+    : streamset_t(std::forward<ValueArgs>(args)...)
+    , Name(std::move(name)) {
 
     }
 
     std::string Name;
-    streamset_t Value;
 };
-
 
 template <typename T>
 struct Output {
@@ -79,18 +88,33 @@ struct Output {
 };
 
 template <>
-struct Output<streamset_t>  {
+struct Output<streamset_t> : public streamset_t {
 
     template<typename ... ValueArgs>
     explicit Output(std::string name, ValueArgs &&... args)
-    : Name(std::move(name))
-    , Value(std::forward<ValueArgs>(args)...) {
+    : streamset_t(std::forward<ValueArgs>(args)...)
+    , Name(std::move(name)) {
 
     }
 
     std::string Name;
-    streamset_t Value;
 };
+
+struct Signature {
+
+    explicit Signature(std::string && signature)
+    : SignatureValue(std::move(signature)) {
+
+    }
+
+    Signature(llvm::StringRef signature)
+    : SignatureValue(signature.str()) {
+
+    }
+
+    std::string SignatureValue;
+};
+
 
 namespace { /* anonymous */
 
@@ -233,77 +257,77 @@ struct extract_args<Output<streamset_t>, Rest...> {
     static constexpr auto OutputStreamSetCount = extract_args<Rest...>::OutputStreamSetCount + 1;
 };
 
+struct PipelineConfig {
+    Bindings InputScalars;
+    Bindings OutputScalars;
+    Bindings InputStreamSets;
+    Bindings OutputStreamSets;
+    AttributeSet Attributes;
+};
+
+inline void append_arg(BaseDriver & driver,
+                       PipelineConfig & config,
+                       Signature && S) {
+    /* TODO */
+}
+
+inline void append_arg(BaseDriver & driver,
+                       PipelineConfig & config,
+                       Attribute && A) {
+    config.Attributes.addAttribute(A);
+}
+
 template<typename InputType>
 inline void append_arg(BaseDriver & driver,
-                       Bindings & inputScalars, Bindings & /* outputScalars */,
-                       Bindings & inputStreamSets, Bindings & /* outputStreamSets */,
-                       Input<InputType> && f) {
+                       PipelineConfig & config,
+                       Input<InputType> && I) {
     if constexpr (std::is_base_of<streamset_t, InputType>::value) {
-        inputStreamSets.emplace_back(std::move(f.Name),
-                                     driver.CreateStreamSet(f.Value.ElementCount, f.Value.FieldWidth),
-                                     std::move(f.Value.AnnotatedProcessingRate));
+        StreamSet * streamSet = nullptr;
+        if (I.StreamSet) {
+            streamSet = I.StreamSet;
+        } else {
+            streamSet = driver.CreateStreamSet(I.ElementCount, I.FieldWidth);
+        }
+        config.InputStreamSets.emplace_back(std::move(I.Name), streamSet,  std::move(I.AnnotatedProcessingRate));
     } else {
         llvm::Type * const ty = llvm::TypeBuilder<InputType, false>::get(driver.getContext());
-        inputScalars.emplace_back(ty, f.Name, driver.CreateScalar(ty));
+        config.InputScalars.emplace_back(ty, I.Name, driver.CreateScalar(ty));
     }
 
 }
 
 template<typename OutputType>
 inline void append_arg(BaseDriver & driver,
-                       Bindings & /* inputScalars */, Bindings & outputScalars,
-                       Bindings & /* inputStreamSets */, Bindings & outputStreamSets,
-                       Output<OutputType> && f) {
+                       PipelineConfig & config,
+                       Output<OutputType> && O) {
     if constexpr (std::is_base_of<streamset_t, OutputType>::value) {
-        outputStreamSets.emplace_back(std::move(f.Name),
-                                      driver.CreateStreamSet(f.Value.ElementCount, f.Value.FieldWidth),
-                                      std::move(f.Value.AnnotatedProcessingRate));
+        StreamSet * streamSet = nullptr;
+        if (O.StreamSet) {
+            streamSet = O.StreamSet;
+        } else {
+            streamSet = driver.CreateStreamSet(O.ElementCount, O.FieldWidth);
+        }
+        config.OutputStreamSets.emplace_back(std::move(O.Name), streamSet,  std::move(O.AnnotatedProcessingRate));
     } else {
         llvm::Type * const ty = llvm::TypeBuilder<OutputType, false>::get(driver.getContext());
-        outputScalars.emplace_back(ty, f.Name, driver.CreateScalar(ty));
+        config.OutputScalars.emplace_back(ty, O.Name, driver.CreateScalar(ty));
     }
 }
 
-//template<>
-//inline static void append_arg(BaseDriver & driver,
-//                       Bindings & /* inputScalars */, Bindings & /* outputScalars */,
-//                       Bindings & inputStreamSets, Bindings & /* outputStreamSets */,
-//                       Input<streamset_t> && f) {
-//    inputStreamSets.emplace_back(std::move(f.Name),
-//                                 driver.CreateStreamSet(f.Value.ElementCount, f.Value.FieldWidth),
-//                                 std::move(f.Value.AnnotatedProcessingRate));
-//}
-
-//template<>
-//inline static void append_arg(BaseDriver & driver,
-//                       Bindings & /* inputScalars */, Bindings & /* outputScalars */,
-//                       Bindings & /* inputStreamSets */, Bindings & outputStreamSets,
-//                       Output<streamset_t> && f) {
-//    outputStreamSets.emplace_back(std::move(f.Name),
-//                                  driver.CreateStreamSet(f.Value.ElementCount, f.Value.FieldWidth),
-//                                  std::move(f.Value.AnnotatedProcessingRate));
-//}
-
 template<typename... Fs>
 inline void append_args(BaseDriver & driver,
-                        Bindings & inputScalars, Bindings & outputScalars,
-                        Bindings & inputStreamSets, Bindings & outputStreamSets,
-                        Fs &&... fs);
-
-template<>
-inline void append_args(BaseDriver & driver,
-                        Bindings & inputScalars, Bindings & outputScalars,
-                        Bindings & inputStreamSets, Bindings & outputStreamSets) {
+                        PipelineConfig & config,
+                        Fs &&... fs) {
+    static_assert(sizeof...(Fs) == 0, "compilation error");
     /* do nothing */
 }
 
 template<typename F, typename... Fs>
 inline void append_args(BaseDriver & driver,
-                        Bindings & inputScalars, Bindings & outputScalars,
-                        Bindings & inputStreamSets, Bindings & outputStreamSets,
+                        PipelineConfig & config,
                         F f, Fs &&... fs) {
-    append_arg(driver, inputScalars, outputScalars, inputStreamSets, outputStreamSets, std::forward<F>(f));
-    append_args(driver, inputScalars, outputScalars, inputStreamSets, outputStreamSets, std::forward<Fs>(fs)...);
+    append_arg(driver, config, std::forward<F>(f));
+    append_args(driver, config, std::forward<Fs>(fs)...);
 }
 
 
@@ -313,7 +337,7 @@ inline void append_args(BaseDriver & driver,
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ProgramBuilder
  ** ------------------------------------------------------------------------------------------------------------- */
-template<typename ... Args>
+template<typename PipelineKernelType, typename ... Args>
 class TypedProgramBuilder final : public ProgramBuilder {
     friend class ::BaseDriver;
 
@@ -337,34 +361,30 @@ public:
 
 private:
 
-    static PipelineKernel * constructKernel(BaseDriver & driver, Args &&... args) {
-        Bindings scalar_inputs{};
+    static PipelineKernelType * constructKernel(BaseDriver & driver, Args &&... args) {
+
+        PipelineConfig config;
         constexpr auto inputScalarCount = extract_args<Args...>::InputScalarCount;
-        if constexpr (inputScalarCount > 0) scalar_inputs.reserve(inputScalarCount);
-
-        Bindings scalar_outputs{};
+        if constexpr (inputScalarCount > 0) config.InputScalars.reserve(inputScalarCount);
         constexpr auto outputScalarCount = extract_args<Args...>::OutputScalarCount;
-        if constexpr (outputScalarCount > 0) scalar_outputs.reserve(outputScalarCount);
-
-        Bindings stream_inputs{};
+        if constexpr (outputScalarCount > 0) config.OutputScalars.reserve(outputScalarCount);
         constexpr auto inputStreamSetCount = extract_args<Args...>::InputStreamSetCount;
-        if constexpr (inputStreamSetCount > 0) stream_inputs.reserve(inputStreamSetCount);
-
-        Bindings stream_outputs{};
+        if constexpr (inputStreamSetCount > 0) config.InputStreamSets.reserve(inputStreamSetCount);
         constexpr auto outputStreamSetCount = extract_args<Args...>::OutputStreamSetCount;
-        if constexpr (outputStreamSetCount > 0) stream_outputs.reserve(outputStreamSetCount);
+        if constexpr (outputStreamSetCount > 0) config.OutputStreamSets.reserve(outputStreamSetCount);
 
-        append_args(driver, scalar_inputs, scalar_outputs, stream_inputs, stream_outputs, std::forward<Args>(args)...);
+        append_args(driver, config, std::forward<Args>(args)...);
 
-        assert (scalar_inputs.size() == inputScalarCount);
-        assert (scalar_outputs.size() == outputScalarCount);
-        assert (stream_inputs.size() == inputStreamSetCount);
-        assert (stream_outputs.size() == outputStreamSetCount);
+        assert (config.InputScalars.size() == inputScalarCount);
+        assert (config.OutputScalars.size() == outputScalarCount);
+        assert (config.InputStreamSets.size() == inputStreamSetCount);
+        assert (config.OutputStreamSets.size() == outputStreamSetCount);
 
-        PipelineKernel * const pipeline =
-            new PipelineKernel(driver,
-                               std::move(stream_inputs), std::move(stream_outputs),
-                               std::move(scalar_inputs), std::move(scalar_outputs));
+        PipelineKernelType * const pipeline =
+            new PipelineKernelType(driver,
+                                  std::move(config.Attributes),
+                                  std::move(config.InputStreamSets), std::move(config.OutputStreamSets),
+                                  std::move(config.InputScalars), std::move(config.OutputScalars));
         return pipeline;
     }
 
@@ -378,18 +398,24 @@ namespace {
 // compile time.
 
 template<typename T>
-struct ordering_rank;
+struct ordering_rank {
+    constexpr static unsigned value = std::is_base_of_v<Attribute, T> ? 6 : 0; // attribute or unknown type id
+};
+
+template<>
+struct ordering_rank<Signature> {
+    constexpr static unsigned value = 1;
+};
 
 template<typename U>
 struct ordering_rank<Input<U>> {
-    constexpr static unsigned value = std::is_same_v<streamset_t, U> ? 0 : 2;
+    constexpr static unsigned value = std::is_same_v<streamset_t, U> ? 2 : 4;
 };
 
 template<typename U>
 struct ordering_rank<Output<U>> {
-    constexpr static unsigned value = std::is_same_v<streamset_t, U> ? 1 : 3;
+    constexpr static unsigned value = std::is_same_v<streamset_t, U> ? 3 : 5;
 };
-
 
 template<size_t i, typename ...Args>
 constexpr bool ordering_constraints() {
@@ -398,6 +424,8 @@ constexpr bool ordering_constraints() {
     } else {
         using U = typename std::tuple_element<i, std::tuple<Args...>>::type;
         using V = typename std::tuple_element<i + 1, std::tuple<Args...>>::type;
+        static_assert(ordering_rank<U>::value > 0 && ordering_rank<V>::value > 0,
+        "CreatePipeline and CreateNestedPipeline can accept only Signature, Input<X> and Output<Y> arguments");
         if constexpr (ordering_rank<U>::value > ordering_rank<V>::value) {
             return false;
         }
@@ -405,39 +433,22 @@ constexpr bool ordering_constraints() {
     }
 }
 
-
-//// accept any 0 or 1 arg cases
-//template<typename T, typename = void>
-//struct ordering_constraints : std::true_type {};
-//// by default, everything is valid ...
-//template<typename U, typename V, typename ...Rest>
-//struct ordering_constraints<std::tuple<U, V, Rest...>, void> : ordering_constraints<std::tuple<V, Rest...>, void> {};
-
-//// except when outputs are ordered before inputs
-//template<typename U,  typename V, typename ...Rest, typename std::enable_if_t<!std::is_base_of_v<streamset_t, V>> E>
-//struct ordering_constraints<std::tuple<Output<U>, Input<V>, Rest...>, E> :  std::false_type {};
-
-//// but we do want the output streamsets to be before the input scalars
-//template<typename V, typename ...Rest, typename E = std::is_base_of_v<streamset_t, V>>
-//struct ordering_constraints<std::tuple<Output<streamset_t>, Input<V>, Rest...>, E> : ordering_constraints<std::tuple<V, Rest...>, E> {};
-
-// and cannot allow any scalars before streamsets
-//template<typename V, typename ...Rest, typename std::enable_if_t<!std::is_base_of_v<streamset_t, V>, bool> E>
-//struct ordering_constraints<std::tuple<Input<V>, Input<streamset_t>, Rest...>, E> : std::false_type {};
-//template<typename V, typename ...Rest, typename std::enable_if_t<!std::is_base_of_v<streamset_t, V>, bool> E>
-//struct ordering_constraints<std::tuple<Input<V>, Output<streamset_t>, Rest...>, E> : std::false_type {};
-//template<typename V, typename ...Rest, typename std::enable_if_t<!std::is_base_of_v<streamset_t, V>, bool> E>
-//struct ordering_constraints<std::tuple<Output<V>, Input<streamset_t>, Rest...>, E> : std::false_type {};
-//template<typename V, typename ...Rest, typename std::enable_if_t<!std::is_base_of_v<streamset_t, V>, bool> E>
-//struct ordering_constraints<std::tuple<Output<V>, Output<streamset_t>, Rest...>, E> : std::false_type {};
-
 } /* end of anonymous namespace */
 
 template<typename ... Args>
-TypedProgramBuilder<Args...> CreatePipeline(BaseDriver & driver, Args... args) {
+TypedProgramBuilder<PipelineKernel, Args...> CreatePipeline(BaseDriver & driver, Args... args) {
     static_assert(ordering_constraints<0, Args...>(),
-    "Program I/O orderings must have streamsets before scalars and inputs before outputs.");
-    return TypedProgramBuilder<Args...>{driver, std::forward<Args>(args)...};
+    "Program I/O orderings must have signatures before streamsets or scalars and streamsets before scalars and inputs before outputs.");
+    return TypedProgramBuilder<PipelineKernel, Args...>{driver, std::forward<Args>(args)...};
+}
+
+template<class KernelType, typename ... Args>
+TypedProgramBuilder<KernelType, Args...> CreateNestedPipeline(BaseDriver & driver, Args... args) {
+    static_assert(std::is_base_of_v<PipelineKernel, KernelType>,
+    "Pipeline kernel type must be a subtype of PipelineKernel");
+    static_assert(ordering_constraints<0, Args...>(),
+    "Program I/O orderings must have signatures before streamsets or scalars and streamsets before scalars and inputs before outputs.");
+    return TypedProgramBuilder<KernelType, Args...>{driver, std::forward<Args>(args)...};
 }
 
 }

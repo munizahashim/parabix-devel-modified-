@@ -31,7 +31,7 @@ class PipelineKernel : public Kernel {
     friend class PipelineAnalysis;
     friend class PipelineBuilder;
     friend class ProgramBuilder;
-    template<typename ... Args>
+    template<typename PipelineKernelType, typename ... Args>
     friend class TypedProgramBuilder;
     friend class ::BaseDriver;
 public:
@@ -140,6 +140,7 @@ protected:
                    LengthAssertions && lengthAssertions);
 
     PipelineKernel(LLVMTypeSystemInterface & ts,
+                   AttributeSet && attributes,
                    Bindings && stream_inputs, Bindings && stream_outputs,
                    Bindings && scalar_inputs, Bindings && scalar_outputs);
 

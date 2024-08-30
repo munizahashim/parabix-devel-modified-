@@ -554,6 +554,7 @@ protected:
     // Constructor used by pipeline
     Kernel(LLVMTypeSystemInterface & ts,
            const TypeId typeId,
+           AttributeSet && attributes,
            Bindings &&stream_inputs, Bindings &&stream_outputs,
            Bindings &&scalar_inputs, Bindings &&scalar_outputs);
 
