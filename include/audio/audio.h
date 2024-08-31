@@ -31,7 +31,7 @@ namespace audio
         const unsigned int &numSamples);
 
     void ParseAudioBuffer(
-        const std::unique_ptr<ProgramBuilder> &P,
+        ProgramBuilder & P,
         Scalar *const fileDescriptor,
         unsigned int numChannels,
         unsigned int bitsPerSample,
@@ -39,7 +39,7 @@ namespace audio
         const bool& splitChannels = true);
 
     void ParseAudioBuffer(
-        const std::unique_ptr<ProgramBuilder> &P,
+        ProgramBuilder & P,
         Scalar *const buffer,
         Scalar *const length,
         unsigned int numChannels,
@@ -47,20 +47,19 @@ namespace audio
         std::vector<StreamSet *> &outputDataStreams,
         const bool& splitChannels = true);
 
-    void S2P(
-        const std::unique_ptr<ProgramBuilder> &P,
+    void S2P(ProgramBuilder &P,
         unsigned int bitsPerSample,
         StreamSet * const inputStream,
         StreamSet *&outputStreams);
 
     void P2S(
-        const std::unique_ptr<ProgramBuilder> &P,
+        ProgramBuilder &P,
         StreamSet * const inputStreams,
         StreamSet *&outputStream);
 
     class FlexS2PKernel final : public MultiBlockKernel {
     public:
-        FlexS2PKernel(kernel::KernelBuilder & b, 
+        FlexS2PKernel(LLVMTypeSystemInterface & b,
                 const unsigned int bitsPerSample,
                 StreamSet * const inputStream,
                 StreamSet * const outputStreams);
@@ -73,7 +72,7 @@ namespace audio
 
     class DiscontinuityKernel final : public PabloKernel {
     public:
-        DiscontinuityKernel(kernel::KernelBuilder & b,
+        DiscontinuityKernel(LLVMTypeSystemInterface & b,
                 StreamSet * const inputStreams,
                 const unsigned int& threshold,
                 StreamSet * const markStream);
@@ -86,7 +85,7 @@ namespace audio
 
     class Stereo2MonoPabloKernel final : public PabloKernel {
     public:
-        Stereo2MonoPabloKernel(kernel::KernelBuilder & b,
+        Stereo2MonoPabloKernel(LLVMTypeSystemInterface & b,
                 StreamSet * const firstInputStreams,
                 StreamSet * const secondInputStreams,
                 StreamSet * const outputStreams);
@@ -96,7 +95,7 @@ namespace audio
 
     class AmplifyPabloKernel final : public PabloKernel {
     public:
-        AmplifyPabloKernel(kernel::KernelBuilder & b,
+        AmplifyPabloKernel(LLVMTypeSystemInterface & b,
                 const unsigned int bitsPerSample,
                 StreamSet * const inputStreams,
                 const unsigned int& factor,
@@ -112,7 +111,7 @@ namespace audio
 
     class ConcatenateKernel final : public PabloKernel {
     public:
-        ConcatenateKernel(kernel::KernelBuilder & b,
+        ConcatenateKernel(LLVMTypeSystemInterface & b,
                 StreamSet *const firstInputStreams,
                 StreamSet *const secondInputStreams,
                 StreamSet * const outputStreams);

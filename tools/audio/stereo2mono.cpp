@@ -8,7 +8,7 @@
 #include <re/adt/re_re.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/core/streamsetptr.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/streamutils/stream_select.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
@@ -28,51 +28,53 @@ using namespace audio;
 
 #define SHOW_STREAM(name)           \
     if (codegen::EnableIllustrator) \
-    P->captureBitstream(#name, name)
+    P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name)           \
     if (codegen::EnableIllustrator) \
-    P->captureBixNum(#name, name)
+    P.captureBixNum(#name, name)
 #define SHOW_BYTES(name)            \
     if (codegen::EnableIllustrator) \
-    P->captureByteData(#name, name)
+    P.captureByteData(#name, name)
 
 static cl::OptionCategory DemoOptions("Demo Options", "Demo control options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(DemoOptions));
 static cl::opt<std::string> outputFile("o", cl::desc("Specify a file to save the modified .wav file."), cl::cat(DemoOptions));
 
 typedef void (*PipelineFunctionType)(StreamSetPtr & ss_buf, int32_t fd);
-PipelineFunctionType generatePipeline(CPUDriver &pxDriver, const unsigned int& numChannels, const unsigned int& bitsPerSample)
-{
-    StreamSet * OutputBytes = pxDriver.CreateStreamSet(1,bitsPerSample);
 
-    auto &b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipelineWithIO({}, {Bind("OutputBytes", OutputBytes, ReturnedBuffer(1))}, 
-                                             {Binding{b.getInt32Ty(), "inputFileDecriptor"}});
-    Scalar * const fileDescriptor = P->getInputScalar("inputFileDecriptor");
+PipelineFunctionType generatePipeline(CPUDriver & pxDriver, const unsigned int& numChannels, const unsigned int& bitsPerSample)
+{
+
+    auto P = CreatePipeline(pxDriver,
+                            Output<streamset_t>("OutputBytes", 1, bitsPerSample, ReturnedBuffer(1)),
+                            Input<int32_t>("inputFileDecriptor"));
+
+    Scalar * const fileDescriptor = P.getInputScalar("inputFileDecriptor");
 
     std::vector<StreamSet *> ChannelSampleStreams(numChannels);
     for (unsigned i=0;i<numChannels;++i)
     {
-        ChannelSampleStreams[i] = P->CreateStreamSet(1,bitsPerSample);
+        ChannelSampleStreams[i] = P.CreateStreamSet(1,bitsPerSample);
     }
     ParseAudioBuffer(P, fileDescriptor, numChannels, bitsPerSample, ChannelSampleStreams);
 
-    StreamSet *FirstChannelBasisBits = P->CreateStreamSet(bitsPerSample);
+    StreamSet *FirstChannelBasisBits = P.CreateStreamSet(bitsPerSample);
     S2P(P, bitsPerSample, ChannelSampleStreams[0], FirstChannelBasisBits);
     //SHOW_STREAM(FirstChannelBasisBits);
 
-    StreamSet *SecondChannelBasisBits = P->CreateStreamSet(bitsPerSample);
+    StreamSet *SecondChannelBasisBits = P.CreateStreamSet(bitsPerSample);
     S2P(P, bitsPerSample, ChannelSampleStreams[1], SecondChannelBasisBits);
     //SHOW_STREAM(SecondChannelBasisBits);
 
-    StreamSet *MonoBasisBits = P->CreateStreamSet(bitsPerSample);
-    P->CreateKernelCall<Stereo2MonoPabloKernel>(FirstChannelBasisBits, SecondChannelBasisBits, MonoBasisBits);   
+    StreamSet *MonoBasisBits = P.CreateStreamSet(bitsPerSample);
+    P.CreateKernelCall<Stereo2MonoPabloKernel>(FirstChannelBasisBits, SecondChannelBasisBits, MonoBasisBits);
     //SHOW_STREAM(MonoBasisBits);
 
+    StreamSet * OutputBytes = P.getOutputStreamSet(0);
     P2S(P, MonoBasisBits, OutputBytes);
     SHOW_BYTES(OutputBytes);
 
-    return reinterpret_cast<PipelineFunctionType>(P->compile());
+    return P.compile();
 }
 
 int main(int argc, char *argv[])

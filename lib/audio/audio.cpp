@@ -14,23 +14,24 @@
 #include <pablo/bixnum/bixnum.h>
 #include <pablo/pe_ones.h>
 #include <pablo/pe_zeroes.h>
+#include <kernel/pipeline/program_builder.h>
 
 #define SHOW_STREAM(name)           \
     if (codegen::EnableIllustrator) \
-    P->captureBitstream(#name, name)
+    P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name)           \
     if (codegen::EnableIllustrator) \
-    P->captureBixNum(#name, name)
+    P.captureBixNum(#name, name)
 #define SHOW_BYTES(name)            \
     if (codegen::EnableIllustrator) \
-    P->captureByteData(#name, name)
+    P.captureByteData(#name, name)
 
 #define NUM_HEADER_BYTES 44
 
 namespace audio
 {
     void ParseAudioBuffer(
-        const std::unique_ptr<ProgramBuilder> &P,
+        ProgramBuilder & P,
         Scalar *const fileDescriptor,
         unsigned int numChannels,
         unsigned int bitsPerSample,
@@ -50,18 +51,18 @@ namespace audio
         if (numChannels == 2 && splitChannels)
         {
             unsigned SampleStreamFW = (splitChannels) ? bitsPerSample * numChannels : bitsPerSample;
-            StreamSet *SampleStream = P->CreateStreamSet(1, SampleStreamFW);
-            P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, SampleStream);
-            P->CreateKernelCall<Split2Kernel>(bitsPerSample, SampleStream, outputDataStreams[0], outputDataStreams[1]);
+            StreamSet *SampleStream = P.CreateStreamSet(1, SampleStreamFW);
+            P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, SampleStream);
+            P.CreateKernelCall<Split2Kernel>(bitsPerSample, SampleStream, outputDataStreams[0], outputDataStreams[1]);
         }
         else
         {
-            P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, outputDataStreams[0]);
+            P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, outputDataStreams[0]);
         }
     }
 
     void ParseAudioBuffer(
-        const std::unique_ptr<ProgramBuilder> &P,
+        ProgramBuilder & P,
         Scalar *const buffer,
         Scalar *const length,
         unsigned int numChannels,
@@ -82,13 +83,13 @@ namespace audio
         if (numChannels == 2 && splitChannels)
         {
             unsigned SampleStreamFW = (splitChannels) ? bitsPerSample * numChannels : bitsPerSample;
-            StreamSet *SampleStream = P->CreateStreamSet(1, SampleStreamFW);
-            P->CreateKernelCall<MemorySourceKernel>(buffer, length, SampleStream);
-            P->CreateKernelCall<Split2Kernel>(bitsPerSample, SampleStream, outputDataStreams[0], outputDataStreams[1]);
+            StreamSet *SampleStream = P.CreateStreamSet(1, SampleStreamFW);
+            P.CreateKernelCall<MemorySourceKernel>(buffer, length, SampleStream);
+            P.CreateKernelCall<Split2Kernel>(bitsPerSample, SampleStream, outputDataStreams[0], outputDataStreams[1]);
         }
         else
         {
-            P->CreateKernelCall<MemorySourceKernel>(buffer, length, outputDataStreams[0]);
+            P.CreateKernelCall<MemorySourceKernel>(buffer, length, outputDataStreams[0]);
         }
     }
 
@@ -222,25 +223,25 @@ namespace audio
     }
 
     void S2P(
-        const std::unique_ptr<ProgramBuilder> &P,
+        ProgramBuilder &P,
         unsigned int bitsPerSample,
         StreamSet *const inputStream,
         StreamSet *&outputStreams)
     {
         if (bitsPerSample == 16)
         {
-            StreamSet *LowStream = P->CreateStreamSet(1, 8);
-            StreamSet *HighStream = P->CreateStreamSet(1, 8);
-            P->CreateKernelCall<Split2Kernel>(8, inputStream, LowStream, HighStream);
-            StreamSet *LowBitBasisStream = P->CreateStreamSet(8);
-            StreamSet *HighBitBasisStream = P->CreateStreamSet(8);
-            P->CreateKernelCall<S2PKernel>(LowStream, LowBitBasisStream);
-            P->CreateKernelCall<S2PKernel>(HighStream, HighBitBasisStream);
-            P->CreateKernelCall<ConcatenateKernel>(LowBitBasisStream, HighBitBasisStream, outputStreams);
+            StreamSet *LowStream = P.CreateStreamSet(1, 8);
+            StreamSet *HighStream = P.CreateStreamSet(1, 8);
+            P.CreateKernelCall<Split2Kernel>(8, inputStream, LowStream, HighStream);
+            StreamSet *LowBitBasisStream = P.CreateStreamSet(8);
+            StreamSet *HighBitBasisStream = P.CreateStreamSet(8);
+            P.CreateKernelCall<S2PKernel>(LowStream, LowBitBasisStream);
+            P.CreateKernelCall<S2PKernel>(HighStream, HighBitBasisStream);
+            P.CreateKernelCall<ConcatenateKernel>(LowBitBasisStream, HighBitBasisStream, outputStreams);
         }
         else if (bitsPerSample == 8)
         {
-            P->CreateKernelCall<S2PKernel>(inputStream, outputStreams);
+            P.CreateKernelCall<S2PKernel>(inputStream, outputStreams);
         }
         else
         {
@@ -248,18 +249,17 @@ namespace audio
         }
     }
 
-    void P2S(
-        const std::unique_ptr<ProgramBuilder> &P,
+    void P2S(ProgramBuilder &P,
         StreamSet *const inputStreams,
         StreamSet *&outputStream)
     {
         if (inputStreams->getNumElements() == 16)
         {
-            P->CreateKernelCall<P2S16Kernel>(inputStreams, outputStream);
+            P.CreateKernelCall<P2S16Kernel>(inputStreams, outputStream);
         }
         else if (inputStreams->getNumElements() == 8)
         {
-            P->CreateKernelCall<P2SKernel>(inputStreams, outputStream);
+            P.CreateKernelCall<P2SKernel>(inputStreams, outputStream);
         }
         else
         {
@@ -267,7 +267,7 @@ namespace audio
         }
     }
 
-    FlexS2PKernel::FlexS2PKernel(KernelBuilder &b, const unsigned int bitsPerSample, StreamSet *const inputStream, StreamSet *const outputStreams) 
+    FlexS2PKernel::FlexS2PKernel(LLVMTypeSystemInterface &b, const unsigned int bitsPerSample, StreamSet *const inputStream, StreamSet *const outputStreams)
         :
          bitsPerSample(bitsPerSample),
          MultiBlockKernel(b, "FlexS2PKernel_" + std::to_string(bitsPerSample),
@@ -330,7 +330,7 @@ namespace audio
         b.SetInsertPoint(exit);
     }
 
-    DiscontinuityKernel::DiscontinuityKernel(kernel::KernelBuilder &b, StreamSet *const inputStreams, const unsigned int &threshold, StreamSet *const markStream)
+    DiscontinuityKernel::DiscontinuityKernel(LLVMTypeSystemInterface &b, StreamSet *const inputStreams, const unsigned int &threshold, StreamSet *const markStream)
         : PabloKernel(b, "DiscontinuityKernel_" + std::to_string(inputStreams->getNumElements()) + "_" + std::to_string(threshold),
                       {Binding{"inputStreams", inputStreams, FixedRate(1), LookAhead(1)}},
                       {Binding{"markStream", markStream}}),
@@ -370,7 +370,7 @@ namespace audio
         pb.createAssign(pb.createExtract(result, pb.getInteger(0)), exceedThreshold);
     }
 
-    AmplifyPabloKernel::AmplifyPabloKernel(KernelBuilder &b, const unsigned int bitsPerSample, StreamSet *const inputStreams, const unsigned int &factor, StreamSet *const outputStreams)
+    AmplifyPabloKernel::AmplifyPabloKernel(LLVMTypeSystemInterface &b, const unsigned int bitsPerSample, StreamSet *const inputStreams, const unsigned int &factor, StreamSet *const outputStreams)
         : PabloKernel(b, "AmplifyPabloKernel_" + std::to_string(factor) + "_" + std::to_string(inputStreams->getNumElements()) + "_" + std::to_string(bitsPerSample),
                       {Binding{"inputStreams", inputStreams}},
                       {Binding{"outputStreams", outputStreams}}),
@@ -422,7 +422,7 @@ namespace audio
         }
     }
 
-    Stereo2MonoPabloKernel::Stereo2MonoPabloKernel(kernel::KernelBuilder &b, StreamSet *const firstInputStreams, StreamSet *const secondInputStreams, StreamSet *const outputStreams)
+    Stereo2MonoPabloKernel::Stereo2MonoPabloKernel(LLVMTypeSystemInterface &b, StreamSet *const firstInputStreams, StreamSet *const secondInputStreams, StreamSet *const outputStreams)
         : PabloKernel(b, "Stereo2MonoPabloKernel_" + std::to_string(firstInputStreams->getNumElements()),
                       {Binding{"firstInputStreams", firstInputStreams}, Binding{"secondInputStreams", secondInputStreams}},
                       {Binding{"outputStreams", outputStreams}})
@@ -457,7 +457,7 @@ namespace audio
         }
     }
 
-    ConcatenateKernel::ConcatenateKernel(KernelBuilder &b, StreamSet *const firstInputStreams, StreamSet *const secondInputStreams, StreamSet *const outputStreams)
+    ConcatenateKernel::ConcatenateKernel(LLVMTypeSystemInterface & b, StreamSet *const firstInputStreams, StreamSet *const secondInputStreams, StreamSet *const outputStreams)
         : PabloKernel(b, "ConcatenateKernel_" + std::to_string(firstInputStreams->getNumElements()) + "_" + std::to_string(secondInputStreams->getNumElements()),
                       {Binding{"firstInputStreams", firstInputStreams}, Binding{"secondInputStreams", secondInputStreams}},
                       {Binding{"outputStreams", outputStreams}}),

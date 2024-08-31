@@ -16,19 +16,10 @@ using namespace llvm;
 
 namespace audio 
 {
-    class CreateOnes : public PabloKernel {
-    public:
-        CreateOnes(KernelBuilder & kb, StreamSet * dataStream, StreamSet * onesStream)
-            : PabloKernel(kb, "CreateOnes",
-                        {Binding{"dataStream", dataStream}},
-                        {Binding{"onesStream", onesStream}}) {}
-    protected:
-        void generatePabloMethod() override;
-    };
 
     class SplitKernel final : public MultiBlockKernel {
     public:
-        SplitKernel(KernelBuilder & b,
+        SplitKernel(LLVMTypeSystemInterface & b,
                 const unsigned int bitsPerSample,
                 StreamSet * const inputStreams,
                 StreamSet * const outputStreams);
@@ -41,7 +32,7 @@ namespace audio
 
     class Split2Kernel final : public MultiBlockKernel {
     public:
-        Split2Kernel(KernelBuilder &b, const unsigned int bitsPerSample, StreamSet *const inputStream, StreamSet *const outputStream_1, StreamSet *const outputStream_2);
+        Split2Kernel(LLVMTypeSystemInterface &b, const unsigned int bitsPerSample, StreamSet *const inputStream, StreamSet *const outputStream_1, StreamSet *const outputStream_2);
     protected:
         void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
     private:
@@ -50,7 +41,7 @@ namespace audio
 
     class MergeKernel final : public MultiBlockKernel {
     public:
-        MergeKernel(KernelBuilder & b,
+        MergeKernel(LLVMTypeSystemInterface & b,
                 const unsigned int bitsPerSample,
                 StreamSet * const firstInputStream,
                 StreamSet * const secondInputStream,

@@ -7,7 +7,6 @@
 #include <re/adt/re_name.h>
 #include <re/adt/re_re.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/core/streamsetptr.h>
@@ -22,6 +21,7 @@
 #include <audio/stream_manipulation.h>
 #include <iostream>
 #include <util/aligned_allocator.h>
+#include <kernel/pipeline/program_builder.h>
 
 using namespace kernel;
 using namespace llvm;
@@ -30,13 +30,13 @@ using namespace audio;
 
 #define SHOW_STREAM(name)           \
     if (codegen::EnableIllustrator) \
-    P->captureBitstream(#name, name)
+    P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name)           \
     if (codegen::EnableIllustrator) \
-    P->captureBixNum(#name, name)
+    P.captureBixNum(#name, name)
 #define SHOW_BYTES(name)            \
     if (codegen::EnableIllustrator) \
-    P->captureByteData(#name, name)
+    P.captureByteData(#name, name)
 
 static cl::OptionCategory DemoOptions("Demo Options", "Demo control options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(DemoOptions));
@@ -44,19 +44,20 @@ static cl::opt<int> amplifyFactor("f", cl::desc("Amplify factor"), cl::Required,
 static cl::opt<std::string> outputFile("o", cl::desc("Specify a file to save the modified .wav file."), cl::cat(DemoOptions));
 
 typedef void (*PipelineFunctionType)(StreamSetPtr & ss_buf, int32_t fd);
-PipelineFunctionType generatePipeline(CPUDriver &pxDriver, const unsigned int& amplifyFactor, const unsigned int &numChannels, const unsigned int &bitsPerSample)
-{
-    StreamSet * OutputBytes = pxDriver.CreateStreamSet(1,bitsPerSample * numChannels);
 
-    auto &b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipelineWithIO({}, {Bind("OutputBytes", OutputBytes, ReturnedBuffer(1))}, 
-                                             {Binding{b.getInt32Ty(), "inputFileDecriptor"}});
-    Scalar * const fileDescriptor = P->getInputScalar("inputFileDecriptor");
+PipelineFunctionType generatePipeline(CPUDriver & pxDriver, const unsigned int& amplifyFactor, const unsigned int &numChannels, const unsigned int &bitsPerSample)
+{
+
+    auto P = CreatePipeline(pxDriver, Output<streamset_t>("OutputBytes", 1, bitsPerSample * numChannels, ReturnedBuffer(1)), Input<int32_t>("inputFileDecriptor"));
+
+    StreamSet * OutputBytes = P.getOutputStreamSet("OutputBytes");
+
+    Scalar * const fileDescriptor = P.getInputScalar("inputFileDecriptor");
 
     std::vector<StreamSet *> ChannelSampleStreams(numChannels);
     for (unsigned i=0;i<numChannels;++i)
     {
-        ChannelSampleStreams[i] = P->CreateStreamSet(1,bitsPerSample);
+        ChannelSampleStreams[i] = P.CreateStreamSet(1,bitsPerSample);
     }
 
     ParseAudioBuffer(P, fileDescriptor, numChannels, bitsPerSample, ChannelSampleStreams);
@@ -65,21 +66,21 @@ PipelineFunctionType generatePipeline(CPUDriver &pxDriver, const unsigned int& a
 
     for (unsigned i = 0; i < numChannels; ++i)
     {
-        StreamSet* BasisBits = P->CreateStreamSet(bitsPerSample);
+        StreamSet* BasisBits = P.CreateStreamSet(bitsPerSample);
         S2P(P, bitsPerSample, ChannelSampleStreams[i], BasisBits);
         //SHOW_BIXNUM(BasisBits);
-        StreamSet *AmplifiedBasisBits = P->CreateStreamSet(bitsPerSample);
-        P->CreateKernelCall<AmplifyPabloKernel>(bitsPerSample, BasisBits, amplifyFactor, AmplifiedBasisBits);
+        StreamSet *AmplifiedBasisBits = P.CreateStreamSet(bitsPerSample);
+        P.CreateKernelCall<AmplifyPabloKernel>(bitsPerSample, BasisBits, amplifyFactor, AmplifiedBasisBits);
         //SHOW_STREAM(AmplifiedBasisBits);
 
-        AmplifiedSampleStreams[i] = P->CreateStreamSet(1, bitsPerSample);
+        AmplifiedSampleStreams[i] = P.CreateStreamSet(1, bitsPerSample);
         P2S(P, AmplifiedBasisBits, AmplifiedSampleStreams[i]);
         //SHOW_BYTES(OutputStreams[i]);
     }
     
-    P->CreateKernelCall<MergeKernel>(bitsPerSample, AmplifiedSampleStreams[0], AmplifiedSampleStreams[1], OutputBytes);
+    P.CreateKernelCall<MergeKernel>(bitsPerSample, AmplifiedSampleStreams[0], AmplifiedSampleStreams[1], OutputBytes);
     SHOW_BYTES(OutputBytes);
-    return reinterpret_cast<PipelineFunctionType>(P->compile());
+    return P.compile();
 }
 
 int main(int argc, char *argv[])
