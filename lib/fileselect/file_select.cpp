@@ -241,7 +241,6 @@ void recursiveFileSelect(CPUDriver & driver,
 
     if (hasLocalIgnoreFile) {
         pathSelectEngine.push(coalesceREs(re::parseGitIgnoreFile(dirpath, ExcludePerDirectory), GitREcoalescing));
-        pathSelectEngine.grepCodeGen();
     }
     // Gather files and subdirectories.
     // TODO: verify whether these are discarded before recursion
@@ -382,9 +381,7 @@ std::vector<fs::path> getFullFileList(CPUDriver & driver, cl::list<std::string> 
 
     grep::NestedInternalSearchEngine pathSelectEngine(driver);
     pathSelectEngine.setRecordBreak(grep::GrepRecordBreakKind::Null);
-    pathSelectEngine.init();
     pathSelectEngine.push(coalesceREs(getIncludeExcludePatterns(), GitREcoalescing));
-    pathSelectEngine.grepCodeGen();
 
     const auto commandLineFileCandidates = fileCandidates.getCandidateCount();
     if (commandLineFileCandidates > 0) {

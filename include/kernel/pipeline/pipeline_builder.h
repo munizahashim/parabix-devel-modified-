@@ -40,16 +40,6 @@ public:
         return initializeKernel(kernel, flags);
     }
 
-    template<typename KernelType, typename... Args>
-    PipelineKernel * CreateNestedPipelineCall(Args &&... args) {
-        return initializeNestedPipeline(new KernelType(mDriver, std::forward<Args>(args) ...), 0U);
-    }
-
-    template<typename KernelType, typename... Args>
-    PipelineKernel * CreateNestedPipelineFamilyCall(Args &&... args) {
-        return initializeNestedPipeline(new KernelType(mDriver, std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::Family);
-    }
-
     std::shared_ptr<OptimizationBranchBuilder>
         CreateOptimizationBranch(Relationship * const condition,
                                  Bindings && stream_inputs = {}, Bindings && stream_outputs = {},
@@ -351,8 +341,6 @@ protected:
     PipelineBuilder(BaseDriver & driver, PipelineKernel * const kernel);
 
     Kernel * initializeKernel(Kernel * const kernel, const unsigned flags);
-
-    PipelineKernel * initializeNestedPipeline(PipelineKernel * const kernel, const unsigned flags);
 
 protected:
 

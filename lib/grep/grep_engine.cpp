@@ -822,110 +822,15 @@ void EmitMatch::finalize_match(char * buffer_end) {
     if (!mTerminated) *mResultStr << "\n";
 }
 
-class GrepColourizationPipeline : public PipelineKernel {
-public:
-    GrepColourizationPipeline(LLVMTypeSystemInterface & driver,
-                              StreamSet * SourceCoords,
-                              StreamSet * MatchSpans,
-                              StreamSet * Basis,
-                              Scalar * const callbackObject)
-        : PipelineKernel(driver
-                         // signature
-                         , [&]() -> std::string {
-                             return pablo::annotateKernelNameWithPabloDebugFlags("GrepColourization");
-                         }()
-                         // contains kernel family calls
-                         , false
-                         // kernel list
-                         , {}
-                         // called functions
-                         , {}
-                         // stream inputs
-                         , {Bind("SourceCoords", SourceCoords, GreedyRate(1), Deferred()),
-                            Bind("MatchSpans", MatchSpans, GreedyRate(), Deferred()),
-                            Bind("Basis", Basis, GreedyRate(), Deferred())}
-                         // stream outputs
-                         , {}
-                         // input scalars
-                         , {Binding{TypeBuilder<grep::GrepCallBackObject &, false>::get(driver.getContext()), "callbackObject", callbackObject}}
-                         // output scalars
-                         , {}
-                         // internally generated streamsets
-                         , {}
-                         // length assertions
-                         , {}) {
-        addAttribute(InternallySynchronized());
-        addAttribute(MustExplicitlyTerminate());
-        addAttribute(SideEffecting());
-        // TODO: study the I/O settings to see what the best balance is for memory vs. throughput.
-
-        // TODO: I'm not sure how safe the greedyrate is here. When compiling the nested kernel,
-        // the pipeline compiler doesn't really understand how to treat the greedy input rate
-        // as a "production" rate. The simulator inside needs more information to understand it
-        // as a dataflow rate but current modelling system isn't very good for that.
-
-    }
-
-protected:
-
-    void instantiateInternalKernels(PipelineBuilder & E) final {
-        const std::string ESC = "\x1B";
-        const std::vector<std::string> colorEscapes = {ESC + "[01;31m" + ESC + "[K", ESC + "[m"};
-        std::vector<uint64_t> colorEscapeBytes;
-        const  unsigned insertLengthBits = 4;
-        std::vector<unsigned> insertAmts;
-        for (auto & s : colorEscapes) {
-            insertAmts.push_back(s.size());
-            for (auto & ch : s) {
-                colorEscapeBytes.push_back(static_cast<uint64_t>(ch));
-            }
-        }
-
-
-        StreamSet * const MatchSpans = getInputStreamSet(1);
-        StreamSet * const InsertMarks = E.CreateStreamSet(2, 1);
-        E.CreateKernelCall<SpansToMarksKernel>(MatchSpans, InsertMarks);
-
-        StreamSet * const InsertBixNum = E.CreateStreamSet(insertLengthBits, 1);
-        E.CreateKernelCall<ZeroInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
-        StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
-
-        StreamSet * const Basis = getInputStreamSet(2);
-        StreamSet * ColorEscapeBasis = E.CreateRepeatingBixNum(8, colorEscapeBytes);
-        StreamSet * ColorizedBasis = E.CreateStreamSet(8);
-        MergeByMask(E, SpreadMask, Basis, ColorEscapeBasis, ColorizedBasis);
-
-        StreamSet * const ColorizedBytes  = E.CreateStreamSet(1, 8);
-        E.CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);
-
-        StreamSet * ColorizedBreaks = E.CreateStreamSet(1);
-        E.CreateKernelCall<UnixLinesKernelBuilder>(ColorizedBasis, ColorizedBreaks, UnterminatedLineAtEOF::Add1);
-
-        StreamSet * const ColorizedCoords = E.CreateStreamSet(3, sizeof(size_t) * 8);
-        E.CreateKernelCall<MatchCoordinatesKernel>(ColorizedBreaks, ColorizedBreaks, ColorizedCoords, 1);
-
-        // TODO: source coords >= colorized coords until the final stride?
-        // E->AssertEqualLength(SourceCoords, ColorizedCoords);
-
-        StreamSet * const SourceCoords = getInputStreamSet(0);
-        Scalar * const callbackObject = getInputScalarAt(0);
-        Kernel * const matchK = E.CreateKernelCall<ColorizedReporter>(ColorizedBytes, SourceCoords, ColorizedCoords, callbackObject);
-        matchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
-        matchK->link("finalize_match_wrapper", finalize_match_wrapper);
-    }
-
-};
-
-void GrepEngine::applyColorization(PipelineBuilder & E,
+void GrepEngine::applyColorization(PipelineBuilder & P,
                                    StreamSet * SourceCoords,
                                    StreamSet * MatchSpans,
                                    StreamSet * Basis) {
 
-    Scalar * const callbackObject = E.getInputScalar("callbackObject");
+    Scalar * const callbackObject = P.getInputScalar("callbackObject");
 
-    if (UseNestedColourizationPipeline) {
-        E.CreateNestedPipelineCall<GrepColourizationPipeline>(SourceCoords, MatchSpans, Basis, callbackObject);
-    } else {
+    auto makeNestedColourizationPipeline = [&](PipelineBuilder & E) {
+
         std::string ESC = "\x1B";
         std::vector<std::string> colorEscapes = {ESC + "[01;31m" + ESC + "[K", ESC + "[m"};
         unsigned insertLengthBits = 4;
@@ -987,6 +892,28 @@ void GrepEngine::applyColorization(PipelineBuilder & E,
         Kernel * const matchK = E.CreateKernelCall<ColorizedReporter>(ColorizedBytes, SourceCoords, ColorizedCoords, callbackObject);
         matchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
         matchK->link("finalize_match_wrapper", finalize_match_wrapper);
+        return E.makeKernel();
+    };
+
+
+    if (UseNestedColourizationPipeline) {
+
+        auto E = CreatePipeline(mGrepDriver,
+                                Input<streamset_t>("SourceCoords", SourceCoords, GreedyRate(1), Deferred()),
+                                Input<streamset_t>("MatchSpans", MatchSpans, GreedyRate(), Deferred()),
+                                Input<streamset_t>("Basis", Basis, GreedyRate(), Deferred()),
+                                Input<grep::GrepCallBackObject &>("callbackObject", callbackObject),
+                                InternallySynchronized(),
+                                MustExplicitlyTerminate(),
+                                SideEffecting()
+                                );
+
+        P.AddKernelCall(makeNestedColourizationPipeline(E), PipelineKernel::KernelBindingFlag::None);
+
+    } else {
+
+        makeNestedColourizationPipeline(P);
+
     }
 
 }

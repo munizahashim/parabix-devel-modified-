@@ -55,12 +55,14 @@ struct streamset_t {
 template <typename T>
 struct Input {
 
-    Input(std::string && name)
-    : Name(std::move(name)) {
+    Input(std::string && name, kernel::Scalar * scalar = nullptr)
+    : Name(std::move(name))
+    , Scalar(scalar) {
 
     }
 
     std::string Name;
+    kernel::Scalar * const Scalar;
 };
 
 template <>
@@ -79,12 +81,14 @@ struct Input<streamset_t> : public streamset_t {
 template <typename T>
 struct Output {
 
-    explicit Output(std::string name)
-    : Name(std::move(name)) {
+    explicit Output(std::string name, kernel::Scalar * scalar = nullptr)
+    : Name(std::move(name))
+    , Scalar(scalar) {
 
     }
 
     std::string Name;
+    kernel::Scalar * const Scalar;
 };
 
 template <>
@@ -291,7 +295,13 @@ inline void append_arg(BaseDriver & driver,
         config.InputStreamSets.emplace_back(std::move(I.Name), streamSet,  std::move(I.AnnotatedProcessingRate));
     } else {
         llvm::Type * const ty = llvm::TypeBuilder<InputType, false>::get(driver.getContext());
-        config.InputScalars.emplace_back(ty, I.Name, driver.CreateScalar(ty));
+        Scalar * scalar = nullptr;
+        if (I.Scalar) {
+            scalar = I.Scalar;
+        } else {
+            scalar = driver.CreateScalar(ty);
+        }
+        config.InputScalars.emplace_back(ty, I.Name, scalar);
     }
 
 }
@@ -310,7 +320,13 @@ inline void append_arg(BaseDriver & driver,
         config.OutputStreamSets.emplace_back(std::move(O.Name), streamSet,  std::move(O.AnnotatedProcessingRate));
     } else {
         llvm::Type * const ty = llvm::TypeBuilder<OutputType, false>::get(driver.getContext());
-        config.OutputScalars.emplace_back(ty, O.Name, driver.CreateScalar(ty));
+        Scalar * scalar = nullptr;
+        if (O.Scalar) {
+            scalar = O.Scalar;
+        } else {
+            scalar = driver.CreateScalar(ty);
+        }
+        config.OutputScalars.emplace_back(ty, O.Name, scalar);
     }
 }
 
@@ -337,7 +353,7 @@ inline void append_args(BaseDriver & driver,
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ProgramBuilder
  ** ------------------------------------------------------------------------------------------------------------- */
-template<typename PipelineKernelType, typename ... Args>
+template<typename ... Args>
 class TypedProgramBuilder final : public ProgramBuilder {
     friend class ::BaseDriver;
 
@@ -361,7 +377,7 @@ public:
 
 private:
 
-    static PipelineKernelType * constructKernel(BaseDriver & driver, Args &&... args) {
+    static PipelineKernel * constructKernel(BaseDriver & driver, Args &&... args) {
 
         PipelineConfig config;
         constexpr auto inputScalarCount = extract_args<Args...>::InputScalarCount;
@@ -380,8 +396,8 @@ private:
         assert (config.InputStreamSets.size() == inputStreamSetCount);
         assert (config.OutputStreamSets.size() == outputStreamSetCount);
 
-        PipelineKernelType * const pipeline =
-            new PipelineKernelType(driver,
+        PipelineKernel * const pipeline =
+            new PipelineKernel(driver,
                                   std::move(config.Attributes),
                                   std::move(config.InputStreamSets), std::move(config.OutputStreamSets),
                                   std::move(config.InputScalars), std::move(config.OutputScalars));
@@ -436,19 +452,10 @@ constexpr bool ordering_constraints() {
 } /* end of anonymous namespace */
 
 template<typename ... Args>
-TypedProgramBuilder<PipelineKernel, Args...> CreatePipeline(BaseDriver & driver, Args... args) {
+TypedProgramBuilder<Args...> CreatePipeline(BaseDriver & driver, Args... args) {
     static_assert(ordering_constraints<0, Args...>(),
-    "Program I/O orderings must have signatures before streamsets or scalars and streamsets before scalars and inputs before outputs.");
-    return TypedProgramBuilder<PipelineKernel, Args...>{driver, std::forward<Args>(args)...};
-}
-
-template<class KernelType, typename ... Args>
-TypedProgramBuilder<KernelType, Args...> CreateNestedPipeline(BaseDriver & driver, Args... args) {
-    static_assert(std::is_base_of_v<PipelineKernel, KernelType>,
-    "Pipeline kernel type must be a subtype of PipelineKernel");
-    static_assert(ordering_constraints<0, Args...>(),
-    "Program I/O orderings must have signatures before streamsets or scalars and streamsets before scalars and inputs before outputs.");
-    return TypedProgramBuilder<KernelType, Args...>{driver, std::forward<Args>(args)...};
+    "Program I/O orderings must be ordered in <Signature??, <Input StreamSet>*, <Output StreamSet>*, <Input Scalar>*, <Output Scalar>*, <Pipeline Attribute>*.");
+    return TypedProgramBuilder<Args...>{driver, std::forward<Args>(args)...};
 }
 
 }

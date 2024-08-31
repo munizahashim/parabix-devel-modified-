@@ -43,19 +43,6 @@ Kernel * PipelineBuilder::initializeKernel(Kernel * const kernel, const unsigned
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief initializeNestedPipeline
- ** ------------------------------------------------------------------------------------------------------------- */
-PipelineKernel * PipelineBuilder::initializeNestedPipeline(PipelineKernel * const pk, const unsigned flags) {
-    // TODO: this isn't a very good way of doing this but if I want to allow users to always use a builder,
-    // this gives me a safe workaround for the problem.
-    PipelineBuilder nested(mDriver, pk);
-    nested.setExternallySynchronized(true);
-    pk->instantiateInternalKernels(nested);
-    initializeKernel(nested.makeKernel(), flags);
-    return pk;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief CreateRepeatingBixNum
  ** ------------------------------------------------------------------------------------------------------------- */
 StreamSet * PipelineBuilder::CreateRepeatingBixNum(unsigned bixNumBits, pattern_t nums, bool isDynamic) {

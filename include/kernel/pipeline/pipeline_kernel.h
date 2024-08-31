@@ -25,13 +25,13 @@ class PipelineAnalysis;
 class PipelineBuilder;
 class PipelineCompiler;
 
-class PipelineKernel : public Kernel {
+class PipelineKernel final : public Kernel {
     friend class Kernel;
     friend class PipelineCompiler;
     friend class PipelineAnalysis;
     friend class PipelineBuilder;
     friend class ProgramBuilder;
-    template<typename PipelineKernelType, typename ... Args>
+    template<typename ... Args>
     friend class TypedProgramBuilder;
     friend class ::BaseDriver;
 public:
@@ -143,8 +143,6 @@ protected:
                    AttributeSet && attributes,
                    Bindings && stream_inputs, Bindings && stream_outputs,
                    Bindings && scalar_inputs, Bindings && scalar_outputs);
-
-    virtual void instantiateInternalKernels(PipelineBuilder &) {}
 
     static std::string annotateSignatureWithPipelineFlags(std::string && name);
 

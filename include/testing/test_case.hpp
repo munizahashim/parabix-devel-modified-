@@ -309,7 +309,7 @@ struct toKernelInput<std::tuple<>> {
 
 template <typename ... Ts>
 struct TypedProgramBuilderType {
-    using type = typename kernel::TypedProgramBuilder<kernel::PipelineKernel, Ts...>;
+    using type = typename kernel::TypedProgramBuilder<Ts...>;
 };
 
 template <typename ... Ts>
