@@ -163,10 +163,8 @@ public:
 
     /// Fetch the type of an integer with size at least as big as that of a
     /// pointer in the given address space.
-    llvm::IntegerType * LLVM_READNONE getIntPtrTy(unsigned AddressSpace = 0);
-
-    llvm::IntegerType * LLVM_READNONE getIntAddrTy() const {
-        return llvm::IntegerType::get(getContext(), sizeof(intptr_t) * 8);
+    llvm::IntegerType * LLVM_READNONE getIntPtrTy(unsigned AddressSpace = 0) {
+        return llvm::IntegerType::get(getContext(), sizeof(uintptr_t) * 8);
     }
 
     virtual llvm::VectorType * getStreamTy(const unsigned FieldWidth = 1) = 0;

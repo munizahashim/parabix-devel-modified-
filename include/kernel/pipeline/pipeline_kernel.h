@@ -140,6 +140,7 @@ protected:
                    LengthAssertions && lengthAssertions);
 
     PipelineKernel(LLVMTypeSystemInterface & ts,
+                   std::string && signature,
                    AttributeSet && attributes,
                    Bindings && stream_inputs, Bindings && stream_outputs,
                    Bindings && scalar_inputs, Bindings && scalar_outputs);

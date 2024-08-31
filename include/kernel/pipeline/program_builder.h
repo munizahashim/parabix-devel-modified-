@@ -107,16 +107,16 @@ struct Output<streamset_t> : public streamset_t {
 struct Signature {
 
     explicit Signature(std::string && signature)
-    : SignatureValue(std::move(signature)) {
+    : Value(std::move(signature)) {
 
     }
 
     Signature(llvm::StringRef signature)
-    : SignatureValue(signature.str()) {
+    : Value(signature.str()) {
 
     }
 
-    std::string SignatureValue;
+    std::string Value;
 };
 
 
@@ -262,91 +262,13 @@ struct extract_args<Output<streamset_t>, Rest...> {
 };
 
 struct PipelineConfig {
+    std::string Signature;
     Bindings InputScalars;
     Bindings OutputScalars;
     Bindings InputStreamSets;
     Bindings OutputStreamSets;
     AttributeSet Attributes;
 };
-
-inline void append_arg(BaseDriver & driver,
-                       PipelineConfig & config,
-                       Signature && S) {
-    /* TODO */
-}
-
-inline void append_arg(BaseDriver & driver,
-                       PipelineConfig & config,
-                       Attribute && A) {
-    config.Attributes.addAttribute(A);
-}
-
-template<typename InputType>
-inline void append_arg(BaseDriver & driver,
-                       PipelineConfig & config,
-                       Input<InputType> && I) {
-    if constexpr (std::is_base_of<streamset_t, InputType>::value) {
-        StreamSet * streamSet = nullptr;
-        if (I.StreamSet) {
-            streamSet = I.StreamSet;
-        } else {
-            streamSet = driver.CreateStreamSet(I.ElementCount, I.FieldWidth);
-        }
-        config.InputStreamSets.emplace_back(std::move(I.Name), streamSet,  std::move(I.AnnotatedProcessingRate));
-    } else {
-        llvm::Type * const ty = llvm::TypeBuilder<InputType, false>::get(driver.getContext());
-        Scalar * scalar = nullptr;
-        if (I.Scalar) {
-            scalar = I.Scalar;
-        } else {
-            scalar = driver.CreateScalar(ty);
-        }
-        config.InputScalars.emplace_back(ty, I.Name, scalar);
-    }
-
-}
-
-template<typename OutputType>
-inline void append_arg(BaseDriver & driver,
-                       PipelineConfig & config,
-                       Output<OutputType> && O) {
-    if constexpr (std::is_base_of<streamset_t, OutputType>::value) {
-        StreamSet * streamSet = nullptr;
-        if (O.StreamSet) {
-            streamSet = O.StreamSet;
-        } else {
-            streamSet = driver.CreateStreamSet(O.ElementCount, O.FieldWidth);
-        }
-        config.OutputStreamSets.emplace_back(std::move(O.Name), streamSet,  std::move(O.AnnotatedProcessingRate));
-    } else {
-        llvm::Type * const ty = llvm::TypeBuilder<OutputType, false>::get(driver.getContext());
-        Scalar * scalar = nullptr;
-        if (O.Scalar) {
-            scalar = O.Scalar;
-        } else {
-            scalar = driver.CreateScalar(ty);
-        }
-        config.OutputScalars.emplace_back(ty, O.Name, scalar);
-    }
-}
-
-template<typename... Fs>
-inline void append_args(BaseDriver & driver,
-                        PipelineConfig & config,
-                        Fs &&... fs) {
-    static_assert(sizeof...(Fs) == 0, "compilation error");
-    /* do nothing */
-}
-
-template<typename F, typename... Fs>
-inline void append_args(BaseDriver & driver,
-                        PipelineConfig & config,
-                        F f, Fs &&... fs) {
-    append_arg(driver, config, std::forward<F>(f));
-    append_args(driver, config, std::forward<Fs>(fs)...);
-}
-
-
 
 } /* end of anonymous namespace */
 
@@ -377,6 +299,72 @@ public:
 
 private:
 
+
+    static inline void append_arg(BaseDriver & driver, PipelineConfig & config, Signature && S) {
+        config.Signature = S.Value;
+    }
+
+    static inline void append_arg(BaseDriver & driver, PipelineConfig & config, Attribute && A) {
+        config.Attributes.addAttribute(A);
+    }
+
+    template<typename InputType>
+    static inline void append_arg(BaseDriver & driver, PipelineConfig & config, Input<InputType> && I) {
+        if constexpr (std::is_base_of<streamset_t, InputType>::value) {
+            StreamSet * streamSet = nullptr;
+            if (I.StreamSet) {
+                streamSet = I.StreamSet;
+            } else {
+                streamSet = driver.CreateStreamSet(I.ElementCount, I.FieldWidth);
+            }
+            config.InputStreamSets.emplace_back(std::move(I.Name), streamSet,  std::move(I.AnnotatedProcessingRate));
+        } else {
+            llvm::Type * const ty = llvm::TypeBuilder<InputType, false>::get(driver.getContext());
+            Scalar * scalar = nullptr;
+            if (I.Scalar) {
+                scalar = I.Scalar;
+            } else {
+                scalar = driver.CreateScalar(ty);
+            }
+            config.InputScalars.emplace_back(ty, I.Name, scalar);
+        }
+
+    }
+
+    template<typename OutputType>
+    static inline void append_arg(BaseDriver & driver, PipelineConfig & config, Output<OutputType> && O) {
+        if constexpr (std::is_base_of<streamset_t, OutputType>::value) {
+            StreamSet * streamSet = nullptr;
+            if (O.StreamSet) {
+                streamSet = O.StreamSet;
+            } else {
+                streamSet = driver.CreateStreamSet(O.ElementCount, O.FieldWidth);
+            }
+            config.OutputStreamSets.emplace_back(std::move(O.Name), streamSet,  std::move(O.AnnotatedProcessingRate));
+        } else {
+            llvm::Type * const ty = llvm::TypeBuilder<OutputType, false>::get(driver.getContext());
+            Scalar * scalar = nullptr;
+            if (O.Scalar) {
+                scalar = O.Scalar;
+            } else {
+                scalar = driver.CreateScalar(ty);
+            }
+            config.OutputScalars.emplace_back(ty, O.Name, scalar);
+        }
+    }
+
+    template<typename... Fs>
+    static inline void append_args(BaseDriver & driver, PipelineConfig & config, Fs &&... fs) {
+        static_assert(sizeof...(Fs) == 0, "compilation error");
+        /* do nothing */
+    }
+
+    template<typename F, typename... Fs>
+    static inline void append_args(BaseDriver & driver, PipelineConfig & config, F f, Fs &&... fs) {
+        append_arg(driver, config, std::forward<F>(f));
+        append_args(driver, config, std::forward<Fs>(fs)...);
+    }
+
     static PipelineKernel * constructKernel(BaseDriver & driver, Args &&... args) {
 
         PipelineConfig config;
@@ -398,9 +386,10 @@ private:
 
         PipelineKernel * const pipeline =
             new PipelineKernel(driver,
-                                  std::move(config.Attributes),
-                                  std::move(config.InputStreamSets), std::move(config.OutputStreamSets),
-                                  std::move(config.InputScalars), std::move(config.OutputScalars));
+                               std::move(config.Signature),
+                               std::move(config.Attributes),
+                               std::move(config.InputStreamSets), std::move(config.OutputStreamSets),
+                               std::move(config.InputScalars), std::move(config.OutputScalars));
         return pipeline;
     }
 

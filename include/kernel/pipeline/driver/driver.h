@@ -14,23 +14,28 @@
 
 namespace llvm { class Function; }
 namespace kernel { class KernelBuilder; }
+namespace kernel { class PipelineAnalysis; }
 namespace kernel { class PipelineBuilder; }
 namespace kernel { class ProgramBuilder; }
+namespace kernel {template<typename ... Args> class TypedProgramBuilder; }
+
 class CBuilder;
 class ParabixObjectCache;
 
 class BaseDriver : public LLVMTypeSystemInterface {
     friend class CBuilder;
+    friend class kernel::PipelineAnalysis;
     friend class kernel::PipelineBuilder;
     friend class kernel::ProgramBuilder;
     friend class kernel::Kernel;
+    template<typename ... Args> friend class kernel::TypedProgramBuilder;
+
 public:
 
     using Kernel = kernel::Kernel;
     using Relationship = kernel::Relationship;
     using Bindings = kernel::Bindings;
     using KernelSet = std::vector<std::unique_ptr<Kernel>>;
-    using KernelMap = llvm::StringMap<std::unique_ptr<Kernel>>;
 
     void addKernel(not_null<Kernel *> kernel);
 
@@ -53,6 +58,8 @@ public:
     void setPreserveKernels(const bool value = true) {
         mPreservesKernels = value;
     }
+
+protected:
 
     kernel::StreamSet * CreateStreamSet(const unsigned NumElements = 1, const unsigned FieldWidth = 1) noexcept;
 

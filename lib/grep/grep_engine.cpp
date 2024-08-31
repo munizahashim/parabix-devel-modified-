@@ -908,7 +908,7 @@ void GrepEngine::applyColorization(PipelineBuilder & P,
                                 SideEffecting()
                                 );
 
-        P.AddKernelCall(makeNestedColourizationPipeline(E), PipelineKernel::KernelBindingFlag::None);
+        P.AddKernelCall(makeNestedColourizationPipeline(E));
 
     } else {
 

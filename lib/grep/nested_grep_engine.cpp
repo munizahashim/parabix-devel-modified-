@@ -80,9 +80,9 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
 
     StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
     P.CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
-    StreamSet * const mBasisBits = mGrepDriver.CreateStreamSet(8);
+    StreamSet * const mBasisBits = P.CreateStreamSet(8);
     P.CreateKernelCall<S2PKernel>(ByteStream, mBasisBits);
-    StreamSet * const mBreaks = mGrepDriver.CreateStreamSet();
+    StreamSet * const mBreaks = P.CreateStreamSet();
 
     re::CC * mBreakCC = nullptr;
 
@@ -94,10 +94,10 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
 
 
     P.CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{mBreakCC}, mBasisBits, mBreaks);
-    StreamSet * const mU8index = mGrepDriver.CreateStreamSet();
+    StreamSet * const mU8index = P.CreateStreamSet();
     P.CreateKernelCall<UTF8_index>(mBasisBits, mU8index);
 
-    StreamSet * const mMatches = mGrepDriver.CreateStreamSet();
+    StreamSet * const mMatches = P.CreateStreamSet();
 
     assert (mNested.size() > 0 && mNested[0] == nullptr);
     assert (mNested.size() == 1 || mNested[1] != nullptr);
@@ -145,7 +145,7 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
         };
 
         if (outerKernel) {
-            Kernel * const chained = E.AddKernelCall(outerKernel, PipelineKernel::Family);
+            Kernel * const chained = E.AddKernelFamilyCall(outerKernel);
             addKernelCode(chained);
             resultSoFar = chained->getOutputStreamSet(0); assert (resultSoFar);
         }
@@ -191,7 +191,7 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
         kernel = E.makeKernel();
     }
 
-    P.AddKernelCall(kernel, PipelineKernel::KernelBindingFlag::Family);
+    P.AddKernelFamilyCall(kernel);
     if (MatchCoordinateBlocks > 0) {
         StreamSet * const MatchCoords = P.CreateStreamSet(3, sizeof(size_t) * 8);
         P.CreateKernelCall<MatchCoordinatesKernel>(mMatches, mBreaks, MatchCoords, MatchCoordinateBlocks);

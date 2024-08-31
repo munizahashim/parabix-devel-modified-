@@ -644,7 +644,11 @@ Kernel * createMultiLevelNestingTest(CPUDriver & driver,
 
     auto N = createNestedRepeatingStreamSetTest(driver, pattern, unaligned, output, invalid);
 
-    P.AddKernelCall(N, familyCall ? PipelineKernel::KernelBindingFlag::Family : PipelineKernel::KernelBindingFlag::None);
+    if (familyCall) {
+        P.AddKernelFamilyCall(N);
+    } else {
+        P.AddKernelCall(N);
+    }
 
     return P.makeKernel();
 }
@@ -674,7 +678,7 @@ bool runRepeatingStreamSetTest(CPUDriver & driver, std::default_random_engine & 
 
     size_t repetitionLength = optRepetitionLength;
     if (repetitionLength == 0) {
-        const auto bw = driver.getBitBlockWidth();
+        const auto bw = P.getBitBlockWidth();
         const auto v = boost::lcm<unsigned>(patternLength, bw) * 3U;
         repetitionLength = std::max(v, 4567U);
     }
@@ -721,10 +725,19 @@ bool runRepeatingStreamSetTest(CPUDriver & driver, std::default_random_engine & 
 
     if (useNestedTest == 2) {
         auto K = createMultiLevelNestingTest(driver, pattern, allowUnaligned, useFamilyCall[1], Output, invalid);
-        P.AddKernelCall(K, useFamilyCall[0] ? PipelineKernel::KernelBindingFlag::Family : PipelineKernel::KernelBindingFlag::None);
+
+        if (useFamilyCall[0]) {
+            P.AddKernelFamilyCall(K);
+        } else {
+            P.AddKernelCall(K);
+        }
     } else if (useNestedTest == 1) {
         auto K = createNestedRepeatingStreamSetTest(driver, pattern, allowUnaligned, Output, invalid);
-        P.AddKernelCall(K, useFamilyCall[0] ? PipelineKernel::KernelBindingFlag::Family : PipelineKernel::KernelBindingFlag::None);
+        if (useFamilyCall[0]) {
+            P.AddKernelFamilyCall(K);
+        } else {
+            P.AddKernelCall(K);
+        }
     } else {
         RepeatingStreamSet * RepeatingStream = nullptr;
         if (allowUnaligned) {

@@ -968,14 +968,15 @@ PipelineKernel::PipelineKernel(Internal, LLVMTypeSystemInterface & ts,
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
 PipelineKernel::PipelineKernel(LLVMTypeSystemInterface & ts,
-                               AttributeSet && attributes,
+               std::string && signature,
+               AttributeSet && attributes,
                Bindings && stream_inputs, Bindings && stream_outputs,
                Bindings && scalar_inputs, Bindings && scalar_outputs)
 : Kernel(ts, TypeId::Pipeline,
          std::move(attributes),
          std::move(stream_inputs), std::move(stream_outputs),
          std::move(scalar_inputs), std::move(scalar_outputs))
-{
+, mSignature(std::move(signature)) {
 
 }
 
