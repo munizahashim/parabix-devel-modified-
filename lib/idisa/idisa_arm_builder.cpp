@@ -11,34 +11,95 @@ namespace IDISA {
 
 std::string IDISA_ARM_Builder::getBuilderUniqueName() { return mBitBlockWidth != 128 ? "ARM_" + std::to_string(mBitBlockWidth) : "ARM";}
 
-Value * IDISA_ARM_Builder::hsimd_signmask(unsigned fw, Value * a) {
-  if (getVectorBitWidth(a) == ARM_width) {
-    SmallVector<Constant *, 16> shuffle_amount;
-    switch(fw) {
-      case 64:
-        for (int i = 0; i < 2; i++) {
-          shuffle_amount.push_back(ConstantInt::get(getInt64Ty(), i));
-        }
-        break;
-      case 32:
-        for (int i = 0; i < 4; i++) {
-          shuffle_amount.push_back(ConstantInt::get(getInt32Ty(), i));
-        }
-        break;
-      case 8:
-        for (int i = 0; i < 16; i++) {
-          shuffle_amount.push_back(ConstantInt::get(getInt8Ty(), i));
-        }
-        break;
-      default:
-        return IDISA_Builder::hsimd_signmask(fw, a);
+Value* IDISA_ARM_Builder::simd_popcount(unsigned fw, Value * a) {
+    if (getVectorBitWidth(a) != ARM_width || fw < 8 || fw % 8 != 0) {
+        return IDISA_Builder::simd_popcount(fw, a);
     }
-    Value * shift = ConstantVector::get(shuffle_amount);
-    Value * temp = CreateLShr(fwCast(fw, a), fw-1);
-    Value * shift_left_a = CreateShl(fwCast(fw, temp), shift);
-    return CreateAddReduce(fwCast(fw, shift_left_a));    
-  }
-  return IDISA_Builder::hsimd_signmask(fw, a);
+
+    // There is a CNT instruction offered by NEON that counts set bits in each byte.
+    // It only exists for vectors of i8, i.e. <8 x i8> and <16 x i8>. For some reason,
+    // LLVM exposes an instrinsic for this instruction but fails to select it
+    // during compilation. As a workaround we use the LLVM ctpop instrinsic which does
+    // the right thing and emits CNT.
+    Value* countInBytes = CreatePopcount(fwCast(8, a));
+
+    if (fw == 8) { // if `a` is a vector of i8 then we're already done
+        return countInBytes;
+    } else if (fw == 128) {
+        auto addv = Intrinsic::getDeclaration(getModule(),
+                                              Intrinsic::aarch64_neon_uaddv,
+                                              { getInt32Ty(), FixedVectorType::get(getInt8Ty(), 16) });
+
+        auto popcnt = CreateCall(addv->getFunctionType(),
+                                     addv,
+                                     fwCast(8, countInBytes));
+
+        // It appears that when fw == 128 most calling code expects we return 2xi64
+        return CreateInsertElement(fwCast(64, allZeroes()),
+                                   CreateZExt(popcnt, getInt64Ty()),
+                                   Constant::getNullValue(getInt32Ty()));
+    } else {
+        // addParirsW: pairwise widening add
+        // Adds each pair of fields in a vector together and stores
+        // the result in a vector whose fields are twice as wide as
+        // the source vector
+        auto addPairsW = [this](unsigned _fw, Value* _a) -> Value* {
+            unsigned nElems = getVectorBitWidth(_a) / _fw;
+            unsigned destFw = _fw * 2;
+            unsigned destNElems = nElems / 2;
+
+            auto low = CreateExtractVector(FixedVectorType::get(getIntNTy(_fw), nElems / 2),
+                                           _a,
+                                           ConstantInt::get(getInt64Ty(), 0));
+            auto hi = CreateExtractVector(FixedVectorType::get(getIntNTy(_fw), nElems / 2),
+                                           _a,
+                                           ConstantInt::get(getInt64Ty(), nElems / 2));
+
+            auto lowExt = CreateZExt(low, FixedVectorType::get(getIntNTy(destFw), destNElems));
+            auto hiExt = CreateZExt(hi, FixedVectorType::get(getIntNTy(destFw), destNElems));
+
+            auto addp = Intrinsic::getDeclaration(getModule(),
+                                                  Intrinsic::aarch64_neon_addp,
+                                                  FixedVectorType::get(getIntNTy(destFw), destNElems));
+            return fwCast(destFw, CreateCall(addp->getFunctionType(), addp, {lowExt, hiExt}));
+        };
+
+        // Add pairs together and widen each field until we have reduced
+        // to the destination field width
+        Value* result = countInBytes;
+        for (unsigned thisFw = 8; thisFw < fw; thisFw <<= 1) {
+            result = addPairsW(thisFw, result);
+        }
+        return result;
+    }
+}
+
+Value * IDISA_ARM_Builder::simd_bitreverse(unsigned fw, Value * a) {
+
+    if (fw < 8 || getVectorBitWidth(a) != ARM_width) {
+        return IDISA_Builder::simd_bitreverse(fw, a);
+    }
+
+    // First reverse the bits in each byte
+    auto rbit = Intrinsic::getDeclaration(getModule(), Intrinsic::aarch64_sve_rbit, fwVectorType(fw));
+    if (fw == 8) {
+        return CreateCall(rbit->getFunctionType(), rbit, fwCast(8, a));
+    }
+    Function* refBytesInFields = nullptr;
+
+    // Then reverse the bytes in each field
+    if (fw == 64) {
+        refBytesInFields = Intrinsic::getDeclaration(getModule(), Intrinsic::aarch64_sve_revw);
+    } else if (fw == 32) {
+        refBytesInFields = Intrinsic::getDeclaration(getModule(), Intrinsic::aarch64_sve_revh);
+    } else if (fw == 16) {
+        refBytesInFields = Intrinsic::getDeclaration(getModule(), Intrinsic::aarch64_sve_revb);
+    } else {
+        return IDISA_Builder::simd_bitreverse(fw, a);
+    }
+
+    auto bitsInBytesRevsd = CreateCall(rbit->getFunctionType(), rbit, fwCast(8, a));
+    return CreateCall(refBytesInFields->getFunctionType(), refBytesInFields, fwCast(fw, bitsInBytesRevsd));
 }
 
 Value * IDISA_ARM_Builder::mvmd_shuffle(unsigned fw, llvm::Value * data_table, llvm::Value * index_vector) {
@@ -68,59 +129,30 @@ Value * IDISA_ARM_Builder::mvmd_shuffle(unsigned fw, llvm::Value * data_table, l
   return IDISA_Builder::mvmd_shuffle(fw, data_table, index_vector);
 }
 
-Value * IDISA_ARM_Builder::mvmd_compress(unsigned fw, Value * a, Value * selector) {
-  if ((mBitBlockWidth == 128) && (fw == 64)) {
-    Constant * keep[2] = {ConstantInt::get(getInt64Ty(), 1), ConstantInt::get(getInt64Ty(), 3)};
-    Constant * keep_mask = ConstantVector::get({keep, 2});
-    Constant * shift[2] = {ConstantInt::get(getInt64Ty(), 2), ConstantInt::get(getInt64Ty(), 0)};
-    Constant * shifted_mask = ConstantVector::get({shift, 2});
-    Value * a_srli1 = mvmd_srli(64, a, 1);
-    Value * bdcst = simd_fill(64, CreateZExt(selector, getInt64Ty()));
-    Value * kept = simd_and(simd_eq(64, simd_and(keep_mask, bdcst), keep_mask), a);
-    Value * shifted = simd_and(a_srli1, simd_eq(64, shifted_mask, bdcst));
-    return simd_or(kept, shifted);
-    }
-    if ((mBitBlockWidth == 128) && (fw == 32)) {
-      Value * bdcst = simd_fill(32, CreateZExtOrTrunc(selector, getInt32Ty()));
-      Constant * fieldBit[4] =
-      {ConstantInt::get(getInt32Ty(), 1), ConstantInt::get(getInt32Ty(), 2),
-        ConstantInt::get(getInt32Ty(), 4), ConstantInt::get(getInt32Ty(), 8)};
-      Constant * fieldMask = ConstantVector::get({fieldBit, 4});
-      Value * a_selected = simd_and(simd_eq(32, fieldMask, simd_and(fieldMask, bdcst)), a);
-      Constant * rotateInwards[4] =
-      {ConstantInt::get(getInt32Ty(), 1), ConstantInt::get(getInt32Ty(), 0),
-        ConstantInt::get(getInt32Ty(), 3), ConstantInt::get(getInt32Ty(), 2)};
-      Constant * rotateVector = ConstantVector::get({rotateInwards, 4});
-      Value * rotated = CreateShuffleVector(fwCast(32, a_selected), UndefValue::get(fwVectorType(fw)), rotateVector);
-      Constant * rotate_bit[2] = {ConstantInt::get(getInt64Ty(), 2), ConstantInt::get(getInt64Ty(), 4)};
-      Constant * rotate_mask = ConstantVector::get({rotate_bit, 2});
-      Value * rotateControl = simd_eq(64, fwCast(64, simd_and(bdcst, rotate_mask)), allZeroes());
-      Value * centralResult = simd_if(1, rotateControl, rotated, a_selected);
-      Value * delete_marks_lo = CreateAnd(CreateNot(selector), ConstantInt::get(selector->getType(), 3));
-      Value * delCount_lo = CreateSub(delete_marks_lo, CreateLShr(delete_marks_lo, 1));
-      return mvmd_srl(32, centralResult, delCount_lo, true);
-    }
-    return IDISA_Builder::mvmd_compress(fw, a, selector);
-}
-
 Value * IDISA_ARM_Builder::hsimd_packl(unsigned fw, Value * a, Value * b) {
-  if ((fw == 16) && (getVectorBitWidth(a) == ARM_width)) {
-    Value * mask = simd_lomask(16);
-    return hsimd_packus(fw, fwCast(16, simd_and(a, mask)), fwCast(16, simd_and(b, mask)));
-  }
-  // Otherwise use default logic.
-  return IDISA_Builder::hsimd_packl(fw, a, b);
+    if ((fw >= 16) && (fw <= 64) && (getVectorBitWidth(a) == ARM_width)) {
+        int nElems = getVectorBitWidth(a) / fw;
+        int halfFw = fw / 2;
+        Function* uzp1_fn = Intrinsic::getDeclaration(getModule(),
+                                                      Intrinsic::aarch64_sve_uzp1,
+                                                      FixedVectorType::get(getIntNTy(halfFw), nElems * 2));
+        return CreateCall(uzp1_fn->getFunctionType(), uzp1_fn, {fwCast(halfFw, a), fwCast(halfFw, b)});
+    }
+    // Otherwise use default logic.
+    return IDISA_Builder::hsimd_packl(fw, a, b);
 }
 
 Value * IDISA_ARM_Builder::hsimd_packh(unsigned fw, Value * a, Value * b) {
-  if ((fw == 16) && (getVectorBitWidth(a) == ARM_width)) {
-    Function * vqmovun_s16_func = Intrinsic::getDeclaration(getModule(), Intrinsic::aarch64_neon_uqxtn, FixedVectorType::get(getInt8Ty(), 8));
-    Value * sat_a = CreateCall(vqmovun_s16_func->getFunctionType(), vqmovun_s16_func, simd_srli(16, a, 8));
-    Value * sat_b = CreateCall(vqmovun_s16_func->getFunctionType(), vqmovun_s16_func, simd_srli(16, b, 8));
-    return fwCast(8, CreateDoubleVector(sat_a, sat_b));
-  }
-  // Otherwise use default logic.
-  return IDISA_Builder::hsimd_packh(fw, a, b);
+    if ((fw >= 16) && (fw <= 64) && (getVectorBitWidth(a) == ARM_width)) {
+        int nElems = getVectorBitWidth(a) / fw;
+        int halfFw = fw / 2;
+        Function* uzp2_fn = Intrinsic::getDeclaration(getModule(),
+                                                      Intrinsic::aarch64_sve_uzp2,
+                                                      FixedVectorType::get(getIntNTy(halfFw), nElems * 2));
+        return CreateCall(uzp2_fn->getFunctionType(), uzp2_fn, {fwCast(halfFw, a), fwCast(halfFw, b)});
+    }
+    // Otherwise use default logic.
+    return IDISA_Builder::hsimd_packh(fw, a, b);
 }
 
 Value * IDISA_ARM_Builder::hsimd_packus(unsigned fw, Value * a, Value * b) {
@@ -134,95 +166,28 @@ Value * IDISA_ARM_Builder::hsimd_packus(unsigned fw, Value * a, Value * b) {
   return IDISA_Builder::hsimd_packus(fw, a, b);
 }
 
-#define SHIFT_FIELDWIDTH 64
-
-#define CAST_SHIFT_OUT(shiftout) \
-  shiftTy == mBitBlockType ? bitCast(shiftout) : CreateTrunc(CreateBitCast(shiftout, getIntNTy(mBitBlockWidth)), shiftTy)
-
-std::pair<Value *, Value *> IDISA_ARM_Builder::bitblock_advance(Value * a, Value * shiftin, unsigned shift) {
-  Value * shifted = nullptr;
-  Value * shiftout = nullptr;
-  Type * shiftTy = shiftin->getType();
-  if (LLVM_UNLIKELY(shift == 0)) {
-    return std::pair<Value *, Value *>(Constant::getNullValue(shiftTy), a);
-  }
-  Value * si = shiftin;
-  if (shiftTy != mBitBlockType) {
-    si = bitCast(CreateZExt(shiftin, getIntNTy(mBitBlockWidth)));
-  }
-  if (LLVM_UNLIKELY(shift == mBitBlockWidth)) {
-    return std::pair<Value *, Value *>(CreateBitCast(a, shiftTy), si);
-  }
-#ifndef LEAVE_CARRY_UNNORMALIZED
-  if (LLVM_UNLIKELY((shift % 8) == 0)) { // Use a single whole-byte shift, if possible.
-    shifted = bitCast(simd_or(mvmd_slli(8, a, shift / 8), si));
-    shiftout = bitCast(mvmd_srli(8, a, (mBitBlockWidth - shift) / 8));
-    return std::pair<Value *, Value *>(CAST_SHIFT_OUT(shiftout), shifted);
-  }
-  Value * shiftback = simd_srli(SHIFT_FIELDWIDTH, a, SHIFT_FIELDWIDTH - (shift % SHIFT_FIELDWIDTH));
-  Value * shiftfwd = simd_slli(SHIFT_FIELDWIDTH, a, shift % SHIFT_FIELDWIDTH);
-  if (LLVM_LIKELY(shift < SHIFT_FIELDWIDTH)) {
-    shiftout = mvmd_srli(SHIFT_FIELDWIDTH, shiftback, mBitBlockWidth/SHIFT_FIELDWIDTH - 1);
-    shifted = simd_or(simd_or(shiftfwd, si), mvmd_slli(SHIFT_FIELDWIDTH, shiftback, 1));
-  }
-  else {
-    shiftout = simd_or(shiftback, mvmd_srli(SHIFT_FIELDWIDTH, shiftfwd, 1));
-    shifted = simd_or(si, mvmd_slli(SHIFT_FIELDWIDTH, shiftfwd, (mBitBlockWidth - shift) / SHIFT_FIELDWIDTH));
-    if (shift < mBitBlockWidth - SHIFT_FIELDWIDTH) {
-      shiftout = mvmd_srli(SHIFT_FIELDWIDTH, shiftout, (mBitBlockWidth - shift) / SHIFT_FIELDWIDTH);
-      shifted = simd_or(shifted, mvmd_slli(SHIFT_FIELDWIDTH, shiftback, shift/SHIFT_FIELDWIDTH + 1));
-    }
-  }
-#endif
-#ifdef LEAVE_CARRY_UNNORMALIZED
-  shiftout = a;
-  if (LLVM_UNLIKELY((shift % 8) == 0)) { // Use a single whole-byte shift, if possible.
-    shifted = mvmd_dslli(8, a, shiftin, (mBitBlockWidth - shift) / 8);
-  }
-  else if (LLVM_LIKELY(shift < SHIFT_FIELDWIDTH)) {
-    Value * ahead = mvmd_dslli(SHIFT_FIELDWIDTH, a, shiftin, mBitBlockWidth / SHIFT_FIELDWIDTH - 1);
-    shifted = simd_or(simd_srli(SHIFT_FIELDWIDTH, ahead, SHIFT_FIELDWIDTH - shift), simd_slli(SHIFT_FIELDWIDTH, a, shift));
-  }
-  else {
-    throw std::runtime_error("Unsupported shift.");
-  }
-#endif
-  return std::pair<Value *, Value *>(CAST_SHIFT_OUT(shiftout), shifted);
-}
-
-/* merge_h arm */
 Value * IDISA_ARM_Builder::esimd_mergeh(unsigned fw, Value * a, Value * b) {
-  if ((fw == 1) || (fw == 2)) {
-    Constant * interleave_table = bit_interleave_byteshuffle_table(fw);
-    // Merge the bytes.
-    Value * byte_merge = esimd_mergeh(8, a, b);
-    Value * low_bits = mvmd_shuffle(8, interleave_table, fwCast(8, simd_and(byte_merge, simd_lomask(8))));
-    Value * high_bits = simd_slli(16, mvmd_shuffle(8, interleave_table, fwCast(8, simd_srli(8, byte_merge, 4))), fw);
-    // For each 16-bit field, interleave the low bits of the two bytes.
-    low_bits = simd_or(simd_select_lo(16, low_bits), simd_srli(16, low_bits, 8-fw));
-    // For each 16-bit field, interleave the high bits of the two bytes.
-    high_bits = simd_or(simd_select_hi(16, high_bits), simd_slli(16, high_bits, 8-fw));
-    return simd_or(low_bits, high_bits);
+
+  if ((fw >= 16) && (fw <= 64) && (getVectorBitWidth(a) == ARM_width)) {
+    int nElms = getVectorBitWidth(a) / fw;
+    int halfFw = fw / 2;
+    Function * zip2_fn = Intrinsic::getDeclaration(getModule(),
+                                                 Intrinsic::aarch64_sve_zip2,
+                                                 FixedVectorType::get(getIntNTy(halfFw), nElms * 2));
+    return CreateCall(zip2_fn->getFunctionType(), zip2_fn, {fwCast(halfFw, a), fwCast(halfFw, b)});
   }
-  // Otherwise use default logic.
   return IDISA_Builder::esimd_mergeh(fw, a, b);
 }
 
-/* merge_l arm */
 Value * IDISA_ARM_Builder::esimd_mergel(unsigned fw, Value * a, Value * b) {
-  if ((fw == 1) || (fw == 2)) {
-    Constant * interleave_table = bit_interleave_byteshuffle_table(fw);
-    // Merge the bytes.
-    Value * byte_merge = esimd_mergel(8, a, b);
-    Value * low_bits = mvmd_shuffle(8, interleave_table, fwCast(8, simd_and(byte_merge, simd_lomask(8))));
-    Value * high_bits = simd_slli(16, mvmd_shuffle(8, interleave_table, fwCast(8, simd_srli(8, byte_merge, 4))), fw);
-    // For each 16-bit field, interleave the low bits of the two bytes.
-    low_bits = simd_or(simd_select_lo(16, low_bits), simd_srli(16, low_bits, 8-fw));
-    // For each 16-bit field, interleave the high bits of the two bytes.
-    high_bits = simd_or(simd_select_hi(16, high_bits), simd_slli(16, high_bits, 8-fw));
-    return simd_or(low_bits, high_bits);
+  if ((fw >= 16) && (fw <= 64) && (getVectorBitWidth(a) == ARM_width)) {
+    int nElms = getVectorBitWidth(a) / fw;
+    int halfFw = fw / 2;
+    Function * zip1_fn = Intrinsic::getDeclaration(getModule(),
+                                                 Intrinsic::aarch64_sve_zip1,
+                                                 FixedVectorType::get(getIntNTy(halfFw), nElms * 2));
+    return CreateCall(zip1_fn->getFunctionType(), zip1_fn, {fwCast(halfFw, a), fwCast(halfFw, b)});
   }
-  // Otherwise use default logic.
   return IDISA_Builder::esimd_mergel(fw, a, b);
 }
 
