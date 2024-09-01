@@ -1105,6 +1105,8 @@ void U8_Compiler::lengthAnalysis(CC_List & ccs) {
         extract_CCs_by_range(UTF8_Range[k], ccs, mSeqData[k].seqCCs);
         mSeqData[k].actualRange = CC_Set_Range(mSeqData[k].seqCCs);
         mSeqData[k].byte1CC = prefixCC(mSeqData[k].seqCCs);
+        mSeqData[k].test = nullptr;
+        mSeqData[k].suffixTest = nullptr;
     }
 }
 
@@ -1208,7 +1210,7 @@ class U8_Advance_Compiler : public U8_Compiler {
 public:
     U8_Advance_Compiler(pablo::Var * Var, PabloBuilder & pb, pablo::PabloAST * mask);
 protected:
-    //PabloAST * mSuffix;
+    PabloAST * mSuffix;
     void prepareScope(unsigned scope, PabloBuilder & pb) override;
     void prepareUnifiedBasis(Basis_Set & UnifiedBasis) override;
 };
@@ -1250,40 +1252,39 @@ void U8_Lookahead_Compiler::prepareUnifiedBasis(Basis_Set & UnifiedBasis) {
 }
 
 U8_Advance_Compiler::U8_Advance_Compiler(pablo::Var * v, PabloBuilder & pb, pablo::PabloAST * mMask) :
-U8_Compiler(v, pb, mMask) {
-    //mSuffix = pb.createAnd(mScopeBasis[0][7], pb.createNot(mScopeBasis[0][6]));
+U8_Compiler(v, pb, mMask), mSuffix(nullptr) {
 }
 
 void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
     if (mSeqData[scope].byte1CC->empty()) return;
-    for (unsigned sfx = 1; sfx <= scope; sfx++) {
-        bool basis_needed = (sfx < scope) && (mScopeBasis[sfx].size() == 0);
-        basis_needed |= (sfx == scope) && (mSeqData[scope].byte1CC->count() >= 1);
-        if (basis_needed) {
-            mScopeBasis[sfx].resize(mScopeBasis[0].size());
-            for (unsigned i = 0; i < mScopeBasis[0].size(); i++) {
-                mScopeBasis[sfx][i] = pb.createAdvance(mScopeBasis[0][i], sfx);
-            }
-            // TO DO: Deal with suffix testing.
-            mCodeUnitCompilers[sfx] =
-            std::make_unique<cc::Parabix_CC_Compiler_Builder>(mScopeBasis[sfx]);
+    if (mSuffix == nullptr) {
+        mSuffix = pb.createAnd(mScopeBasis[0][7], pb.createNot(mScopeBasis[0][6]), "mSuffix");
+        mSeqData[1].suffixTest = mSuffix;
+    }
+    for (unsigned sfx = 2; sfx <= scope; sfx++) {
+        if (mSeqData[sfx].suffixTest == nullptr) {
+            PabloAST * adv_suffix = pb.createAdvance(mSeqData[sfx-1].suffixTest, 1);
+            mSeqData[sfx].suffixTest = pb.createAnd(adv_suffix, mSuffix, "scope" + std::to_string(sfx) + "_sfx_test");
         }
     }
-    if (mSeqData[scope].byte1CC->count() == 1) {
-        mSeqData[scope].test = pb.createAdvance(mSeqData[scope].test, scope);
-    } else {
-        mSeqData[scope].test = mCodeUnitCompilers[scope] -> compileCC(mSeqData[scope].byte1CC, pb);
+    // For each prior suffix, we need 6 data bits.
+    unsigned total_bits_needed = ceil_log2(mSeqData[scope].actualRange.hi);
+    unsigned bits_remaining = total_bits_needed;
+    for (unsigned sfx = 1; sfx <= scope; sfx++) {
+        unsigned sfx_bits = mScopeBasis[sfx].size();
+        unsigned bits_needed = std::min(bits_remaining, 6u);
+        if (sfx_bits < bits_needed) {
+            mScopeBasis[sfx].resize(bits_needed);
+            for (unsigned i = sfx_bits; i < bits_needed; i++) {
+                mScopeBasis[sfx][i] = pb.createAdvance(mScopeBasis[0][i], sfx);
+            }
+        }
+        bits_remaining -= bits_needed;
     }
-#if 0
-    // Combine the suffix bits into the current test and discard them.
-    if (SuffixOptimization) {
-        // Combine the suffix bits into the current test and discard them.
-        inner_test = nested.createAnd(mScopeBasis[scope][7], inner_test);
-        SeqData[i].test = nested.createAnd(nested.createNot(mScopeBasis[scope][6]), inner_test);
-        mScopeBasis[scope].resize(6);
-    }
-#endif
+    //
+    mSeqData[scope].test = pb.createAnd(mSeqData[scope].suffixTest, pb.createAdvance(mSeqData[scope].test, scope));
 }
+
 
 void U8_Advance_Compiler::prepareUnifiedBasis(Basis_Set & UnifiedBasis) {
     unsigned bits_per_unit = 6;
