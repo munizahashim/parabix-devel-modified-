@@ -1080,7 +1080,8 @@ protected:
     void lengthAnalysis(CC_List & ccs);
     void preparePrefixTests(PabloAST * enclosing_test, PabloBuilder & pb);
     void createInitialHierarchy(CC_List & ccs) override;
-    void extendLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb);
+    void extendLengthHierarchy(PabloAST * enclosingTest, PabloBuilder & pb);
+    void prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloAST * enclosingTest, PabloBuilder & pb);
     PabloAST * compilePrefix(re::CC * prefixCC, PabloBuilder & pb);
 };
 
@@ -1143,7 +1144,7 @@ void U8_Compiler::createInitialHierarchy(CC_List & ccs) {
             auto nested = mPB.createScope();
             mPB.createIf(prefix_test, nested);
             preparePrefixTests(prefix_test, nested);
-            extendLengthHierarchy(TwoByte, nested);
+            extendLengthHierarchy(prefix_test, nested);
 #if 0
         } else if (!PrefixCCTest) {
             unsigned lo_prefix = mEncoder.nthCodeUnit(actual_subrange.lo, 1);
@@ -1152,37 +1153,54 @@ void U8_Compiler::createInitialHierarchy(CC_List & ccs) {
             PabloAST * prefix_test = combine(mMask, compilePrefix(prefix_range_CC, mPB));
             auto nested = mPB.createScope();
             mPB.createIf(prefix_test, nested);
-            extendLengthHierarchy(TwoByte, nested);
+            preparePrefixTests(prefix_test, nested);
+            extendLengthHierarchy(prefix_test, nested);
 #endif
         } else {
             preparePrefixTests(mMask, mPB);
             auto nested = mPB.createScope();
             mPB.createIf(mSeqData[TwoByte].combinedTest, nested);
-            extendLengthHierarchy(TwoByte, nested);
+            extendLengthHierarchy(mSeqData[TwoByte].combinedTest, nested);
         }
     }
 }
 
-void U8_Compiler::extendLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb) {
-    if (mSeqData[k].combinedTest == nullptr) return;
-    if (!mSeqData[k].byte1CC->empty()) {
-        PabloAST * outer_test = mSeqData[k].combinedTest;
-        auto nested = pb.createScope();
-        pb.createIf(outer_test, nested);
-        prepareScope(k, nested);
-        if (!mSeqData[k].actualRange.is_empty()) {
-            codepoint_t test_lo = mEncoder.minCodePointWithCommonCodeUnits(mSeqData[k].actualRange.lo, 1);
-            codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(mSeqData[k].actualRange.hi, 1);
-            Range testRange{test_lo, test_hi};
-            Basis_Set UnifiedBasis = prepareUnifiedBasis(UTF8_Range[k]);
-            Unicode_Range_Compiler range_compiler(UnifiedBasis, mTargets, nested);
-            range_compiler.compile(mSeqData[k].seqCCs, testRange, mSeqData[k].test);
-        }
-        if (k == TwoByte) extendLengthHierarchy(ThreeByte, nested);
-        else if (k == ThreeByte) extendLengthHierarchy(FourByte, nested);
+void U8_Compiler::extendLengthHierarchy(PabloAST * enclosingTest, PabloBuilder & pb) {
+    if (!mSeqData[TwoByte].byte1CC->empty()) {
+        prepareScope(TwoByte, pb);
+        prepareFixedLengthHierarchy(TwoByte, enclosingTest, pb);
+    }
+    PabloAST * outer_test = mSeqData[ThreeByte].combinedTest;
+    if (outer_test == nullptr) return;
+    auto nested = pb.createScope();
+    pb.createIf(outer_test, nested);
+    if (!mSeqData[ThreeByte].byte1CC->empty()) {
+        prepareScope(ThreeByte, nested);
+        prepareFixedLengthHierarchy(ThreeByte, outer_test, nested);
+    }
+    if (!mSeqData[FourByte].byte1CC->empty()) {
+        prepareScope(FourByte, nested);
+        prepareFixedLengthHierarchy(FourByte, outer_test, nested);
+    }
+}
+
+void U8_Compiler::prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloAST * enclosingTest, PabloBuilder & pb) {
+    // No code generation if there are no CCs within this range.
+    if (mSeqData[k].actualRange.is_empty()) return;
+    codepoint_t test_lo = mEncoder.minCodePointWithCommonCodeUnits(mSeqData[k].actualRange.lo, 1);
+    codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(mSeqData[k].actualRange.hi, 1);
+    Range testRange{test_lo, test_hi};
+    if (mSeqData[k].test == enclosingTest) {
+        // No further test needed.
+        Basis_Set UnifiedBasis = prepareUnifiedBasis(UTF8_Range[k]);
+        Unicode_Range_Compiler range_compiler(UnifiedBasis, mTargets, pb);
+        range_compiler.compile(mSeqData[k].seqCCs, testRange, mSeqData[k].test);
     } else {
-        if (k == TwoByte) extendLengthHierarchy(ThreeByte, pb);
-        else if (k == ThreeByte) extendLengthHierarchy(FourByte, pb);
+        auto nested = pb.createScope();
+        pb.createIf(mSeqData[k].test, nested);
+        Basis_Set UnifiedBasis = prepareUnifiedBasis(UTF8_Range[k]);
+        Unicode_Range_Compiler range_compiler(UnifiedBasis, mTargets, nested);
+        range_compiler.compile(mSeqData[k].seqCCs, testRange, mSeqData[k].test);
     }
 }
 
