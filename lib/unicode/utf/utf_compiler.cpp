@@ -960,7 +960,7 @@ protected:
     std::unique_ptr<cc::CC_Compiler> mCodeUnitCompilers[4];
     virtual void createInitialHierarchy(CC_List & ccs) = 0;
     virtual void prepareScope(unsigned scope, PabloBuilder & pb) = 0;
-    virtual void prepareUnifiedBasis(Basis_Set & UnifiedBasis) = 0;
+    virtual Basis_Set prepareUnifiedBasis(Range basis_range) = 0;
 };
 
 New_UTF_Compiler::New_UTF_Compiler(Var * basis_var, pablo::PabloBuilder & pb, pablo::PabloAST * mask) :
@@ -998,7 +998,7 @@ public:
     }
 protected:
     void prepareScope(unsigned scope, PabloBuilder & pb) override;
-    void prepareUnifiedBasis(Basis_Set & UnifiedBasis) override;
+    Basis_Set prepareUnifiedBasis(Range basis_range) override;
     void createInitialHierarchy(CC_List & ccs) override;
 };
 
@@ -1007,10 +1007,12 @@ void U21_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
     //  of 21 Unicode bit streams is provided.
 }
 
-void U21_Compiler::prepareUnifiedBasis(Basis_Set & UnifiedBasis) {
-    for (unsigned i = 0; i < UnifiedBasis.size(); i++) {
-        UnifiedBasis[i] = mScopeBasis[0][i];
+Basis_Set U21_Compiler::prepareUnifiedBasis(Range basis_range) {
+    Basis_Set basis(ceil_log2(basis_range.hi));
+    for (unsigned i = 0; i < basis.size(); i++) {
+        basis[i] = mScopeBasis[0][i];
     }
+    return basis;
 }
 
 void U21_Compiler::createInitialHierarchy(CC_List & ccs) {
@@ -1021,9 +1023,7 @@ void U21_Compiler::createInitialHierarchy(CC_List & ccs) {
         Range ASCII_Range{0, 0x7F};
         CC_List ASCII_ccs(ccs.size());
         extract_CCs_by_range(ASCII_Range, ccs, ASCII_ccs);
-        Basis_Set ASCIIBasis;
-        ASCIIBasis.resize(7);
-        prepareUnifiedBasis(ASCIIBasis);
+        Basis_Set ASCIIBasis = prepareUnifiedBasis(ASCII_Range);
         Unicode_Range_Compiler ASCII_compiler(ASCIIBasis, mTargets, mPB);
         PabloAST * e1 = mPB.createOr3(mScopeBasis[0][7], mScopeBasis[0][8], mScopeBasis[0][9]);
         PabloAST * e2 = mPB.createOr3(mScopeBasis[0][10], mScopeBasis[0][11], mScopeBasis[0][12]);
@@ -1038,16 +1038,12 @@ void U21_Compiler::createInitialHierarchy(CC_List & ccs) {
         Range nonASCII_Range{0x80, 0x10FFFF};
         CC_List nonASCII_ccs(ccs.size());
         extract_CCs_by_range(nonASCII_Range, ccs, nonASCII_ccs);
-        Basis_Set UnifiedBasis;
-        UnifiedBasis.resize(21);
-        prepareUnifiedBasis(UnifiedBasis);
+        Basis_Set UnifiedBasis = prepareUnifiedBasis(nonASCII_Range);
         Unicode_Range_Compiler range_compiler(UnifiedBasis, mTargets, nested);
         range_compiler.compile(nonASCII_ccs, nonASCII_Range, nonASCII);
     } else {
         Range UnicodeRange{0, 0x10FFFF};
-        Basis_Set UnifiedBasis;
-        UnifiedBasis.resize(21);
-        prepareUnifiedBasis(UnifiedBasis);
+        Basis_Set UnifiedBasis = prepareUnifiedBasis(UnicodeRange);
         if (mMask) {
             auto nested = mPB.createScope();
             mPB.createIf(mMask, nested);
@@ -1082,6 +1078,7 @@ protected:
     SeqData                 mSeqData[4];
     re::CC * prefixCC(CC_List & ccs);
     void lengthAnalysis(CC_List & ccs);
+    void preparePrefixTests(PabloAST * enclosing_test, PabloBuilder & pb);
     void createInitialHierarchy(CC_List & ccs) override;
     void extendLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb);
     PabloAST * compilePrefix(re::CC * prefixCC, PabloBuilder & pb);
@@ -1114,13 +1111,25 @@ PabloAST * U8_Compiler::compilePrefix(re::CC * prefixCC, PabloBuilder & pb) {
     return mCodeUnitCompilers[0]->compileCC(prefixCC, pb);
 }
 
+void U8_Compiler::preparePrefixTests(PabloAST * enclosing_test, PabloBuilder & pb) {
+    for (unsigned k = TwoByte; k <= FourByte; k++) {
+        if (mSeqData[k].actualRange.is_empty()) {
+            mSeqData[k].test = nullptr;
+        } else {
+            mSeqData[k].test = combine(enclosing_test, compilePrefix(mSeqData[k].byte1CC, pb), pb);
+        }
+    }
+    mSeqData[FourByte].combinedTest = mSeqData[FourByte].test;
+    mSeqData[ThreeByte].combinedTest = combine(mSeqData[ThreeByte].test, mSeqData[FourByte].combinedTest, pb);
+    mSeqData[TwoByte].combinedTest = combine(mSeqData[TwoByte].test, mSeqData[ThreeByte].combinedTest, pb);
+}
+
+
 void U8_Compiler::createInitialHierarchy(CC_List & ccs) {
     lengthAnalysis(ccs);
     if (!mSeqData[ASCII].actualRange.is_empty()) {
         PabloAST * ASCII_test = mPB.createNot(mScopeBasis[0][7]);
-        Basis_Set ASCIIBasis;
-        ASCIIBasis.resize(7);
-        prepareUnifiedBasis(ASCIIBasis);
+        Basis_Set ASCIIBasis = prepareUnifiedBasis(UTF8_Range[ASCII]);
         Unicode_Range_Compiler ASCII_compiler(ASCIIBasis, mTargets, mPB);
         ASCII_compiler.compile(ccs, UTF8_Range[ASCII], ASCII_test);
     }
@@ -1133,16 +1142,7 @@ void U8_Compiler::createInitialHierarchy(CC_List & ccs) {
             PabloAST * prefix_test = combine(mMask, mScopeBasis[0][7], mPB);
             auto nested = mPB.createScope();
             mPB.createIf(prefix_test, nested);
-            for (unsigned k = TwoByte; k <= FourByte; k++) {
-                if (mSeqData[k].actualRange.is_empty()) {
-                    mSeqData[k].test = nullptr;
-                } else {
-                    mSeqData[k].test = compilePrefix(mSeqData[k].byte1CC, nested);
-                }
-            }
-            mSeqData[FourByte].combinedTest = mSeqData[FourByte].test;
-            mSeqData[ThreeByte].combinedTest = combine(mSeqData[ThreeByte].test, mSeqData[FourByte].combinedTest, nested);
-            mSeqData[TwoByte].combinedTest = combine(mSeqData[TwoByte].test, mSeqData[ThreeByte].combinedTest, nested);
+            preparePrefixTests(prefix_test, nested);
             extendLengthHierarchy(TwoByte, nested);
 #if 0
         } else if (!PrefixCCTest) {
@@ -1155,19 +1155,9 @@ void U8_Compiler::createInitialHierarchy(CC_List & ccs) {
             extendLengthHierarchy(TwoByte, nested);
 #endif
         } else {
-            for (unsigned k = TwoByte; k <= FourByte; k++) {
-                if (mSeqData[k].actualRange.is_empty()) {
-                    mSeqData[k].test = nullptr;
-                } else {
-                    mSeqData[k].test = compilePrefix(mSeqData[k].byte1CC, mPB);
-                }
-            }
-            mSeqData[FourByte].combinedTest = mSeqData[FourByte].test;
-            mSeqData[ThreeByte].combinedTest = combine(mSeqData[ThreeByte].test, mSeqData[FourByte].combinedTest, mPB);
-            mSeqData[TwoByte].combinedTest = combine(mSeqData[TwoByte].test, mSeqData[ThreeByte].combinedTest, mPB);
-            PabloAST * prefix_test = combine(mMask, mSeqData[TwoByte].combinedTest, mPB);
+            preparePrefixTests(mMask, mPB);
             auto nested = mPB.createScope();
-            mPB.createIf(prefix_test, nested);
+            mPB.createIf(mSeqData[TwoByte].combinedTest, nested);
             extendLengthHierarchy(TwoByte, nested);
         }
     }
@@ -1184,9 +1174,7 @@ void U8_Compiler::extendLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb) {
             codepoint_t test_lo = mEncoder.minCodePointWithCommonCodeUnits(mSeqData[k].actualRange.lo, 1);
             codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(mSeqData[k].actualRange.hi, 1);
             Range testRange{test_lo, test_hi};
-            Basis_Set UnifiedBasis;
-            UnifiedBasis.resize(ceil_log2(UTF8_Range[k].hi));
-            prepareUnifiedBasis(UnifiedBasis);
+            Basis_Set UnifiedBasis = prepareUnifiedBasis(UTF8_Range[k]);
             Unicode_Range_Compiler range_compiler(UnifiedBasis, mTargets, nested);
             range_compiler.compile(mSeqData[k].seqCCs, testRange, mSeqData[k].test);
         }
@@ -1203,7 +1191,7 @@ public:
     U8_Lookahead_Compiler(pablo::Var * Var, PabloBuilder & pb, pablo::PabloAST * mask);
 protected:
     void prepareScope(unsigned scope, PabloBuilder & pb) override;
-    void prepareUnifiedBasis(Basis_Set & UnifiedBasis) override;
+    Basis_Set prepareUnifiedBasis(Range basis_range) override;
 };
 
 class U8_Advance_Compiler : public U8_Compiler {
@@ -1212,7 +1200,7 @@ public:
 protected:
     PabloAST * mSuffix;
     void prepareScope(unsigned scope, PabloBuilder & pb) override;
-    void prepareUnifiedBasis(Basis_Set & UnifiedBasis) override;
+    Basis_Set prepareUnifiedBasis(Range basis_range) override;
 };
 
 U8_Lookahead_Compiler::U8_Lookahead_Compiler(pablo::Var * v, PabloBuilder & pb, pablo::PabloAST * mask) :
@@ -1240,15 +1228,17 @@ void U8_Lookahead_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
     }
 }
 
-void U8_Lookahead_Compiler::prepareUnifiedBasis(Basis_Set & UnifiedBasis) {
+Basis_Set U8_Lookahead_Compiler::prepareUnifiedBasis(Range basis_range) {
+    Basis_Set basis(ceil_log2(basis_range.hi));
     unsigned bits_per_unit = 6;
-    if (UnifiedBasis.size() == 7) bits_per_unit = 7;
-    unsigned max_suffix = (UnifiedBasis.size() - 1)/bits_per_unit;
-    for (unsigned i = 0; i < UnifiedBasis.size(); i++) {
+    if (basis.size() == 7) bits_per_unit = 7;
+    unsigned max_suffix = (basis.size() - 1)/bits_per_unit;
+    for (unsigned i = 0; i < basis.size(); i++) {
         unsigned suffix_pos = max_suffix - i/bits_per_unit;
         unsigned scope_bit = i % bits_per_unit;
-        UnifiedBasis[i] = mScopeBasis[suffix_pos][scope_bit];
+        basis[i] = mScopeBasis[suffix_pos][scope_bit];
     }
+    return basis;
 }
 
 U8_Advance_Compiler::U8_Advance_Compiler(pablo::Var * v, PabloBuilder & pb, pablo::PabloAST * mMask) :
@@ -1286,14 +1276,16 @@ void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
 }
 
 
-void U8_Advance_Compiler::prepareUnifiedBasis(Basis_Set & UnifiedBasis) {
+Basis_Set U8_Advance_Compiler::prepareUnifiedBasis(Range basis_range) {
+    Basis_Set basis(ceil_log2(basis_range.hi));
     unsigned bits_per_unit = 6;
-    if (UnifiedBasis.size() == 7) bits_per_unit = 7;
-    for (unsigned i = 0; i < UnifiedBasis.size(); i++) {
+    if (basis.size() == 7) bits_per_unit = 7;
+    for (unsigned i = 0; i < basis.size(); i++) {
         unsigned suffix_pos = i/bits_per_unit;
         unsigned scope_bit = i % bits_per_unit;
-        UnifiedBasis[i] = mScopeBasis[suffix_pos][scope_bit];
+        basis[i] = mScopeBasis[suffix_pos][scope_bit];
     }
+    return basis;
 }
 
 UTF_Compiler::UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb,
