@@ -1246,17 +1246,32 @@ void U8_Lookahead_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
     }
 }
 
-Basis_Set U8_Lookahead_Compiler::prepareUnifiedBasis(Range basis_range) {
-    Basis_Set basis(ceil_log2(basis_range.hi));
-    unsigned bits_per_unit = 6;
-    if (basis.size() == 7) bits_per_unit = 7;
-    unsigned max_suffix = (basis.size() - 1)/bits_per_unit;
-    for (unsigned i = 0; i < basis.size(); i++) {
+Basis_Set U8_Lookahead_Compiler::prepareUnifiedBasis(Range cc_range) {
+    unsigned lgth = mEncoder.encoded_length(cc_range.hi);
+    unsigned total_bits = ceil_log2(mEncoder.max_codepoint_of_length(lgth));
+    unsigned variable_bits = ceil_log2(cc_range.lo ^ cc_range.hi);
+    if (UTF_CompilationTracing) {
+        llvm::errs() << "prepareUnifiedBasis(" << cc_range.hex_string() << ")\n";
+        llvm::errs() << "  total_bits = " << total_bits << "\n";
+        llvm::errs() << "  variable_bits = " << variable_bits << "\n";
+    }
+    Basis_Set UnifiedBasis(total_bits);
+    unsigned bits_per_unit = (lgth == 1) ? 7 : 6;
+    unsigned max_suffix = lgth - 1;
+    for (unsigned i = 0; i < variable_bits; i++) {
         unsigned suffix_pos = max_suffix - i/bits_per_unit;
         unsigned scope_bit = i % bits_per_unit;
-        basis[i] = mScopeBasis[suffix_pos][scope_bit];
+        UnifiedBasis[i] = mScopeBasis[suffix_pos][scope_bit];
     }
-    return basis;
+    for (unsigned i = variable_bits; i < total_bits; i++) {
+        unsigned fixed_bit_val = (cc_range.lo >> i) & 1;
+        if (fixed_bit_val == 1) {
+            UnifiedBasis[i] = mPB.createOnes();
+        } else {
+            UnifiedBasis[i] = mPB.createZeroes();
+        }
+    }
+    return UnifiedBasis;
 }
 
 U8_Advance_Compiler::U8_Advance_Compiler(pablo::Var * v, PabloBuilder & pb, pablo::PabloAST * mMask) :
@@ -1294,16 +1309,31 @@ void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
 }
 
 
-Basis_Set U8_Advance_Compiler::prepareUnifiedBasis(Range basis_range) {
-    Basis_Set basis(ceil_log2(basis_range.hi));
-    unsigned bits_per_unit = 6;
-    if (basis.size() == 7) bits_per_unit = 7;
-    for (unsigned i = 0; i < basis.size(); i++) {
-        unsigned suffix_pos = i/bits_per_unit;
-        unsigned scope_bit = i % bits_per_unit;
-        basis[i] = mScopeBasis[suffix_pos][scope_bit];
+Basis_Set U8_Advance_Compiler::prepareUnifiedBasis(Range cc_range) {
+    unsigned lgth = mEncoder.encoded_length(cc_range.hi);
+    unsigned total_bits = ceil_log2(mEncoder.max_codepoint_of_length(lgth));
+    unsigned variable_bits = ceil_log2(cc_range.lo ^ cc_range.hi);
+    if (UTF_CompilationTracing) {
+        llvm::errs() << "prepareUnifiedBasis(" << cc_range.hex_string() << ")\n";
+        llvm::errs() << "  total_bits = " << total_bits << "\n";
+        llvm::errs() << "  variable_bits = " << variable_bits << "\n";
     }
-    return basis;
+    Basis_Set UnifiedBasis(total_bits);
+    unsigned bits_per_unit = (lgth == 1) ? 7 : 6;
+    for (unsigned i = 0; i < variable_bits; i++) {
+        unsigned u8_pos = i/bits_per_unit;
+        unsigned scope_bit = i % bits_per_unit;
+        UnifiedBasis[i] = mScopeBasis[u8_pos][scope_bit];
+    }
+    for (unsigned i = variable_bits; i < total_bits; i++) {
+        unsigned fixed_bit_val = (cc_range.lo >> i) & 1;
+        if (fixed_bit_val == 1) {
+            UnifiedBasis[i] = mPB.createOnes();
+        } else {
+            UnifiedBasis[i] = mPB.createZeroes();
+        }
+    }
+    return UnifiedBasis;
 }
 
 UTF_Compiler::UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb,
