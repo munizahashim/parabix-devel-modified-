@@ -115,7 +115,8 @@ int main(int argc, char *argv[]) {
             }
            break;
         case argv::CountOnly:
-            grep = std::make_unique<grep::CountOnlyEngine>(driver);
+        case argv::CountAll:
+            grep = std::make_unique<grep::CountOnlyEngine>(driver, argv::Mode == argv::CountAll);
             if (argv::WithFilenameFlag) grep->showFileNames();
             if (argv::MaxCountFlag) grep->setMaxCount(argv::MaxCountFlag);
            break;

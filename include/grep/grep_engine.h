@@ -77,7 +77,7 @@ class GrepEngine {
     friend class InternalMultiSearchEngine;
 public:
 
-    enum class EngineKind {QuietMode, MatchOnly, CountOnly, EmitMatches};
+    enum class EngineKind {QuietMode, MatchOnly, CountOnly, CountAll, EmitMatches};
 
     GrepEngine(BaseDriver & driver);
 
@@ -252,7 +252,7 @@ private:
 
 class CountOnlyEngine final : public GrepEngine {
 public:
-    CountOnlyEngine(BaseDriver & driver);
+    CountOnlyEngine(BaseDriver & driver, bool CountAll = false);
 private:
     void showResult(uint64_t grepResult, const std::string & fileName, std::ostringstream & strm) override;
 };
