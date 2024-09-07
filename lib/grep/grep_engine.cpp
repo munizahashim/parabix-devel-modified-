@@ -176,8 +176,8 @@ MatchOnlyEngine::MatchOnlyEngine(BaseDriver & driver, bool showFilesWithMatch, b
     mShowFileNames = true;
 }
 
-CountOnlyEngine::CountOnlyEngine(BaseDriver &driver) : GrepEngine(driver) {
-    mEngineKind = EngineKind::CountOnly;
+CountOnlyEngine::CountOnlyEngine(BaseDriver &driver, bool countall) : GrepEngine(driver) {
+    mEngineKind = countall ? EngineKind::CountAll : EngineKind::CountOnly;
     mFileSuffix = ":";
 }
 
@@ -250,6 +250,7 @@ void GrepEngine::initFileResult(const std::vector<boost::filesystem::path> & pat
 // scanning or counting processes (with a max count != 1).   If the REs
 // are not all anchored, then we need to move the matches to EOL.
 bool GrepEngine::matchesToEOLrequired () {
+    if (mEngineKind == EngineKind::CountAll) return false;
     // Moving matches is required for UnicodeLines mode, because matches
     // may be on the CR of a CRLF.
     if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) return true;
