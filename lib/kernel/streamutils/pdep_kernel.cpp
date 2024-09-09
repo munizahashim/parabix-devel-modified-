@@ -233,7 +233,8 @@ void StreamExpandKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value 
 
 
 /*************************StreamMergeKernel*********************************/
-const unsigned StreamMergeStrideSize = 4;
+constexpr unsigned StreamMergeStrideSize = 4;
+
 StreamMergeKernel::StreamMergeKernel(LLVMTypeSystemInterface & ts,
                                        StreamSet * mask,
                                        StreamSet * source1,
@@ -833,4 +834,67 @@ StreamSet * InsertionSpreadMask(PipelineBuilder & P,
     SpreadByMask(P, submask, spread1_mask, finalmask, false, 0); // , itemsPerOutputUnit);
     return finalmask;
 }
+
+
+ByteSpreadByMaskKernel::ByteSpreadByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const spread, StreamSet * const Packed)
+: MultiBlockKernel(b, "ByteSpreadByMask",
+{Binding{"byteStream", byteStream, PopcountOf("spread")}, Binding{"spread", spread, FixedRate(1)}},
+    {Binding{"output", Packed, FixedRate(1)}}, {}, {}, {}) {}
+
+void ByteSpreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+    BasicBlock * entry = b.GetInsertBlock();
+    BasicBlock * packLoop = b.CreateBasicBlock("packLoop");
+    BasicBlock * packFinalize = b.CreateBasicBlock("packFinalize");
+    Constant * const ZERO = b.getSize(0);
+
+    const auto fieldWidth = getInputStreamSet(0)->getFieldWidth();
+
+    Value * initPos = b.getProcessedItemCount("byteStream");
+    b.CreateBr(packLoop);
+
+    b.SetInsertPoint(packLoop);
+    PHINode * toReadPosPhi = b.CreatePHI(b.getSizeTy(), 2);
+    toReadPosPhi->addIncoming(initPos, entry);
+    PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
+    blockOffsetPhi->addIncoming(ZERO, entry);
+
+    // Load spread vector
+    Value * spreadVec = b.loadInputStreamBlock("spread", ZERO, blockOffsetPhi);
+    VectorType * popVecTy = FixedVectorType::get(b.getIntNTy(b.getBitBlockWidth() / 8), 8);
+    spreadVec = b.CreateBitCast(spreadVec, popVecTy);
+
+    // Output tracking
+    Value * toReadPos = toReadPosPhi;
+    for (unsigned i = 0; i < fieldWidth; ++i) {
+        Value * spreadElem = b.CreateExtractElement(spreadVec, b.getInt32(i));
+        Value * elementPopCount = b.CreatePopcount(spreadElem);
+
+        // Get a pointer to the next unprocessed item
+        Value * toReadPtr = b.getRawInputPointer("byteStream", toReadPos);
+        VectorType * dataVecTy = FixedVectorType::get(b.getIntNTy(8), b.getBitBlockWidth() / 8);
+        toReadPtr = b.CreatePointerCast(toReadPtr, dataVecTy->getPointerTo());
+        Value * data = b.CreateAlignedLoad(dataVecTy, toReadPtr, 1);
+
+        // Expand the loaded data
+        Value * expanded = b.mvmd_expand(fieldWidth, data, spreadElem); assert (expanded);
+        // Store the expanded data in the i-th pack of the current stride
+        b.storeOutputStreamPack("output", ZERO, b.getSize(i), blockOffsetPhi, expanded);
+
+        // Update the write position for the next pack
+        toReadPos = b.CreateAdd(toReadPos, b.CreateZExt(elementPopCount, b.getSizeTy()));
+
+    }
+
+    // Finalize loop
+    toReadPosPhi->addIncoming(toReadPos, packLoop);
+
+    Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
+    blockOffsetPhi->addIncoming(nextBlk, packLoop);
+
+    Value * moreToDo = b.CreateICmpNE(nextBlk, numOfStrides);
+    b.CreateCondBr(moreToDo, packLoop, packFinalize);
+
+    b.SetInsertPoint(packFinalize);
+}
+
 }

@@ -176,7 +176,7 @@ void ParabixIllustrator::captureByteData(ProgramBuilderRef P, std::string stream
     P.CreateKernelCall<PrintableASCII>(basis, printableBasis, nonASCIIsubstitute);
     StreamSet * printableData = P.CreateStreamSet(1, 8);
     P.CreateKernelCall<P2SKernel>(printableBasis, printableData);
-    Scalar * streamNo = P.CreateConstant(P.getDriver().getSize(illustratedStreamNo));
+    Scalar * streamNo = P.CreateConstant(P.getSize(illustratedStreamNo));
     Kernel * scK = P.CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
     scK->link("appendStreamText_wrapper", appendStreamText_wrapper);
 }
@@ -187,7 +187,7 @@ void ParabixIllustrator::captureBitstream(ProgramBuilderRef P, std::string strea
     P.CreateKernelCall<BitstreamIllustrator>(bitstream, printableBasis, zeroCh, oneCh);
     StreamSet * printableData = P.CreateStreamSet(1, 8);
     P.CreateKernelCall<P2SKernel>(printableBasis, printableData);
-    Scalar * streamNo = P.CreateConstant(P.getDriver().getSize(illustratedStreamNo));
+    Scalar * streamNo = P.CreateConstant(P.getSize(illustratedStreamNo));
     Kernel * scK = P.CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
     scK->link("appendStreamText_wrapper", appendStreamText_wrapper);
 }
@@ -200,7 +200,7 @@ void ParabixIllustrator::captureBixNum(ProgramBuilderRef P, std::string streamLa
         P.CreateKernelCall<PrintableBixNum>(bixnum, printableBasis, hexBase);
         StreamSet * printableData = P.CreateStreamSet(1, 8);
         P.CreateKernelCall<P2SKernel>(printableBasis, printableData);
-        Scalar * streamNo = P.CreateConstant(P.getDriver().getSize(illustratedStreamNo));
+        Scalar * streamNo = P.CreateConstant(P.getSize(illustratedStreamNo));
         Kernel * scK = P.CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
         scK->link("appendStreamText_wrapper", appendStreamText_wrapper);
     } else {

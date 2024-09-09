@@ -166,5 +166,12 @@ private:
     unsigned mPendingSetCount;
 };
 
+class ByteFilterByMaskKernel final : public MultiBlockKernel {
+public:
+    ByteFilterByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const filter, StreamSet * const Packed);
+protected:
+    void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
+};
+
 }
 

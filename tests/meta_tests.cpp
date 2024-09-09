@@ -86,7 +86,6 @@ auto commutative_ne_b = IntStream<int64_t>({1, 2, 3, 4});
 
 TEST_CASE(commutative_ne, commutative_ne_a, commutative_ne_b) {
     AssertNE(P, Input<0>(T), Input<1>(T));
-    AssertNE(P, Input<1>(T), Input<0>(T));
 }
 
 

@@ -1455,4 +1455,55 @@ void FilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & kb, llvm::Value
     kb.SetInsertPoint(done);
 }
 
+
+ByteFilterByMaskKernel::ByteFilterByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const filter, StreamSet * const Packed)
+: MultiBlockKernel(b, "ByteFilterByMask",
+{Binding{"byteStream", byteStream}, Binding{"filter", filter}},
+    {Binding{"output", Packed, PopcountOf("filter")}}, {}, {}, {}) {}
+
+void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+    BasicBlock * entry = b.GetInsertBlock();
+    BasicBlock * packLoop = b.CreateBasicBlock("packLoop");
+    BasicBlock * packFinalize = b.CreateBasicBlock("packFinalize");
+    Constant * const ZERO = b.getSize(0);
+
+    Value * initToWritePos = b.getProducedItemCount("output");
+
+    const auto fieldWidth = getInputStreamSet(0)->getFieldWidth();
+    b.CreateBr(packLoop);
+
+    b.SetInsertPoint(packLoop);
+    PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
+    blockOffsetPhi->addIncoming(ZERO, entry);
+    PHINode * const toWritePosPhi = b.CreatePHI(b.getSizeTy(), 2);
+    toWritePosPhi->addIncoming(initToWritePos, entry);
+    Value * filterVec = b.loadInputStreamBlock("filter", ZERO, blockOffsetPhi);
+
+    VectorType * popVecTy = FixedVectorType::get(b.getIntNTy(b.getBitBlockWidth() / 8), 8);
+
+    filterVec = b.CreateBitCast(filterVec, popVecTy);
+
+    Value * toWritePos = toWritePosPhi;
+
+    for (unsigned i = 0; i < fieldWidth; ++i) {
+        Value * const filterElem = b.CreateExtractElement(filterVec, b.getInt32(i));
+        Value * const elementPopCount = b.CreatePopcount(filterElem);
+        Value * const data = b.loadInputStreamPack("byteStream", ZERO, b.getSize(i), blockOffsetPhi);
+        Value * const compressed = b.mvmd_compress(fieldWidth, data, filterElem);
+        Value * const ptr = b.getRawOutputPointer("output", toWritePos);
+        Value * const toStorePtr = b.CreatePointerCast(ptr, compressed->getType()->getPointerTo());
+        b.CreateAlignedStore(compressed, toStorePtr, 1);
+        toWritePos = b.CreateAdd(toWritePos, b.CreateZExt(elementPopCount, b.getSizeTy()));
+    }
+
+    Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
+    blockOffsetPhi->addIncoming(nextBlk, packLoop);
+
+    toWritePosPhi->addIncoming(toWritePos, packLoop);
+    Value * moreToDo = b.CreateICmpNE(nextBlk, numOfStrides);
+
+    b.CreateCondBr(moreToDo, packLoop, packFinalize);
+    b.SetInsertPoint(packFinalize);
+}
+
 }
