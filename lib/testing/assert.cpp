@@ -93,12 +93,9 @@ void StreamEquivalenceKernel::generateMultiBlockLogic(KernelBuilder & b, Value *
                 lhs = b.loadInputStreamPack("lhs", IDX[i], IDX[j], strideNo);
                 rhs = b.loadInputStreamPack("rhs", IDX[i], IDX[j], strideNo);
             }
-            b.CallPrintRegister("lhs", lhs);
-            b.CallPrintRegister("rhs", rhs);
             Value * const nonMatches = b.CreateICmpNE(lhs, rhs);
             assert (intVecTy->getIntegerBitWidth() == cast<FixedVectorType>(nonMatches->getType())->getNumElements());
             Value * anyNonMatch = b.CreateIsNotNull(b.CreateBitCast(nonMatches, intVecTy));
-            b.CallPrintInt("anyNonMatch", anyNonMatch);
             nextAccum = b.CreateOr(nextAccum, anyNonMatch);
         }
     }

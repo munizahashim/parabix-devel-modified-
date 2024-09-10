@@ -529,7 +529,7 @@ Value * IDISA_AVX2_Builder::mvmd_shuffle(unsigned fw, Value * a, Value * index_v
             Constant * splat01 = ConstantVector::get(Idxs);
             Value * half_fw_indexes = simd_or(idx, mvmd_slli(half_fw, idx, 1));
             half_fw_indexes = simd_add(fw, simd_add(fw, half_fw_indexes, half_fw_indexes), splat01);
-            return mvmd_shuffle(half_fw, a, half_fw_indexes);
+            return fwCast(fw, mvmd_shuffle(half_fw, a, half_fw_indexes));
         } else if (fw == 32) {
             Function * shuf32Func = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx2_permd);
             return CreateCall(shuf32Func->getFunctionType(), shuf32Func, {fwCast(32, a), fwCast(32, index_vector)});
@@ -689,6 +689,7 @@ Value * IDISA_AVX2_Builder::mvmd_compress(unsigned fw, Value * a, Value * select
             // // Step 4: Use mvmd_shuffle2 to shuffle using permute_vec
             Value * const shuffled = mvmd_shuffle(fw, a, permute_vec);
             Value * mask = CreateNot(mvmd_sll(fw, ConstantVector::getAllOnesValue(resultTy), CreatePopcount(select_mask)));
+            assert (shuffled->getType() == mask->getType());
             return CreateAnd(shuffled, mask);
         }
     }
@@ -698,10 +699,6 @@ Value * IDISA_AVX2_Builder::mvmd_compress(unsigned fw, Value * a, Value * select
 
 Value * IDISA_AVX2_Builder::mvmd_expand(unsigned fw, Value * a, Value * select_mask) {
     if (hasBMI2 && (mBitBlockWidth == 256)) {
-
-
-
-
          if (fw >= 8) {
 
              const auto fieldCount = 256 / fw;
@@ -726,8 +723,6 @@ Value * IDISA_AVX2_Builder::mvmd_expand(unsigned fw, Value * a, Value * select_m
                  }
              }
 
-             CallPrintInt("select_mask", select_mask);
-
              // Step 2: Use PEXT instruction to select only the bixnum values for the bytes to be selected
 
              Value * permute_vec = nullptr;
@@ -748,15 +743,7 @@ Value * IDISA_AVX2_Builder::mvmd_expand(unsigned fw, Value * a, Value * select_m
              for (unsigned i = 0; i < m; ++i) {
                  args[0] = ConstantInt::get(intTy, indices[i]);
                  Value * const expanded = CreateCall(pdepFunc->getFunctionType(), pdepFunc, args);
-
-                 CallPrintInt("expanded" +  std::to_string(i), expanded);
-
-
                  Value * byteExpanded = bitspread(expanded);
-
-
-                 CallPrintRegister("byteExpanded" +  std::to_string(i), byteExpanded);
-
                  if (i == 0) {
                      permute_vec = byteExpanded;
                  } else {
@@ -770,11 +757,9 @@ Value * IDISA_AVX2_Builder::mvmd_expand(unsigned fw, Value * a, Value * select_m
 
              // // Step 4: Use mvmd_shuffle to shuffle using permute_vec
              Value * const shuffled = mvmd_shuffle(fw, a, permute_vec);
-             CallPrintRegister("shuffled", shuffled);
              Value * const mask = simd_any(fw, bitspread(select_mask));
-             CallPrintRegister("mask", mask);
+             assert (shuffled->getType() == mask->getType());
              return CreateAnd(shuffled, mask);
-
          }
     }
     return IDISA_AVX_Builder::mvmd_expand(fw, a, select_mask);

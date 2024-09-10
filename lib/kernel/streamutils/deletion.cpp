@@ -1457,9 +1457,11 @@ void FilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & kb, llvm::Value
 
 
 ByteFilterByMaskKernel::ByteFilterByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const filter, StreamSet * const Packed)
-: MultiBlockKernel(b, "ByteFilterByMask",
+: MultiBlockKernel(b, "ByteFilterByMask" + std::to_string(byteStream->getFieldWidth()),
 {Binding{"byteStream", byteStream}, Binding{"filter", filter}},
-    {Binding{"output", Packed, PopcountOf("filter")}}, {}, {}, {}) {}
+{Binding{"output", Packed, PopcountOf("filter")}}, {}, {}, {}) {
+
+}
 
 void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
     BasicBlock * entry = b.GetInsertBlock();
@@ -1479,7 +1481,7 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     toWritePosPhi->addIncoming(initToWritePos, entry);
     Value * filterVec = b.loadInputStreamBlock("filter", ZERO, blockOffsetPhi);
 
-    VectorType * popVecTy = FixedVectorType::get(b.getIntNTy(b.getBitBlockWidth() / 8), 8);
+    VectorType * popVecTy = FixedVectorType::get(b.getIntNTy(b.getBitBlockWidth() / fieldWidth), fieldWidth);
 
     filterVec = b.CreateBitCast(filterVec, popVecTy);
 

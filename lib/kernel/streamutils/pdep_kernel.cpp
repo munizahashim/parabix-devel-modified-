@@ -837,7 +837,7 @@ StreamSet * InsertionSpreadMask(PipelineBuilder & P,
 
 
 ByteSpreadByMaskKernel::ByteSpreadByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const spread, StreamSet * const Packed)
-: MultiBlockKernel(b, "ByteSpreadByMask",
+: MultiBlockKernel(b, "ByteSpreadByMask" + std::to_string(byteStream->getFieldWidth()),
 {Binding{"byteStream", byteStream, PopcountOf("spread")}, Binding{"spread", spread, FixedRate(1)}},
     {Binding{"output", Packed, FixedRate(1)}}, {}, {}, {}) {}
 
@@ -860,9 +860,10 @@ void ByteSpreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
     // Load spread vector
     Value * spreadVec = b.loadInputStreamBlock("spread", ZERO, blockOffsetPhi);
-    VectorType * popVecTy = FixedVectorType::get(b.getIntNTy(b.getBitBlockWidth() / 8), 8);
+    FixedVectorType * popVecTy = FixedVectorType::get(b.getIntNTy(b.getBitBlockWidth() / fieldWidth), fieldWidth);
     spreadVec = b.CreateBitCast(spreadVec, popVecTy);
 
+    FixedVectorType * dataVecTy = FixedVectorType::get(b.getIntNTy(fieldWidth), b.getBitBlockWidth() / fieldWidth);
     // Output tracking
     Value * toReadPos = toReadPosPhi;
     for (unsigned i = 0; i < fieldWidth; ++i) {
@@ -871,12 +872,11 @@ void ByteSpreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
         // Get a pointer to the next unprocessed item
         Value * toReadPtr = b.getRawInputPointer("byteStream", toReadPos);
-        VectorType * dataVecTy = FixedVectorType::get(b.getIntNTy(8), b.getBitBlockWidth() / 8);
         toReadPtr = b.CreatePointerCast(toReadPtr, dataVecTy->getPointerTo());
         Value * data = b.CreateAlignedLoad(dataVecTy, toReadPtr, 1);
 
         // Expand the loaded data
-        Value * expanded = b.mvmd_expand(fieldWidth, data, spreadElem); assert (expanded);
+        Value * const expanded = b.CreateBitCast(b.mvmd_expand(fieldWidth, data, spreadElem), b.getBitBlockType());
         // Store the expanded data in the i-th pack of the current stride
         b.storeOutputStreamPack("output", ZERO, b.getSize(i), blockOffsetPhi, expanded);
 

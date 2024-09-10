@@ -52,22 +52,16 @@ uint32_t runTestCase(CPUDriver & driver, const size_t testLength, const Mode mod
 
     using datatype_t = typename boost::uint_t<FieldWidth>::exact;
 
-    using DataAllocator = AlignedAllocator<datatype_t, 512 / FieldWidth>;
+    using Allocator = AlignedAllocator<uint8_t, (512 / 8)>;
 
-    DataAllocator alloc;
+    Allocator alloc;
 
-    datatype_t * const source = alloc.allocate(testLength);
-
-    using MarkerAllocator = AlignedAllocator<uint64_t, 512 / 64>;
-
+    datatype_t * const source = (datatype_t*)alloc.allocate(testLength * sizeof(datatype_t));
 
     std::uniform_int_distribution<datatype_t> dataDist(0ULL, std::numeric_limits<datatype_t>::max());
     for (size_t i = 0; i < testLength; ++i) {
         source[i] = dataDist(rng);
     }
-
-
-    MarkerAllocator markerAlloc;
 
     std::uniform_int_distribution<uint64_t> markDist(0ULL, std::numeric_limits<uint64_t>::max());
 
@@ -84,7 +78,7 @@ uint32_t runTestCase(CPUDriver & driver, const size_t testLength, const Mode mod
 
         markerLength = (testLength + 63) / 64;
 
-        markers = markerAlloc.allocate(markerLength);
+        markers = (uint64_t*)alloc.allocate(markerLength * sizeof(uint64_t));
 
         size_t popCount = 0;
 
@@ -104,7 +98,7 @@ uint32_t runTestCase(CPUDriver & driver, const size_t testLength, const Mode mod
 
         resultLength = (popCount + 511ULL) & ~511ULL;
 
-        result = alloc.allocate(resultLength);
+        result = (datatype_t*)alloc.allocate(resultLength * sizeof(datatype_t));
 
         size_t out = 0;
 
@@ -135,7 +129,7 @@ uint32_t runTestCase(CPUDriver & driver, const size_t testLength, const Mode mod
 
         size_t capacity = (testLength * 4  + 511) / 64;
 
-        markers = markerAlloc.allocate(capacity);
+        markers = (uint64_t*)alloc.allocate(capacity * sizeof(uint64_t));
 
         size_t total = 0;
 
@@ -147,7 +141,7 @@ uint32_t runTestCase(CPUDriver & driver, const size_t testLength, const Mode mod
             if (LLVM_UNLIKELY(total >= capacity)) {
                 // resize
                 const auto newCapacity = (capacity * 2);
-                uint64_t * const newMarkers = markerAlloc.allocate(newCapacity);
+                uint64_t * const newMarkers = (uint64_t*)alloc.allocate(newCapacity * sizeof(uint64_t));
                 std::memcpy(newMarkers, markers, capacity * sizeof(uint64_t));
                 markers = newMarkers;
                 capacity = newCapacity;
@@ -166,7 +160,7 @@ uint32_t runTestCase(CPUDriver & driver, const size_t testLength, const Mode mod
 
         markerLength = (total * 64);
         resultLength = (markerLength + 511) & ~511;
-        result = alloc.allocate(resultLength);
+        result = (datatype_t*)alloc.allocate(resultLength * sizeof(datatype_t));
 
         size_t in = 0;
         size_t out = 0;
@@ -230,38 +224,32 @@ uint32_t runTestCase(CPUDriver & driver, const size_t testLength, const Mode mod
 
 bool runTestCase(CPUDriver & driver, const size_t testLength, const size_t fieldWidth, const Mode mode, std::default_random_engine & rng) {
 
-    if (mode == Mode::Filter) {
-        llvm::errs() << "FILTER";
-    } else if (mode == Mode::Spread) {
-        llvm::errs() << "SPREAD";
-    }
-
-    llvm::errs() << " TEST: " << testLength << 'x' << fieldWidth << "\n\n";
-
     uint32_t result = 0;
-    if (fieldWidth == 8) {
-        result = runTestCase<8>(driver, testLength, mode, rng);
-    } else if (fieldWidth == 16) {
-        result = runTestCase<16>(driver, testLength, mode, rng);
-    } else if (fieldWidth == 32) {
-        result = runTestCase<32>(driver, testLength, mode, rng);
-    } else if (fieldWidth == 64) {
-        result = runTestCase<64>(driver, testLength, mode, rng);
-    } else {
-        llvm::report_fatal_error("Unexpected field width");
+
+    try {
+        if (fieldWidth == 8) {
+            result = runTestCase<8>(driver, testLength, mode, rng);
+        } else if (fieldWidth == 16) {
+            result = runTestCase<16>(driver, testLength, mode, rng);
+        } else if (fieldWidth == 32) {
+            result = runTestCase<32>(driver, testLength, mode, rng);
+        } else if (fieldWidth == 64) {
+            result = runTestCase<64>(driver, testLength, mode, rng);
+        } else {
+            llvm::report_fatal_error("Unexpected field width");
+        }
+    }  catch (...) {
+        result = 1;
     }
 
     if (result != 0 || optVerbose) {
-
         if (mode == Mode::Filter) {
             llvm::errs() << "FILTER";
         } else if (mode == Mode::Spread) {
             llvm::errs() << "SPREAD";
         }
 
-        llvm::errs() << " TEST: " << testLength << 'x' << fieldWidth << " : ";
-
-        llvm::errs() << " -- ";
+        llvm::errs() << " TEST: " << testLength << 'x' << fieldWidth << " -- ";
         if (result == 0) {
             llvm::errs() << "success";
         } else {
@@ -310,8 +298,8 @@ int main(int argc, char *argv[]) {
     std::default_random_engine rng(rd());
 
     bool testResult = false;
-    //for (unsigned rounds = 0; rounds < 10; ++rounds) {
+    for (unsigned rounds = 0; rounds < 100; ++rounds) {
         testResult |= runTestCase(driver, rng);
-    //}
+    }
     return testResult ? -1 : 0;
 }

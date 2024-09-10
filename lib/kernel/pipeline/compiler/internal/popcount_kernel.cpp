@@ -243,7 +243,6 @@ void PopCountKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * co
     b.CreateCondBr(done, popCountLoop, popCountExit);
 
     b.SetInsertPoint(popCountExit);
-
     #ifndef USE_LOOKBEHIND_FOR_LAST_VALUE
     if (LLVM_LIKELY(mType == PopCountType::POSITIVE || mType == PopCountType::NEGATIVE)) {
         Value * count = positivePartialSum;
