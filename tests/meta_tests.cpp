@@ -38,11 +38,12 @@ TEST_CASE(long_hex_ne, long_hex_ne_i, long_hex_ne_e) {
 
 
 auto hex_binary_eq_i = HexStream("0123 4567 89ab cdef");
+
 auto hex_binary_eq_e = BinaryStream(
-    ".... ...1 ..1. ..11"
-    ".1.. .1.1 .11. .111"
-    "1... 1..1 1.1. 1.11"
-    "11.. 11.1 111. 1111");
+    ".... 1... .1.. 11.."
+    "..1. 1.1. .11. 111."
+    "...1 1..1 .1.1 11.1"
+    "..11 1.11 .111 1111");
 
 TEST_CASE(hex_binary_equivalence, hex_binary_eq_i, hex_binary_eq_e) {
     AssertEQ(P, Input<0>(T), Input<1>(T));

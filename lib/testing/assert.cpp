@@ -29,7 +29,7 @@ StreamEquivalenceKernel::StreamEquivalenceKernel(LLVMTypeSystemInterface & ts,
     StreamSet * rhs,
     Scalar * outPtr)
 : MultiBlockKernel(ts, KernelName(mode, lhs, rhs),
-    {{"lhs", lhs}, {"rhs", rhs}},
+    {{"lhs", lhs, FixedRate(), Principal()}, {"rhs", rhs, FixedRate(), ZeroExtended()}},
     {},
     {{"result_ptr", outPtr}},
     {},
@@ -42,7 +42,7 @@ StreamEquivalenceKernel::StreamEquivalenceKernel(LLVMTypeSystemInterface & ts,
 }
 
 void StreamEquivalenceKernel::generateInitializeMethod(KernelBuilder & b) {
-    // b.setScalarField("anyNonMatch", b.getInt1(mMode == Mode::EQ));
+    b.setScalarField("anyNonMatch", b.getInt1(false));
 }
 
 void StreamEquivalenceKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
@@ -110,47 +110,39 @@ void StreamEquivalenceKernel::generateMultiBlockLogic(KernelBuilder & b, Value *
 }
 
 void StreamEquivalenceKernel::generateFinalizeMethod(KernelBuilder & b) {
-    // a `result` value of `true` means the assertion passed
-    Value * anyNonMatch = b.getScalarField("anyNonMatch");
+    Value * result = b.getScalarField("anyNonMatch");
     if (mMode == Mode::EQ) {
-        anyNonMatch = b.CreateNot(anyNonMatch);
+        result = b.CreateNot(result);
     }
-
-
     // A `ptrVal` value of `0` means that the test is currently passing and a
     // value of `1` means the test is failing. If the test is already failing,
     // then we don't need to update the test state.
     Value * resultPtr = b.getScalarField("result_ptr");
-
-
     Value * const ptrVal = b.CreateLoad(b.getInt32Ty(), resultPtr);
-    Value * resultState = b.CreateSelect(anyNonMatch, ptrVal, b.getInt32(1));
-    b.CreateStore(resultState, resultPtr);
-
-//    if (mMode == Mode::EQ) {
-//        // ptrVal is initially zero
-//        resultState = b.CreateSelect(anyNonMatch, ptrVal, b.getInt32(1));
-//    } else {
-//        // To preserve commutativity of `NE` comparisons, two additional test
-//        // states are needed. State `2` represents a partial passing `NE`
-//        // comparison and state `3` represents a partial failing `NE` comparison.
-//        // `AssertNE` first checks `A != B` putting the test into a parital
-//        // state (`2` if the comparison returns `true` or `3` if it returns `false`).
-//        // The second comparison `B != A` resolves the partial state. If the second
-//        // comparison returns `false` and the first comparison did as well (i.e.,
-//        // the test is in state `3`) then the test is put into a failing state.
-//        // Otherwise, if either of the tests returned `true` the total assertion
-//        // passed.
-//        Value * const isParitalState = b.CreateOr(b.CreateICmpEQ(ptrVal, b.getInt32(2)), b.CreateICmpEQ(ptrVal, b.getInt32(3)));
-//        Value * const resolveToFail = b.CreateAnd(b.CreateICmpEQ(ptrVal, b.getInt32(3)), b.CreateNot(anyNonMatch));
-//        resultState = b.CreateSelect(
-//            isParitalState,
-//            b.CreateSelect(resolveToFail, b.getInt32(1), b.getInt32(0)),
-//            b.CreateSelect(anyNonMatch, b.getInt32(2), b.getInt32(3))
-//        );
-//    }
-//    Value * const newVal = b.CreateSelect(b.CreateICmpEQ(ptrVal, b.getInt32(1)), b.getInt32(1), resultState);
-//    b.CreateStore(newVal, resultPtr);
+    Value * resultState;
+    if (mMode == Mode::EQ) {
+        resultState = b.CreateSelect(result, b.getInt32(0), b.getInt32(1));
+    } else {
+        // To preserve commutativity of `NE` comparisons, two additional test
+        // states are needed. State `2` represents a partial passing `NE`
+        // comparison and state `3` represents a partial failing `NE` comparison.
+        // `AssertNE` first checks `A != B` putting the test into a parital
+        // state (`2` if the comparison returns `true` or `3` if it returns `false`).
+        // The second comparison `B != A` resolves the partial state. If the second
+        // comparison returns `false` and the first comparison did as well (i.e.,
+        // the test is in state `3`) then the test is put into a failing state.
+        // Otherwise, if either of the tests returned `true` the total assertion
+        // passed.
+        Value * const isParitalState = b.CreateICmpUGE(ptrVal, b.getInt32(2));
+        Value * const resolveToFail = b.CreateAnd(b.CreateICmpEQ(ptrVal, b.getInt32(3)), b.CreateNot(result));
+        resultState = b.CreateSelect(
+            isParitalState,
+            b.CreateSelect(resolveToFail, b.getInt32(1), b.getInt32(0)),
+            b.CreateSelect(result, b.getInt32(2), b.getInt32(3))
+        );
+    }
+    Value * const newVal = b.CreateSelect(b.CreateICmpEQ(ptrVal, b.getInt32(1)), b.getInt32(1), resultState);
+    b.CreateStore(newVal, resultPtr);
 }
 
 } // namespace kernel
@@ -161,13 +153,13 @@ void AssertEQ(kernel::PipelineBuilder & P, StreamSet * lhs, StreamSet * rhs) {
     auto ptr = P.getInputScalar("output");
     // given equal length inputs, both LHS and RHS are equivalent
     P.CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::EQ, lhs, rhs, ptr);
-//    P.CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::EQ, rhs, lhs, ptr);
+    P.CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::EQ, rhs, lhs, ptr);
 }
 
 void AssertNE(kernel::PipelineBuilder & P, StreamSet * lhs, StreamSet * rhs) {
     auto ptr = P.getInputScalar("output");
     P.CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, lhs, rhs, ptr);
-//    P.CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, rhs, lhs, ptr);
+    P.CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, rhs, lhs, ptr);
 }
 
 } // namespace testing
