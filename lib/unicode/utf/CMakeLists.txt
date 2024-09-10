@@ -13,4 +13,5 @@ SRC
 DEPS
     re.cc
     unicode.core
+    pablo.bixnum
 )

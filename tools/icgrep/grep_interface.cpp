@@ -117,6 +117,7 @@ static cl::opt<GrepModeType, true> GrepModeOption(cl::desc("Abbreviated output m
         clEnumValN(FilesWithoutMatch, "L", "Display only the names of files that do not match the pattern."),
         clEnumValN(QuietMode, "q", "Do not generate any output and ignore errors; set the return to zero status if a match is found."),
         clEnumValN(CountOnly, "count", "Alias for -c"),
+        clEnumValN(CountAll, "countall", "Count and display the total number matched positions of files that have at least one match."),
         clEnumValN(FilesWithMatch, "files-with-match", "Alias for -l"),
         clEnumValN(FilesWithoutMatch, "files-without-match", "Alias for -L"),
         clEnumValN(QuietMode, "quiet", "Alias for -q"),
