@@ -100,14 +100,14 @@ void editdGPUKernel::generateFinalBlockMethod(KernelBuilder & b, Value * remaini
     RepeatDoBlockLogic(b);
 }
 
-editdGPUKernel::editdGPUKernel(KernelBuilder & b, unsigned dist, unsigned pattLen, unsigned groupSize) :
-BlockOrientedKernel(b, "editd_gpu",
-{Binding{b.getStreamSetTy(4), "CCStream"}},
-{Binding{b.getStreamSetTy(dist + 1), "ResultStream"}},
-{Binding{PointerType::get(b.getInt8Ty(), 1), "pattStream"},
-Binding{PointerType::get(ArrayType::get(b.getBitBlockType(), pattLen * (dist + 1) * 4 * groupSize), 0), "strideCarry"}},
+editdGPUKernel::editdGPUKernel(LLVMTypeSystemInterface & ts, unsigned dist, unsigned pattLen, unsigned groupSize) :
+BlockOrientedKernel(ts, "editd_gpu",
+{Binding{ts.getStreamSetTy(4), "CCStream"}},
+{Binding{ts.getStreamSetTy(dist + 1), "ResultStream"}},
+{Binding{PointerType::get(ts.getInt8Ty(), 1), "pattStream"},
+Binding{PointerType::get(ArrayType::get(ts.getBitBlockType(), pattLen * (dist + 1) * 4 * groupSize), 0), "strideCarry"}},
 {},
-{InternalScalar{ScalarType::NonPersistent, b.getBitBlockType(), "EOFmask"}})
+{InternalScalar{ScalarType::NonPersistent, ts.getBitBlockType(), "EOFmask"}})
 , mEditDistance(dist)
 , mPatternLen(pattLen)
 , mGroupSize(groupSize) {

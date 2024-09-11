@@ -64,6 +64,7 @@ SRC
     optimizationbranch/optimizationbranch.cpp
     pipeline_builder.cpp
     pipeline_kernel.cpp
+    program_builder.cpp
 DEPS
     objcache
     kernel.illustrator

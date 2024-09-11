@@ -12,7 +12,7 @@
 #include <re/unicode/resolve_properties.h>
 #include <re/cc/cc_kernel.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/core/streamset.h>
@@ -50,38 +50,34 @@ std::vector<fs::path> allFiles;
 
 typedef uint64_t (*GCountFunctionType)(uint32_t fd);
 
-GCountFunctionType pipelineGen(CPUDriver & pxDriver) {
+GCountFunctionType pipelineGen(CPUDriver & driver) {
 
-    auto & b = pxDriver.getBuilder();
+    auto P = CreatePipeline(driver, Input<uint32_t>{"fileDescriptor"}, Output<uint64_t>{"countResult"});
 
-    auto P = pxDriver.makePipeline(
-                {Binding{b.getInt32Ty(), "fileDescriptor"}},
-                {Binding{b.getInt64Ty(), "countResult"}});
-
-    Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
+    Scalar * const fileDescriptor = P.getInputScalar("fileDescriptor");
 
     //  Create a stream set consisting of a single stream of 8-bit units (bytes).
-    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
 
     //  Read the file into the ByteStream.
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     //  Create a set of 8 parallel streams of 1-bit units (bits).
-    StreamSet * const BasisBits = P->CreateStreamSet(8, 1);
+    StreamSet * const BasisBits = P.CreateStreamSet(8, 1);
 
     //  Transpose the ByteSteam into parallel bit stream for
-    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
 
-    StreamSet * u8index = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    StreamSet * u8index = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
     
-    StreamSet * GCB = P->CreateStreamSet(1, 1);
+    StreamSet * GCB = P.CreateStreamSet(1, 1);
     re::UTF8_Transformer U8xfrmer;
     GraphemeClusterLogic(P, BasisBits, u8index, GCB);
 
-    P->CreateKernelCall<PopcountKernel>(GCB, P->getOutputScalar("countResult"));
+    P.CreateKernelCall<PopcountKernel>(GCB, P.getOutputScalar("countResult"));
 
-    return reinterpret_cast<GCountFunctionType>(P->compile());
+    return reinterpret_cast<GCountFunctionType>(P.compile());
 }
 
 uint64_t gcount1(GCountFunctionType fn_ptr, const uint32_t fileIdx) {
@@ -115,13 +111,13 @@ int main(int argc, char *argv[]) {
     if (argv::RecursiveFlag || argv::DereferenceRecursiveFlag) {
         argv::DirectoriesFlag = argv::Recurse;
     }
-    CPUDriver pxDriver("gc");
+    CPUDriver driver("gc");
 
-    allFiles = argv::getFullFileList(pxDriver, inputFiles);
+    allFiles = argv::getFullFileList(driver, inputFiles);
     const auto fileCount = allFiles.size();
 
     GCountFunctionType gCountFunctionPtr = nullptr;
-    gCountFunctionPtr = pipelineGen(pxDriver);
+    gCountFunctionPtr = pipelineGen(driver);
     
     std::vector<uint64_t> theCounts;
     

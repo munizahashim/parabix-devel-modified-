@@ -9,7 +9,7 @@
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/pipeline/pipeline_kernel.h>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/raw_ostream.h>
 #include <boost/integer/common_factor_rt.hpp>
@@ -42,7 +42,7 @@ static cl::opt<bool> optVerbose("v", cl::desc("Print verbose output"), cl::init(
 
 class RepeatingSourceKernel final : public SegmentOrientedKernel {
 public:
-    RepeatingSourceKernel(KernelBuilder & b, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, Scalar * repLength, const unsigned fillSize = 1024);
+    RepeatingSourceKernel(LLVMTypeSystemInterface & driver, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, Scalar * repLength, const unsigned fillSize = 1024);
 protected:
     bool allocatesInternalStreamSets() const override { return true; }
     void generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * expectedNumOfStrides) override;
@@ -77,14 +77,14 @@ std::string RepeatingSourceKernel::makeSignature(const std::vector<std::vector<u
     return tmp;
 }
 
-RepeatingSourceKernel::RepeatingSourceKernel(KernelBuilder & b, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, Scalar * repLength, const unsigned fillSize)
-: SegmentOrientedKernel(b, getStringHash(makeSignature(pattern, output, fillSize)),
+RepeatingSourceKernel::RepeatingSourceKernel(LLVMTypeSystemInterface & ts, std::vector<std::vector<uint64_t>> pattern, StreamSet * output, Scalar * repLength, const unsigned fillSize)
+: SegmentOrientedKernel(ts, getStringHash(makeSignature(pattern, output, fillSize)),
 // input streams
 {},
 // output stream
 {Binding{"output", output, BoundedRate(0, fillSize), { ManagedBuffer(), Linear() }}},
 // input scalar
-{Binding{b.getSizeTy(), "repLength", repLength}},
+{Binding{ts.getSizeTy(), "repLength", repLength}},
 {},
 // internal scalar
 {})
@@ -92,10 +92,10 @@ RepeatingSourceKernel::RepeatingSourceKernel(KernelBuilder & b, std::vector<std:
 , Pattern(std::move(pattern)) {
     addAttribute(MustExplicitlyTerminate());
     setStride(1);
-    PointerType * const voidPtrTy = b.getVoidPtrTy();
+    PointerType * const voidPtrTy = ts.getVoidPtrTy();
     addInternalScalar(voidPtrTy, "buffer");
     addInternalScalar(voidPtrTy, "ancillaryBuffer");
-    IntegerType * const sizeTy = b.getSizeTy();
+    IntegerType * const sizeTy = ts.getSizeTy();
     addInternalScalar(sizeTy, "effectiveCapacity");
 }
 
@@ -446,7 +446,7 @@ class StreamEq : public MultiBlockKernel {
 public:
     enum class Mode { EQ, NE };
 
-    StreamEq(KernelBuilder & b, StreamSet * x, const bool unalignedLHS, StreamSet * y, const bool unalignedRHS, Scalar * outPtr);
+    StreamEq(LLVMTypeSystemInterface & ts, StreamSet * x, const bool unalignedLHS, StreamSet * y, const bool unalignedRHS, Scalar * outPtr);
     void generateInitializeMethod(KernelBuilder & b) override;
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
     void generateFinalizeMethod(KernelBuilder & b) override;
@@ -472,14 +472,13 @@ inline Bindings StreamEq::makeInputBindings(StreamSet * lhs, const bool unaligne
     return bindings;
 }
 
-StreamEq::StreamEq(
-    KernelBuilder & b,
+StreamEq::StreamEq(LLVMTypeSystemInterface & ts,
     StreamSet * lhs,
     const bool unalignedLHS,
     StreamSet * rhs,
     const bool unalignedRHS,
     Scalar * outPtr)
-    : MultiBlockKernel(b, [&]() -> std::string {
+    : MultiBlockKernel(ts, [&]() -> std::string {
        std::string backing;
        raw_string_ostream str(backing);
        str << "StreamEq::["
@@ -500,7 +499,7 @@ StreamEq::StreamEq(
     {},
     {{"result_ptr", outPtr}},
     {},
-    {InternalScalar(b.getInt1Ty(), "accum")})
+    {InternalScalar(ts.getInt1Ty(), "accum")})
 , UnalignedLHS(unalignedLHS)
 , UnalignedRHS(unalignedRHS)
 {
@@ -610,150 +609,54 @@ typedef void (*TestFunctionType)(uint32_t * output);
 
 using PatternVec = std::vector<std::vector<uint64_t>>;
 
-class NestedRepeatingStreamSetTest : public PipelineKernel {
-public:
-    NestedRepeatingStreamSetTest(KernelBuilder & b,
-                                const PatternVec & pattern,
-                                const bool unaligned,
-                                StreamSet * const Output,
-                                Scalar * const invalid)
-        : PipelineKernel(b
-                         // signature
-                         , "NestedRepeatingStreamSetTest"
-                           + std::to_string(Output->getNumElements())
-                           + "x"
-                           + std::to_string(Output->getFieldWidth())
-                         // contains kernel family calls
-                         , 0
-                         // kernel list
-                         , {}
-                         // called functions
-                         , {}
-                         // stream inputs
-                         , {Binding{"Output", Output, GreedyRate(1), Deferred()}}
-                         // stream outputs
-                         , {}
-                         // input scalars
-                         , {Binding{b.getInt32Ty()->getPointerTo(), "invalid", invalid}}
-                         // output scalars
-                         , {}
-                         // internally generated streamsets
-                         , {}
-                         // length assertions
-                         , {})
-    , mPattern(pattern)
-    , mAllowUnaligned(unaligned) {
-        addAttribute(InternallySynchronized());
-        addAttribute(SideEffecting());
+Kernel * createNestedRepeatingStreamSetTest(CPUDriver & driver,
+                                     const PatternVec & pattern, const bool unaligned,
+                                     StreamSet * const output, Scalar * const invalid) {
 
+    auto P = CreatePipeline(driver,
+                            Input<streamset_t>{"Output", output, GreedyRate(1), Deferred()}, Input<uint32_t*>("invalid", invalid),
+                            InternallySynchronized(), SideEffecting());
+
+    RepeatingStreamSet * RepeatingStream = nullptr;
+    if (unaligned) {
+        RepeatingStream = P.CreateUnalignedRepeatingStreamSet(output->getFieldWidth(), pattern);
+    } else {
+        RepeatingStream = P.CreateRepeatingStreamSet(output->getFieldWidth(), pattern);
     }
 
-protected:
+    P.CreateKernelCall<StreamEq>(RepeatingStream, unaligned, output, false, invalid);
 
-    void instantiateInternalKernels(const std::unique_ptr<PipelineBuilder> & E) final {
+    P.CreateKernelCall<StreamEq>(output, false, RepeatingStream, unaligned, invalid);
 
-        StreamSet * Output = E->getInputStreamSet(0);
+    return P.makeKernel();
+}
 
-        RepeatingStreamSet * RepeatingStream = nullptr;
-        if (mAllowUnaligned) {
-            RepeatingStream = E->CreateUnalignedRepeatingStreamSet(Output->getFieldWidth(), mPattern);
-        } else {
-            RepeatingStream = E->CreateRepeatingStreamSet(Output->getFieldWidth(), mPattern);
-        }
 
-        assert (mInternallyGeneratedStreamSets.size() == 1);
+Kernel * createMultiLevelNestingTest(CPUDriver & driver,
+                                     const PatternVec & pattern, const bool unaligned, const bool familyCall,
+                                     StreamSet * const output, Scalar * const invalid) {
 
-        Scalar * invalid = E->getInputScalar(0);
 
-        E->CreateKernelCall<StreamEq>(RepeatingStream, mAllowUnaligned, Output, false, invalid);
+    auto P = CreatePipeline(driver,
+                            Input<streamset_t>{"Output", output, GreedyRate(1), Deferred()}, Input<uint32_t*>("invalid", invalid),
+                            InternallySynchronized(), SideEffecting());
 
-        E->CreateKernelCall<StreamEq>(Output, false, RepeatingStream, mAllowUnaligned, invalid);
 
+    auto N = createNestedRepeatingStreamSetTest(driver, pattern, unaligned, output, invalid);
+
+    if (familyCall) {
+        P.AddKernelFamilyCall(N);
+    } else {
+        P.AddKernelCall(N);
     }
 
-const PatternVec & mPattern;
-const bool mAllowUnaligned;
-
-};
+    return P.makeKernel();
+}
 
 
-class MultiLevelNestingTest : public PipelineKernel {
-public:
-    MultiLevelNestingTest(KernelBuilder & b,
-                          const PatternVec & pattern,
-                          const bool unaligned,
-                          const bool familyCall,
-                          StreamSet * const Output,
-                          Scalar * const invalid)
-        : PipelineKernel(b
-                         // signature
-                         , [&]() -> std::string {
-                            std::string tmp;
-                            raw_string_ostream out(tmp);
-                            out << "MultiLevelNestedRepeatingStreamSetTest"
-                                << Output->getNumElements()
-                                << "x"
-                                << Output->getFieldWidth();
-                            if (familyCall) {
-                                out << "F";
-                            }
-                            out.flush();
-                            return tmp;
-                         }()
-                         // contains kernel family calls
-                         , 0
-                         // kernel list
-                         , {}
-                         // called functions
-                         , {}
-                         // stream inputs
-                         , {Binding{"Output", Output, GreedyRate(1), Deferred()}}
-                         // stream outputs
-                         , {}
-                         // input scalars
-                         , {Binding{b.getInt32Ty()->getPointerTo(), "invalid", invalid}}
-                         // output scalars
-                         , {}
-                         // internally generated streamsets
-                         , {}
-                         // length assertions
-                         , {})
-  , mPattern(pattern)
-  , mAllowUnaligned(unaligned)
-  , mFamilyCall(familyCall) {
-        addAttribute(InternallySynchronized());
-        addAttribute(SideEffecting());
+bool runRepeatingStreamSetTest(CPUDriver & driver, std::default_random_engine & rng) {
 
-    }
-
-protected:
-
-    void instantiateInternalKernels(const std::unique_ptr<PipelineBuilder> & E) final {
-
-        StreamSet * Output = E->getInputStreamSet(0);
-
-        Scalar * invalid = E->getInputScalar(0);
-
-        if (mFamilyCall) {
-            E->CreateNestedPipelineFamilyCall<NestedRepeatingStreamSetTest>(mPattern, mAllowUnaligned, Output, invalid);
-        } else {
-            E->CreateNestedPipelineCall<NestedRepeatingStreamSetTest>(mPattern, mAllowUnaligned, Output, invalid);
-        }
-
-    }
-
-const PatternVec & mPattern;
-const bool mAllowUnaligned;
-const bool mFamilyCall;
-
-};
-
-
-bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine & rng) {
-
-    auto & b = pxDriver.getBuilder();
-
-    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty()->getPointerTo(), "output"}},{});
+    auto P = CreatePipeline(driver, Input<uint32_t*>{"output"});
 
     unsigned fieldWidth = optFieldWidth;
     if (fieldWidth == 0) {
@@ -775,7 +678,7 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine 
 
     size_t repetitionLength = optRepetitionLength;
     if (repetitionLength == 0) {
-        const auto bw = b.getBitBlockWidth();
+        const auto bw = P.getBitBlockWidth();
         const auto v = boost::lcm<unsigned>(patternLength, bw) * 3U;
         repetitionLength = std::max(v, 4567U);
     }
@@ -812,40 +715,43 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine 
         }
     }
 
-    StreamSet * const Output = P->CreateStreamSet(numElements, fieldWidth);
+    StreamSet * const Output = P.CreateStreamSet(numElements, fieldWidth);
 
-    Scalar *  const repLength = P->CreateConstant(b.getSize(repetitionLength));
+    Scalar *  const repLength = P.CreateConstant(driver.getSize(repetitionLength));
 
-    P->CreateKernelCall<RepeatingSourceKernel>(pattern, Output, repLength);
+    P.CreateKernelCall<RepeatingSourceKernel>(pattern, Output, repLength);
 
-    Scalar * invalid = P->getInputScalar("output");
+    Scalar * invalid = P.getInputScalar("output");
 
     if (useNestedTest == 2) {
+        auto K = createMultiLevelNestingTest(driver, pattern, allowUnaligned, useFamilyCall[1], Output, invalid);
+
         if (useFamilyCall[0]) {
-            P->CreateNestedPipelineFamilyCall<MultiLevelNestingTest>(pattern, allowUnaligned, useFamilyCall[1], Output, invalid);
+            P.AddKernelFamilyCall(K);
         } else {
-            P->CreateNestedPipelineCall<MultiLevelNestingTest>(pattern, allowUnaligned, useFamilyCall[1], Output, invalid);
+            P.AddKernelCall(K);
         }
     } else if (useNestedTest == 1) {
+        auto K = createNestedRepeatingStreamSetTest(driver, pattern, allowUnaligned, Output, invalid);
         if (useFamilyCall[0]) {
-            P->CreateNestedPipelineFamilyCall<NestedRepeatingStreamSetTest>(pattern, allowUnaligned, Output, invalid);
+            P.AddKernelFamilyCall(K);
         } else {
-            P->CreateNestedPipelineCall<NestedRepeatingStreamSetTest>(pattern, allowUnaligned, Output, invalid);
+            P.AddKernelCall(K);
         }
     } else {
         RepeatingStreamSet * RepeatingStream = nullptr;
         if (allowUnaligned) {
-            RepeatingStream = P->CreateUnalignedRepeatingStreamSet(fieldWidth, pattern);
+            RepeatingStream = P.CreateUnalignedRepeatingStreamSet(fieldWidth, pattern);
         } else {
-            RepeatingStream = P->CreateRepeatingStreamSet(fieldWidth, pattern);
+            RepeatingStream = P.CreateRepeatingStreamSet(fieldWidth, pattern);
         }
 
-        P->CreateKernelCall<StreamEq>(RepeatingStream, allowUnaligned, Output, false, invalid);
+        P.CreateKernelCall<StreamEq>(RepeatingStream, allowUnaligned, Output, false, invalid);
 
-        P->CreateKernelCall<StreamEq>(Output, false, RepeatingStream, allowUnaligned, invalid);
+        P.CreateKernelCall<StreamEq>(Output, false, RepeatingStream, allowUnaligned, invalid);
     }
 
-    const auto f = reinterpret_cast<TestFunctionType>(P->compile());
+    const auto f = P.compile();
 
     uint32_t result = 0;
     f(&result);
@@ -900,13 +806,13 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine 
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {});
-    CPUDriver pxDriver("test");
+    CPUDriver driver("test");
     std::random_device rd;
     std::default_random_engine rng(rd());
 
     bool testResult = false;
     for (unsigned rounds = 0; rounds < 10; ++rounds) {
-        testResult |= runRepeatingStreamSetTest(pxDriver, rng);
+        testResult |= runRepeatingStreamSetTest(driver, rng);
     }
     return testResult ? -1 : 0;
 }

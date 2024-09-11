@@ -178,7 +178,7 @@ std::vector<Value *> initializeCompressionMasks(KernelBuilder & b,
     return keyMasks;
 }
 
-LengthGroupCompression::LengthGroupCompression(KernelBuilder & b,
+LengthGroupCompression::LengthGroupCompression(LLVMTypeSystemInterface & ts,
                                                EncodingInfo encodingScheme,
                                                unsigned groupNo,
                                                StreamSet * symbolMarks,
@@ -187,13 +187,13 @@ LengthGroupCompression::LengthGroupCompression(KernelBuilder & b,
                                                StreamSet * compressionMask,
                                                StreamSet * encodedBytes,
                                                unsigned strideBlocks)
-: MultiBlockKernel(b, "LengthGroupCompression" + lengthGroupSuffix(encodingScheme, groupNo) + (PrefixCheck ? "_prefix" : ""),
+: MultiBlockKernel(ts, "LengthGroupCompression" + lengthGroupSuffix(encodingScheme, groupNo) + (PrefixCheck ? "_prefix" : ""),
                    {Binding{"symbolMarks", symbolMarks},
                        Binding{"hashValues", hashValues},
                        ByteDataBinding(encodingScheme.byLength[groupNo].hi, byteData)},
                    {}, {}, {},
-                   {InternalScalar{b.getBitBlockType(), "pendingMaskInverted"},
-                       InternalScalar{ArrayType::get(b.getInt8Ty(), hashTableSize(encodingScheme.byLength[groupNo])), "hashTable"}}),
+                   {InternalScalar{ts.getBitBlockType(), "pendingMaskInverted"},
+                       InternalScalar{ArrayType::get(ts.getInt8Ty(), hashTableSize(encodingScheme.byLength[groupNo])), "hashTable"}}),
 mEncodingScheme(encodingScheme), mGroupNo(groupNo) {
     if (DelayedAttribute) {
         mOutputStreamSets.emplace_back("compressionMask", compressionMask, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
@@ -201,9 +201,9 @@ mEncodingScheme(encodingScheme), mGroupNo(groupNo) {
     } else {
         mOutputStreamSets.emplace_back("compressionMask", compressionMask, BoundedRate(0,1));
         mOutputStreamSets.emplace_back("encodedBytes", encodedBytes, BoundedRate(0,1));
-        addInternalScalar(ArrayType::get(b.getInt8Ty(), encodingScheme.byLength[groupNo].hi), "pendingOutput");
+        addInternalScalar(ArrayType::get(ts.getInt8Ty(), encodingScheme.byLength[groupNo].hi), "pendingOutput");
     }
-    setStride(std::min(b.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
+    setStride(std::min(ts.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
 }
 
 void LengthGroupCompression::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
@@ -495,32 +495,32 @@ void initializeDecompressionMasks(KernelBuilder & b,
 }
 
 
-LengthGroupDecompression::LengthGroupDecompression(KernelBuilder & b,
+LengthGroupDecompression::LengthGroupDecompression(LLVMTypeSystemInterface & ts,
                                                    EncodingInfo encodingScheme,
                                                    unsigned groupNo,
                                                    StreamSet * keyMarks,
                                                    StreamSet * hashValues,
                                                    StreamSet * const hashMarks, StreamSet * const byteData,
                                                    StreamSet * const result, unsigned strideBlocks)
-: MultiBlockKernel(b, "LengthGroupDecompression" + lengthGroupSuffix(encodingScheme, groupNo),
+: MultiBlockKernel(ts, "LengthGroupDecompression" + lengthGroupSuffix(encodingScheme, groupNo),
                    {Binding{"keyMarks0", keyMarks},
                        Binding{"hashValues", hashValues},
                        Binding{"hashMarks0", hashMarks},
                        ByteDataBinding(encodingScheme.byLength[groupNo].hi, byteData)
                    },
                    {}, {}, {},
-                   {InternalScalar{ArrayType::get(b.getInt8Ty(), encodingScheme.byLength[groupNo].hi), "pendingOutput"},
+                   {InternalScalar{ArrayType::get(ts.getInt8Ty(), encodingScheme.byLength[groupNo].hi), "pendingOutput"},
                        // Hash table 8 length-based tables with 256 16-byte entries each.
-                       InternalScalar{ArrayType::get(b.getInt8Ty(), hashTableSize(encodingScheme.byLength[groupNo])), "hashTable"}}),
+                       InternalScalar{ArrayType::get(ts.getInt8Ty(), hashTableSize(encodingScheme.byLength[groupNo])), "hashTable"}}),
     mEncodingScheme(encodingScheme), mGroupNo(groupNo) {
-    setStride(std::min(b.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
+    setStride(std::min(ts.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
     if (DelayedAttribute) {
         mOutputStreamSets.emplace_back("result", result, FixedRate(), Delayed(encodingScheme.maxSymbolLength()) );
     } else {
         mOutputStreamSets.emplace_back("result", result, BoundedRate(0,1));
     }
     if (!DelayedAttribute) {
-        addInternalScalar(ArrayType::get(b.getInt8Ty(), encodingScheme.byLength[groupNo].hi), "pendingOutput");
+        addInternalScalar(ArrayType::get(ts.getInt8Ty(), encodingScheme.byLength[groupNo].hi), "pendingOutput");
     }
 }
 
@@ -990,7 +990,7 @@ void generateKeyProcessingLoops(KernelBuilder & b,
     }
 }
 
-FixedLengthCompression::FixedLengthCompression(KernelBuilder & b,
+FixedLengthCompression::FixedLengthCompression(LLVMTypeSystemInterface & ts,
                                                EncodingInfo encodingScheme,
                                                unsigned lo,
                                                StreamSet * const byteData,
@@ -999,10 +999,10 @@ FixedLengthCompression::FixedLengthCompression(KernelBuilder & b,
                                                StreamSet * compressionMask,
                                                StreamSet * encodedBytes,
                                                unsigned strideBlocks)
-: MultiBlockKernel(b, "FixedLengthCompression" + lengthRangeSuffix(encodingScheme, lo, lo + symbolMarks.size() - 1),
+: MultiBlockKernel(ts, "FixedLengthCompression" + lengthRangeSuffix(encodingScheme, lo, lo + symbolMarks.size() - 1),
                    {ByteDataBinding(lo, byteData), Binding{"hashValues", hashValues}}, {}, {}, {}, {}),
 mEncodingScheme(encodingScheme), mLo(lo), mHi(lo + symbolMarks.size() - 1)  {
-    setStride(std::min(b.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
+    setStride(std::min(ts.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
     for (unsigned i = 0; i < symbolMarks.size(); i++) {
         mInputStreamSets.emplace_back("symbolMarks" + (i > 0 ? std::to_string(i) : ""), symbolMarks[i]);
     }
@@ -1012,18 +1012,18 @@ mEncodingScheme(encodingScheme), mLo(lo), mHi(lo + symbolMarks.size() - 1)  {
     } else {
         mOutputStreamSets.emplace_back("compressionMask", compressionMask, BoundedRate(0,1));
         mOutputStreamSets.emplace_back("encodedBytes", encodedBytes, BoundedRate(0,1));
-        addInternalScalar(ArrayType::get(b.getInt8Ty(), mHi), "pendingOutput");
+        addInternalScalar(ArrayType::get(ts.getInt8Ty(), mHi), "pendingOutput");
     }
-    mInternalScalars.emplace_back(b.getBitBlockType(), "pendingMaskInverted");
+    mInternalScalars.emplace_back(ts.getBitBlockType(), "pendingMaskInverted");
     mSubTableSize = 0;
     for (unsigned i = 0; i < symbolMarks.size(); i++) {
         unsigned lgth = lo + i;
         size_t subTableSize = hashTableSize(encodingScheme, lgth);
         if (subTableSize > mSubTableSize) mSubTableSize = subTableSize;
     }
-    Type * subTableType = ArrayType::get(b.getInt8Ty(), mSubTableSize);
+    Type * subTableType = ArrayType::get(ts.getInt8Ty(), mSubTableSize);
     mInternalScalars.emplace_back(ArrayType::get(subTableType, mHi - mLo + 1), "hashTable");
-    Type * prefixMapTableType  = ArrayType::get(b.getInt16Ty(), 1 << encodingScheme.MAX_HASH_BITS);
+    Type * prefixMapTableType  = ArrayType::get(ts.getInt16Ty(), 1 << encodingScheme.MAX_HASH_BITS);
     mInternalScalars.emplace_back(ArrayType::get(prefixMapTableType, mHi - mLo + 1), "prefixMapTable");
 }
 
@@ -1288,7 +1288,7 @@ void generateHashProcessingLoops(KernelBuilder & b,
     }
 }
 
-FixedLengthDecompression::FixedLengthDecompression(KernelBuilder & b,
+FixedLengthDecompression::FixedLengthDecompression(LLVMTypeSystemInterface & ts,
                                                    EncodingInfo encodingScheme,
                                                    unsigned lo,
                                                    StreamSet * const byteData,
@@ -1296,10 +1296,10 @@ FixedLengthDecompression::FixedLengthDecompression(KernelBuilder & b,
                                                    std::vector<StreamSet *> keyMarks,
                                                    std::vector<StreamSet *> hashMarks,
                                                    StreamSet * const result, unsigned strideBlocks)
-: MultiBlockKernel(b, "FixedLengthDecompression" + lengthRangeSuffix(encodingScheme, lo, lo + keyMarks.size() - 1),
+: MultiBlockKernel(ts, "FixedLengthDecompression" + lengthRangeSuffix(encodingScheme, lo, lo + keyMarks.size() - 1),
                    {ByteDataBinding(lo, byteData), Binding{"hashValues", hashValues}}, {}, {}, {}, {}),
 mEncodingScheme(encodingScheme), mLo(lo), mHi(lo + keyMarks.size() - 1)  {
-    setStride(std::min(b.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
+    setStride(std::min(ts.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
     assert(keyMarks.size() == hashMarks.size() && "keyMarks and hashMarks vectors mismatched");
     for (unsigned i = 0; i < keyMarks.size(); i++) {
         mInputStreamSets.emplace_back("keyMarks" + std::to_string(i), keyMarks[i]);
@@ -1312,14 +1312,14 @@ mEncodingScheme(encodingScheme), mLo(lo), mHi(lo + keyMarks.size() - 1)  {
     } else {
         mOutputStreamSets.emplace_back("result", result, BoundedRate(0,1));
     }
-    mInternalScalars.emplace_back(ArrayType::get(b.getInt8Ty(), encodingScheme.maxSymbolLength()), "pendingOutput");
+    mInternalScalars.emplace_back(ArrayType::get(ts.getInt8Ty(), encodingScheme.maxSymbolLength()), "pendingOutput");
     mSubTableSize = 0;
     for (unsigned i = 0; i < keyMarks.size(); i++) {
         unsigned lgth = lo + i;
         size_t subTableSize = hashTableSize(encodingScheme, lgth);
         if (subTableSize > mSubTableSize) mSubTableSize = subTableSize;
     }
-    Type * subTableType = ArrayType::get(b.getInt8Ty(), mSubTableSize);
+    Type * subTableType = ArrayType::get(ts.getInt8Ty(), mSubTableSize);
     mInternalScalars.emplace_back(ArrayType::get(subTableType, mHi - mLo + 1), "hashTable");
 }
 

@@ -12,7 +12,7 @@ namespace kernel {
 
 class LengthGroupCompression final : public MultiBlockKernel {
 public:
-    LengthGroupCompression(KernelBuilder & b,
+    LengthGroupCompression(LLVMTypeSystemInterface & ts,
                            EncodingInfo encodingScheme,
                            unsigned groupNo,
                            StreamSet * symbolMarks,
@@ -30,7 +30,7 @@ private:
 
 class LengthGroupDecompression final : public MultiBlockKernel {
 public:
-    LengthGroupDecompression(KernelBuilder & b,
+    LengthGroupDecompression(LLVMTypeSystemInterface & ts,
                              EncodingInfo encodingScheme,
                              unsigned groupNo,
                              StreamSet * keyMarks,
@@ -48,7 +48,7 @@ private:
 
 class FixedLengthCompression final : public MultiBlockKernel {
 public:
-    FixedLengthCompression(KernelBuilder & b,
+    FixedLengthCompression(LLVMTypeSystemInterface & ts,
                            EncodingInfo encodingScheme,
                            unsigned length,
                            StreamSet * const byteData,
@@ -68,7 +68,7 @@ private:
 
 class FixedLengthDecompression final : public MultiBlockKernel {
 public:
-    FixedLengthDecompression(KernelBuilder & b,
+    FixedLengthDecompression(LLVMTypeSystemInterface & ts,
                              EncodingInfo encodingScheme,
                              unsigned lo,
                              StreamSet * const byteData,

@@ -17,7 +17,7 @@ namespace kernel {
  */
 class CollapseStreamSet : public BlockOrientedKernel {
 public:
-    CollapseStreamSet(KernelBuilder & b, StreamSet * input, StreamSet * output);
+    CollapseStreamSet(LLVMTypeSystemInterface & ts, StreamSet * input, StreamSet * output);
 protected:
     void generateDoBlockMethod(KernelBuilder & b) override;
 };
@@ -40,7 +40,7 @@ namespace streamutils {
      * 
      * This function is a wrapper for a kernel call to `CollapseStreamSet`.
      */
-    StreamSet * Collapse(const std::unique_ptr<ProgramBuilder> & P, StreamSet * i);
+    StreamSet * Collapse(PipelineBuilder & P, StreamSet * i);
 
 }
 

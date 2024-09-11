@@ -42,7 +42,7 @@ namespace kernel {
 
 class NestingDepth final: public pablo::PabloKernel {
 public:
-    NestingDepth(KernelBuilder & b,
+    NestingDepth(LLVMTypeSystemInterface & ts,
                  StreamSet * brackets,
                  StreamSet * depth, StreamSet * errs,
                  unsigned maxDepth = 15);

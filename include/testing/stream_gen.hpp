@@ -22,6 +22,7 @@
 #include <kernel/io/source_kernel.h>
 #include <testing/stream_parsing.hpp>
 #include <toolchain/toolchain.h>
+#include <kernel/pipeline/program_builder.h>
 
 namespace testing {
 
@@ -621,14 +622,14 @@ IntStreamSet(std::vector<I> const (&arr)[N]) {
 
 /// Constructs a `kernel::StreamSet` from a static stream's properties.
 inline kernel::StreamSet * ToStreamSet(
-    const std::unique_ptr<kernel::ProgramBuilder> & P,
+    kernel::PipelineBuilder & P,
     uint32_t fieldWidth,
     uint32_t numElements,
     kernel::Scalar * pointer,
     kernel::Scalar * size)
 {
-    kernel::StreamSet * source = P->CreateStreamSet(numElements, fieldWidth);
-    P->CreateKernelCall<kernel::MemorySourceKernel>(pointer, size, source);
+    kernel::StreamSet * source = P.CreateStreamSet(numElements, fieldWidth);
+    P.CreateKernelCall<kernel::MemorySourceKernel>(pointer, size, source);
     return source;
 }
 

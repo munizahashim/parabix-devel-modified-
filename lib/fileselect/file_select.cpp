@@ -128,7 +128,7 @@ re::PatternVector getIncludeExcludePatterns() {
         re::RE * excludeRE = re::RE_Parser::parse(path, re::DEFAULT_MODE, re::RE_Syntax::FileGLOB);
         signedPatterns.push_back(std::make_pair(Pattern::Exclude, anchorToFullFileName(excludeRE)));
     }
-    if (ExcludeFromFlag != "") {
+    if (ExcludeFromFlag.getNumOccurrences()) {
         std::ifstream globFile(ExcludeFromFlag.c_str());
         std::string r;
         if (globFile.is_open()) {
@@ -241,7 +241,6 @@ void recursiveFileSelect(CPUDriver & driver,
 
     if (hasLocalIgnoreFile) {
         pathSelectEngine.push(coalesceREs(re::parseGitIgnoreFile(dirpath, ExcludePerDirectory), GitREcoalescing));
-        pathSelectEngine.grepCodeGen();
     }
     // Gather files and subdirectories.
     // TODO: verify whether these are discarded before recursion
@@ -382,9 +381,7 @@ std::vector<fs::path> getFullFileList(CPUDriver & driver, cl::list<std::string> 
 
     grep::NestedInternalSearchEngine pathSelectEngine(driver);
     pathSelectEngine.setRecordBreak(grep::GrepRecordBreakKind::Null);
-    pathSelectEngine.init();
     pathSelectEngine.push(coalesceREs(getIncludeExcludePatterns(), GitREcoalescing));
-    pathSelectEngine.grepCodeGen();
 
     const auto commandLineFileCandidates = fileCandidates.getCandidateCount();
     if (commandLineFileCandidates > 0) {

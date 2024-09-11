@@ -38,7 +38,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <iomanip>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include "json-kernel.h"
 #include "postprocess/json-simple.h"
 #include "postprocess/json-detail.h"
@@ -74,46 +74,39 @@ jsonFunctionType json_parsing_gen(
     std::shared_ptr<PabloParser> parser,
     std::shared_ptr<SourceFile> jsonPabloSrc) {
 
-    auto & b = driver.getBuilder();
-    Type * const int32Ty = b.getInt32Ty();
-    Type * const int64Ty = b.getInt64Ty();
-
     const auto ParallelProcess = !ToCSVFlag && !ShowLinesFlag;
-    Bindings bindingsParallel = {Binding{int64Ty, "errCount"}};
-    Bindings bindingsRegular = {};
-    auto P = driver.makePipeline({Binding{int32Ty, "fd"}},
-        (ParallelProcess ? bindingsParallel : bindingsRegular)
-    );
 
-    Scalar * const fileDescriptor = P->getInputScalar("fd");
+    auto P = CreatePipeline(driver, Input<uint32_t>("fd"));
+
+    Scalar * const fileDescriptor = P.getInputScalar("fd");
 
     // Source data
-    StreamSet * const codeUnitStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
-    StreamSet * const u8basis = P->CreateStreamSet(8);
+    StreamSet * const codeUnitStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
+    StreamSet * const u8basis = P.CreateStreamSet(8);
     Selected_S2P(P, codeUnitStream, u8basis);
 
     // 1. Find string marker (without backslashes)
     // 2. and make string span
-    StreamSet * const stringMarker = P->CreateStreamSet(1);
-    StreamSet * const stringSpan = P->CreateStreamSet(1);
-    P->CreateKernelCall<JSONStringMarker>(
+    StreamSet * const stringMarker = P.CreateStreamSet(1);
+    StreamSet * const stringSpan = P.CreateStreamSet(1);
+    P.CreateKernelCall<JSONStringMarker>(
         u8basis,
         stringMarker,
         stringSpan
     );
 
     // 3. Lexical analysis on basis stream
-    StreamSet * const lexStream = P->CreateStreamSet(12);
-    P->CreateKernelCall<JSONClassifyBytes>(
+    StreamSet * const lexStream = P.CreateStreamSet(12);
+    P.CreateKernelCall<JSONClassifyBytes>(
         u8basis,
         stringSpan,
         lexStream
     );
 
     // 4. Validate UTF8 strings
-    StreamSet * const utf8Err = P->CreateStreamSet(1);
-    P->CreateKernelCall<PabloSourceKernel>(
+    StreamSet * const utf8Err = P.CreateStreamSet(1);
+    P.CreateKernelCall<PabloSourceKernel>(
         parser,
         jsonPabloSrc,
         "ValidateUTF8",
@@ -129,18 +122,18 @@ jsonFunctionType json_parsing_gen(
     // 5. Mark end of keywords (true, false, null)
     // Note: We mark the words later when we sanitize the input because
     // lookahead only works on input streams
-    StreamSet * const keywordEndMarkers = P->CreateStreamSet(3);
-    P->CreateKernelCall<JSONKeywordEndMarker>(
+    StreamSet * const keywordEndMarkers = P.CreateStreamSet(3);
+    P.CreateKernelCall<JSONKeywordEndMarker>(
         u8basis,
         lexStream,
         keywordEndMarkers
     );
 
     // 6. Validate numbers
-    StreamSet * const numberLex = P->CreateStreamSet(1);
-    StreamSet * const numberSpan = P->CreateStreamSet(1);
-    StreamSet * const numberErr = P->CreateStreamSet(1);
-    P->CreateKernelCall<JSONNumberSpan>(
+    StreamSet * const numberLex = P.CreateStreamSet(1);
+    StreamSet * const numberSpan = P.CreateStreamSet(1);
+    StreamSet * const numberErr = P.CreateStreamSet(1);
+    P.CreateKernelCall<JSONNumberSpan>(
         u8basis,
         lexStream,
         stringSpan,
@@ -152,9 +145,9 @@ jsonFunctionType json_parsing_gen(
     // 7. Clean lexers (in case there's special chars inside string)
     // 8. Validate rest of the output (check for extraneous chars)
     // We also take the opportunity to create the keyword marker
-    StreamSet * const combinedLexers = P->CreateStreamSet(4);
-    StreamSet * const extraErr = P->CreateStreamSet(1);
-    P->CreateKernelCall<JSONFindKwAndExtraneousChars>(
+    StreamSet * const combinedLexers = P.CreateStreamSet(4);
+    StreamSet * const extraErr = P.CreateStreamSet(1);
+    P.CreateKernelCall<JSONFindKwAndExtraneousChars>(
         lexStream,
         stringSpan,
         numberSpan,
@@ -164,25 +157,25 @@ jsonFunctionType json_parsing_gen(
     );
 
     if (codegen::EnableIllustrator) {
-        P->captureByteData("codeUnitStream", codeUnitStream);
-        P->captureBitstream("stringSpan", stringSpan);
-        P->captureBitstream("numberSpan", numberSpan);
+        P.captureByteData("codeUnitStream", codeUnitStream);
+        P.captureBitstream("stringSpan", stringSpan);
+        P.captureBitstream("numberSpan", numberSpan);
     }
 
     // 9.1 Prepare and validate StreamSets
     if (ParallelProcess) {
         StreamSet * const brackets = su::Select(P, combinedLexers, su::Range(1, 3));
-        StreamSet * const depthErr = P->CreateStreamSet(1);
-        StreamSet * const syntaxArrErr = P->CreateStreamSet(1);
-        StreamSet * const syntaxObjErr = P->CreateStreamSet(1);
-        StreamSet * const encDepth = P->CreateStreamSet(std::ceil(floor_log2(MaxDepth+1)));
-        P->CreateKernelCall<NestingDepth>(
+        StreamSet * const depthErr = P.CreateStreamSet(1);
+        StreamSet * const syntaxArrErr = P.CreateStreamSet(1);
+        StreamSet * const syntaxObjErr = P.CreateStreamSet(1);
+        StreamSet * const encDepth = P.CreateStreamSet(std::ceil(floor_log2(MaxDepth+1)));
+        P.CreateKernelCall<NestingDepth>(
             brackets,
             encDepth,
             depthErr,
             MaxDepth
         );
-        P->CreateKernelCall<JSONParserArr>(
+        P.CreateKernelCall<JSONParserArr>(
             lexStream,
             stringMarker,
             combinedLexers,
@@ -192,7 +185,7 @@ jsonFunctionType json_parsing_gen(
             OnlyDepth
         );
 
-        P->CreateKernelCall<JSONParserObj>(
+        P.CreateKernelCall<JSONParserObj>(
             lexStream,
             stringMarker,
             combinedLexers,
@@ -203,34 +196,35 @@ jsonFunctionType json_parsing_gen(
         );
 
         // 10. Output error in case JSON is not valid
-        StreamSet * const Errors = P->CreateStreamSet(6, 1);
+        StreamSet * const Errors = P.CreateStreamSet(6, 1);
         // Important: make sure all the streams inside StreamsMerge have Add1, otherwise it fails
-        P->CreateKernelCall<StreamsMerge>(
+        P.CreateKernelCall<StreamsMerge>(
             std::vector<StreamSet *>{extraErr, utf8Err, numberErr, depthErr, syntaxArrErr, syntaxObjErr},
             Errors
         );
         StreamSet * const Errs = su::Collapse(P, Errors);
         auto simpleErrFn = SCAN_CALLBACK(postproc_parensError);
-        Scalar * const errCount = P->getOutputScalar("errCount");
-        P->CreateKernelCall<PopcountKernel>(Errs, errCount);
-        P->CreateCall(simpleErrFn.name, *simpleErrFn.func, { errCount });
+
+        Scalar * const errCount = P.CreateScalar(P.getInt64Ty());
+        P.CreateKernelCall<PopcountKernel>(Errs, errCount);
+        P.CreateCall(simpleErrFn.name, *simpleErrFn.func, { errCount });
 
         if (codegen::EnableIllustrator) {
-            P->captureBixNum("encDepth", encDepth);
-            P->captureBitstream("extraErr", extraErr);
-            P->captureBitstream("utf8Err", utf8Err);
-            P->captureBitstream("numberErr", numberErr);
-            P->captureBitstream("depthErr", depthErr);
-            P->captureBitstream("syntaxArrErr", syntaxArrErr);
-            P->captureBitstream("syntaxObjErr", syntaxObjErr);
-            P->captureBitstream("Errs", Errs);
+            P.captureBixNum("encDepth", encDepth);
+            P.captureBitstream("extraErr", extraErr);
+            P.captureBitstream("utf8Err", utf8Err);
+            P.captureBitstream("numberErr", numberErr);
+            P.captureBitstream("depthErr", depthErr);
+            P.captureBitstream("syntaxArrErr", syntaxArrErr);
+            P.captureBitstream("syntaxObjErr", syntaxObjErr);
+            P.captureBitstream("Errs", Errs);
         }
     } else {
         StreamSet * collapsedLex;
         StreamSet * const symbols = su::Select(P, combinedLexers, 0);
         if (ToCSVFlag) {
-            StreamSet * allLex = P->CreateStreamSet(8, 1);
-            P->CreateKernelCall<StreamsMerge>(
+            StreamSet * allLex = P.CreateStreamSet(8, 1);
+            P.CreateKernelCall<StreamsMerge>(
                     std::vector<StreamSet *>{
                         symbols, stringMarker, keywordEndMarkers, numberLex, stringSpan,
                         extraErr, utf8Err, numberErr
@@ -239,8 +233,8 @@ jsonFunctionType json_parsing_gen(
             );
             collapsedLex = su::Collapse(P, allLex);
         } else {
-            StreamSet * allLex = P->CreateStreamSet(7, 1);
-            P->CreateKernelCall<StreamsMerge>(
+            StreamSet * allLex = P.CreateStreamSet(7, 1);
+            P.CreateKernelCall<StreamsMerge>(
                 std::vector<StreamSet *>{
                     symbols, stringMarker, keywordEndMarkers, numberLex,
                     extraErr, utf8Err, numberErr
@@ -257,8 +251,8 @@ jsonFunctionType json_parsing_gen(
         auto doneJsonFn = SCAN_CALLBACK(postproc_doneCallback);
         auto doneCsv2JsonFn = SCAN_CALLBACK(json2csv_doneCallback);
 
-        auto const LineBreaks = P->CreateStreamSet(1);
-        P->CreateKernelCall<UnixLinesKernelBuilder>(codeUnitStream, LineBreaks, UnterminatedLineAtEOF::Add1);
+        auto const LineBreaks = P.CreateStreamSet(1);
+        P.CreateKernelCall<UnixLinesKernelBuilder>(codeUnitStream, LineBreaks, UnterminatedLineAtEOF::Add1);
         StreamSet * const LineNumbers = scan::LineNumbers(P, collapsedLex, LineBreaks);
         StreamSet * const LineSpans = scan::LineSpans(P, LineBreaks);
         StreamSet * const Spans = scan::FilterLineSpans(P, LineNumbers, LineSpans);
@@ -270,13 +264,13 @@ jsonFunctionType json_parsing_gen(
         scan::Reader(P, driver, fn, doneFn, codeUnitStream, { Indices, Spans }, { LineNumbers, Indices });
     }
 
-    return reinterpret_cast<jsonFunctionType>(P->compile());
+    return P.compile();
 }
 
 int main(int argc, char ** argv) {
     codegen::ParseCommandLineOptions(argc, argv, {&jsonOptions, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
 
-    CPUDriver pxDriver("json");
+    CPUDriver driver("json");
     auto em = ErrorManager::Create();
     auto parser = RecursiveParser::Create(SimpleLexer::Create(em), em);
     auto jsonSource = SourceFile::Relative("json.pablo");
@@ -287,7 +281,7 @@ int main(int argc, char ** argv) {
     if (LLVM_UNLIKELY(fd == -1)) {
         errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
-        auto jsonParsingFunction = json_parsing_gen(pxDriver, parser, jsonSource);
+        auto jsonParsingFunction = json_parsing_gen(driver, parser, jsonSource);
         jsonParsingFunction(fd);
         close(fd);
     }

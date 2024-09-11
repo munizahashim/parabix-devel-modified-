@@ -14,21 +14,25 @@ namespace kernel {
 
 class ScanMatchKernel : public MultiBlockKernel {
 public:
-    ScanMatchKernel(KernelBuilder & b, StreamSet * const Matches, StreamSet * const LineBreakStream, StreamSet * const ByteStream, Scalar * const callbackObject, unsigned strideBlocks = 1);
+    ScanMatchKernel(LLVMTypeSystemInterface & ts,
+                    StreamSet * const Matches, StreamSet * const LineBreakStream, StreamSet * const ByteStream,
+                    Scalar * const callbackObject, unsigned strideBlocks = 1);
 private:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };
 
 class ScanBatchKernel : public MultiBlockKernel {
 public:
-    ScanBatchKernel(KernelBuilder & b, StreamSet * const Matches, StreamSet * const LineBreakStream, StreamSet * const ByteStream, Scalar * const callbackObject, unsigned strideBlocks = 1);
+    ScanBatchKernel(LLVMTypeSystemInterface & ts,
+                    StreamSet * const Matches, StreamSet * const LineBreakStream, StreamSet * const ByteStream,
+                    Scalar * const callbackObject, unsigned strideBlocks = 1);
 private:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };
 
 class MatchCoordinatesKernel : public MultiBlockKernel {
 public:
-    MatchCoordinatesKernel(KernelBuilder & b,
+    MatchCoordinatesKernel(LLVMTypeSystemInterface & ts,
                            StreamSet * const Matches, StreamSet * const LineBreakStream,
                            StreamSet * const Coordinates, unsigned strideBlocks = 1);
 private:
@@ -37,16 +41,16 @@ private:
 
 class BatchCoordinatesKernel : public MultiBlockKernel {
 public:
-    BatchCoordinatesKernel(KernelBuilder & b,
-                           StreamSet * const Matches, StreamSet * const LineBreakStream,
-                           StreamSet * const Coordinates, Scalar * const callbackObject, unsigned strideBlocks = 1);
+    BatchCoordinatesKernel(LLVMTypeSystemInterface & ts,
+                           StreamSet * const Matches, StreamSet * const LineBreakStream, StreamSet * const Coordinates,
+                           Scalar * const callbackObject, unsigned strideBlocks = 1);
 private:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };
 
 class MatchReporter : public SegmentOrientedKernel {
 public:
-    MatchReporter(KernelBuilder & b,
+    MatchReporter(LLVMTypeSystemInterface & ts,
                   StreamSet * ByteStream, StreamSet * const Coordinates, Scalar * const callbackObject);
 private:
     void generateDoSegmentMethod(KernelBuilder & b) override;
@@ -54,7 +58,7 @@ private:
 
 class MatchFilterKernel : public MultiBlockKernel {
 public:
-    MatchFilterKernel(KernelBuilder & b, StreamSet * const MatchStarts, StreamSet * const LineBreaks,
+    MatchFilterKernel(LLVMTypeSystemInterface & ts, StreamSet * const MatchStarts, StreamSet * const LineBreaks,
                       StreamSet * const ByteStream, StreamSet * Output, unsigned strideBlocks = 1);
 private:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
@@ -62,7 +66,7 @@ private:
 
 class ColorizedReporter : public SegmentOrientedKernel {
 public:
-    ColorizedReporter(KernelBuilder & b,
+    ColorizedReporter(LLVMTypeSystemInterface & ts,
                        StreamSet * ByteStream, StreamSet * const SourceCoords, StreamSet * const ColorizedCoords,
                        Scalar * const callbackObject);
 private:

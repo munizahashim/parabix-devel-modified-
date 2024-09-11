@@ -13,7 +13,7 @@
 #include <pablo/pablo_kernel.h>
 #include <pablo/builder.hpp>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 
 using namespace pablo;
 using namespace cc;
@@ -27,8 +27,8 @@ namespace kernel {
 class XmlLineBreakKernel : public PabloKernel {
 public:
 
-    XmlLineBreakKernel(KernelBuilder & b, StreamSet * basis, StreamSet * out)
-    : PabloKernel(b, "XmlLineBreakKernel", {{"basis", basis}}, {{"out", out, FixedRate(), Add1()}})
+    XmlLineBreakKernel(LLVMTypeSystemInterface & ts, StreamSet * basis, StreamSet * out)
+    : PabloKernel(ts, "XmlLineBreakKernel", {{"basis", basis}}, {{"out", out, FixedRate(), Add1()}})
     {
         assert(basis->getFieldWidth() == 8 && basis->getNumElements() == 1);
         assert(out->getFieldWidth() == 1 && out->getNumElements() == 1);
@@ -47,9 +47,9 @@ public:
 
 }
 
-inline kernel::StreamSet * XmlLineBreaks(const std::unique_ptr<kernel::ProgramBuilder> & P, kernel::StreamSet * basis) {
+inline kernel::StreamSet * XmlLineBreaks(kernel::PipelineBuilder & P, kernel::StreamSet * basis) {
     assert(basis->getFieldWidth() == 8 && basis->getNumElements() == 1);
-    auto out = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<kernel::XmlLineBreakKernel>(basis, out);
+    auto out = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<kernel::XmlLineBreakKernel>(basis, out);
     return out;
 }

@@ -11,8 +11,8 @@ using namespace pablo;
 
 namespace kernel {
 
-ShiftForward::ShiftForward(KernelBuilder & b, StreamSet * inputs, StreamSet * outputs, unsigned shiftAmount)
-: PabloKernel(b, "ShftFwd" + std::to_string(outputs->getNumElements()) + "x1_by" + std::to_string(shiftAmount),
+ShiftForward::ShiftForward(LLVMTypeSystemInterface & ts, StreamSet * inputs, StreamSet * outputs, unsigned shiftAmount)
+: PabloKernel(ts, "ShftFwd" + std::to_string(outputs->getNumElements()) + "x1_by" + std::to_string(shiftAmount),
 {Binding{"inputs", inputs}}, {Binding{"outputs", outputs}}),
 mShiftAmount(shiftAmount)
 {   assert(outputs->getNumElements() == inputs->getNumElements());
@@ -27,8 +27,8 @@ void ShiftForward::generatePabloMethod() {
     }
 }
 
-ShiftBack::ShiftBack(KernelBuilder & b, StreamSet * inputs, StreamSet * outputs, unsigned shiftAmount)
-: PabloKernel(b, "ShftBack" + std::to_string(outputs->getNumElements()) + "x1_by" + std::to_string(shiftAmount),
+ShiftBack::ShiftBack(LLVMTypeSystemInterface & ts, StreamSet * inputs, StreamSet * outputs, unsigned shiftAmount)
+: PabloKernel(ts, "ShftBack" + std::to_string(outputs->getNumElements()) + "x1_by" + std::to_string(shiftAmount),
 {Binding{"inputs", inputs, FixedRate(1), LookAhead(shiftAmount)}}, {Binding{"outputs", outputs}}),
 mShiftAmount(shiftAmount)
 {   assert(outputs->getNumElements() == inputs->getNumElements());
@@ -42,8 +42,8 @@ void ShiftBack::generatePabloMethod() {
     }
 }
 
-IndexedAdvance::IndexedAdvance(KernelBuilder & b, StreamSet * inputs, StreamSet * index, StreamSet * outputs, unsigned shiftAmount)
-: PabloKernel(b, "IndexedAdvance" + std::to_string(outputs->getNumElements()) + "x1_by" + std::to_string(shiftAmount),
+IndexedAdvance::IndexedAdvance(LLVMTypeSystemInterface & ts, StreamSet * inputs, StreamSet * index, StreamSet * outputs, unsigned shiftAmount)
+: PabloKernel(ts, "IndexedAdvance" + std::to_string(outputs->getNumElements()) + "x1_by" + std::to_string(shiftAmount),
 {Binding{"inputs", inputs}, Binding{"index", index}}, {Binding{"outputs", outputs}}),
 mShiftAmount(shiftAmount)
 {   assert(outputs->getNumElements() == inputs->getNumElements());

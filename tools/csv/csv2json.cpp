@@ -13,7 +13,7 @@
 #include <re/adt/re_name.h>
 #include <re/adt/re_re.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/run_index.h>
@@ -44,9 +44,9 @@
 #include <util/papi_helper.hpp>
 #endif
 
-#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
-#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
-#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
 using namespace kernel;
 using namespace llvm;
@@ -66,8 +66,8 @@ typedef void (*CSVFunctionType)(uint32_t fd);
 
 class Invert : public PabloKernel {
 public:
-    Invert(KernelBuilder & b, StreamSet * mask, StreamSet * inverted)
-        : PabloKernel(b, "Invert",
+    Invert(LLVMTypeSystemInterface & ts, StreamSet * mask, StreamSet * inverted)
+        : PabloKernel(ts, "Invert",
                       {Binding{"mask", mask}},
                       {Binding{"inverted", inverted}}) {}
 protected:
@@ -84,8 +84,8 @@ void Invert::generatePabloMethod() {
 
 class BasisCombine : public PabloKernel {
 public:
-    BasisCombine(KernelBuilder & b, StreamSet * basis1, StreamSet * basis2, StreamSet * combined)
-        : PabloKernel(b, "BasisCombine",
+    BasisCombine(LLVMTypeSystemInterface & ts, StreamSet * basis1, StreamSet * basis2, StreamSet * combined)
+        : PabloKernel(ts, "BasisCombine",
                       {Binding{"basis1", basis1}, Binding{"basis2", basis2}},
                       {Binding{"combined", combined}}) {}
 protected:
@@ -103,68 +103,66 @@ void BasisCombine::generatePabloMethod() {
     }
 }
 
-void MergeByMask01(const std::unique_ptr<ProgramBuilder> & P,
-                 StreamSet * mask, StreamSet * a, StreamSet * b, StreamSet * merged) {
+inline void MergeByMask01(PipelineBuilder & P, StreamSet * mask, StreamSet * a, StreamSet * b, StreamSet * merged) {
     unsigned elems = merged->getNumElements();
     if ((a->getNumElements() != elems) || (b->getNumElements() != elems)) {
         llvm::report_fatal_error("MergeByMask called with incompatible element counts");
     }
-    StreamSet * expandedA = P->CreateStreamSet(elems);
+    StreamSet * expandedA = P.CreateStreamSet(elems);
     SpreadByMask(P, mask, a, expandedA);
-    StreamSet * inverted = P->CreateStreamSet(1);
-    P->CreateKernelCall<Invert>(mask, inverted);
-    StreamSet * expandedB = P->CreateStreamSet(elems);
+    StreamSet * inverted = P.CreateStreamSet(1);
+    P.CreateKernelCall<Invert>(mask, inverted);
+    StreamSet * expandedB = P.CreateStreamSet(elems);
     SpreadByMask(P, inverted, b, expandedB);
-    P->CreateKernelCall<BasisCombine>(expandedA, expandedB, merged);
+    P.CreateKernelCall<BasisCombine>(expandedA, expandedB, merged);
 }
 
-CSVFunctionType generatePipeline(CPUDriver & pxDriver, const std::vector<std::string> & templateStrs) {
+CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::string> & templateStrs) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
-    auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}}, {});
+    auto P = CreatePipeline(driver, Input<uint32_t>{"inputFileDecriptor"});
     //  The program will use a file descriptor as an input.
-    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
     // File data from mmap
-    StreamSet * ByteStream = P->CreateStreamSet(1, 8);
+    StreamSet * ByteStream = P.CreateStreamSet(1, 8);
     //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
     //  from a file descriptor.
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     //  The Parabix basis bits representation is created by the Parabix S2P kernel.
     //  S2P stands for serial-to-parallel.
-    StreamSet * BasisBits = P->CreateStreamSet(8);
+    StreamSet * BasisBits = P.CreateStreamSet(8);
     Selected_S2P(P, ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
     //  We need to know which input positions are dquotes and which are not.
-    StreamSet * csvCCs = P->CreateStreamSet(5);
-    P->CreateKernelCall<CSVlexer>(BasisBits, csvCCs);
-    StreamSet * recordSeparators = P->CreateStreamSet(1);
-    StreamSet * fieldSeparators = P->CreateStreamSet(1);
-    StreamSet * quoteEscape = P->CreateStreamSet(1);
+    StreamSet * csvCCs = P.CreateStreamSet(5);
+    P.CreateKernelCall<CSVlexer>(BasisBits, csvCCs);
+    StreamSet * recordSeparators = P.CreateStreamSet(1);
+    StreamSet * fieldSeparators = P.CreateStreamSet(1);
+    StreamSet * quoteEscape = P.CreateStreamSet(1);
 
-    P->CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape);
+    P.CreateKernelCall<CSVparser>(csvCCs, recordSeparators, fieldSeparators, quoteEscape);
     SHOW_STREAM(recordSeparators);
     SHOW_STREAM(fieldSeparators);
     SHOW_STREAM(quoteEscape);
-    StreamSet * toKeep = P->CreateStreamSet(1);
-    P->CreateKernelCall<CSVdataFieldMask>(csvCCs, recordSeparators, quoteEscape, toKeep, HeaderSpec == "");
+    StreamSet * toKeep = P.CreateStreamSet(1);
+    P.CreateKernelCall<CSVdataFieldMask>(csvCCs, recordSeparators, quoteEscape, toKeep, HeaderSpec == "");
     SHOW_STREAM(toKeep);
     //
     // Create a short stream which is 1-to-1 with the (field/record) separators,
     // having 0 bits for field separators and 1 bits for record separators.
     // Normally this will be a stream having exactly one bit set for every
     // N positions, where N is the number of entries per row.
-    StreamSet * recordsByField = P->CreateStreamSet(1);
+    StreamSet * recordsByField = P.CreateStreamSet(1);
     FilterByMask(P, fieldSeparators, recordSeparators, recordsByField);
     SHOW_STREAM(recordsByField);
 
-    StreamSet * translatedBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<CSV_Char_Replacement>(quoteEscape, BasisBits, translatedBasis);
+    StreamSet * translatedBasis = P.CreateStreamSet(8);
+    P.CreateKernelCall<CSV_Char_Replacement>(quoteEscape, BasisBits, translatedBasis);
     SHOW_BIXNUM(translatedBasis);
 
-    StreamSet * filteredBasis = P->CreateStreamSet(8);
-    StreamSet * filteredFieldSeparators = P->CreateStreamSet(1);
+    StreamSet * filteredBasis = P.CreateStreamSet(8);
+    StreamSet * filteredFieldSeparators = P.CreateStreamSet(1);
     FilterByMask(P, toKeep, translatedBasis, filteredBasis);
     SHOW_BIXNUM(filteredBasis);
 
@@ -180,13 +178,13 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, const std::vector<std::st
     }
     const unsigned insertLengthBits = ceil_log2(maxInsertAmt+1);
 
-    StreamSet * PrefixLgths = P->CreateRepeatingBixNum(insertLengthBits, insertionAmts, TestDynamicRepeatingFile);
+    StreamSet * PrefixLgths = P.CreateRepeatingBixNum(insertLengthBits, insertionAmts, TestDynamicRepeatingFile);
 
-    StreamSet * fieldStarts = P->CreateStreamSet(1);
-    P->CreateKernelCall<LineStartsKernel>(filteredFieldSeparators, fieldStarts);
+    StreamSet * fieldStarts = P.CreateStreamSet(1);
+    P.CreateKernelCall<LineStartsKernel>(filteredFieldSeparators, fieldStarts);
     SHOW_STREAM(fieldStarts);
 
-    StreamSet * PrefixInsertBixNum = P->CreateStreamSet(insertLengthBits);
+    StreamSet * PrefixInsertBixNum = P.CreateStreamSet(insertLengthBits);
     SpreadByMask(P, fieldStarts, PrefixLgths, PrefixInsertBixNum);
     SHOW_BIXNUM(PrefixInsertBixNum);
 
@@ -199,14 +197,14 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, const std::vector<std::st
     fieldSuffixLgths.push_back(3);
 
     const unsigned suffixLgthBits = 2;  // insert 1-3 characters.
-    StreamSet * RepeatingSuffixLgths = P->CreateRepeatingBixNum(suffixLgthBits, fieldSuffixLgths, TestDynamicRepeatingFile);
+    StreamSet * RepeatingSuffixLgths = P.CreateRepeatingBixNum(suffixLgthBits, fieldSuffixLgths, TestDynamicRepeatingFile);
 
-    StreamSet * SuffixInsertBixNum = P->CreateStreamSet(suffixLgthBits);
+    StreamSet * SuffixInsertBixNum = P.CreateStreamSet(suffixLgthBits);
     SpreadByMask(P, filteredFieldSeparators, RepeatingSuffixLgths, SuffixInsertBixNum);
     SHOW_BIXNUM(SuffixInsertBixNum);
 
-    StreamSet * InsertBixNum = P->CreateStreamSet(insertLengthBits);
-    P->CreateKernelCall<bixnum::Add>(PrefixInsertBixNum, SuffixInsertBixNum, InsertBixNum);
+    StreamSet * InsertBixNum = P.CreateStreamSet(insertLengthBits);
+    P.CreateKernelCall<bixnum::Add>(PrefixInsertBixNum, SuffixInsertBixNum, InsertBixNum);
     SHOW_BIXNUM(InsertBixNum);
 
     StreamSet * const BasisSpreadMask = InsertionSpreadMask(P, InsertBixNum, InsertPosition::Before);
@@ -223,19 +221,19 @@ CSVFunctionType generatePipeline(CPUDriver & pxDriver, const std::vector<std::st
             templateBytes.push_back(static_cast<uint64_t>(','));
         }
     }
-    StreamSet * TemplateBasis = P->CreateRepeatingBixNum(8, templateBytes, TestDynamicRepeatingFile);
+    StreamSet * TemplateBasis = P.CreateRepeatingBixNum(8, templateBytes, TestDynamicRepeatingFile);
 
-    StreamSet * FinalBasis = P->CreateStreamSet(8);
+    StreamSet * FinalBasis = P.CreateStreamSet(8);
     if (UseMergeByMaskKernel) {
         MergeByMask(P, BasisSpreadMask, filteredBasis, TemplateBasis, FinalBasis);
     } else {
         MergeByMask01(P, BasisSpreadMask, filteredBasis, TemplateBasis, FinalBasis);
     }
     SHOW_BIXNUM(FinalBasis);
-    StreamSet * Instantiated = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(FinalBasis, Instantiated);
-    P->CreateKernelCall<StdOutKernel>(Instantiated);
-    return reinterpret_cast<CSVFunctionType>(P->compile());
+    StreamSet * Instantiated = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(FinalBasis, Instantiated);
+    P.CreateKernelCall<StdOutKernel>(Instantiated);
+    return P.compile();
 }
 
 const unsigned MaxHeaderSize = 24;

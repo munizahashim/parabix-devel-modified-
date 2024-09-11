@@ -5,6 +5,7 @@
 
 #include <testing/testing.h>
 #include <kernel/util/nesting.h>
+#include <kernel/pipeline/program_builder.h>
 
 using namespace kernel;
 using namespace testing;
@@ -18,11 +19,11 @@ auto depth_e1  = BinaryStreamSet({"...111...11....11..111...1111...",
 auto errs_e1      = BinaryStream({"................................."});
 
 TEST_CASE(nesting1, brackets1, depth_e1, errs_e1) {
-    auto DepthResult = T->CreateStreamSet(3);
-    auto ErrResult = T->CreateStreamSet(1);
-    P->CreateKernelCall<NestingDepth>(Input<0>(T), DepthResult, ErrResult, 5);
-    AssertEQ(T, DepthResult, Input<1>(T));
-    AssertEQ(T, ErrResult, Input<2>(T));
+    auto DepthResult = P.CreateStreamSet(3);
+    auto ErrResult = P.CreateStreamSet(1);
+    P.CreateKernelCall<NestingDepth>(Input<0>(T), DepthResult, ErrResult, 5);
+    AssertEQ(P, DepthResult, Input<1>(T));
+    AssertEQ(P, ErrResult, Input<2>(T));
 }
 
 auto brackets2 = BinaryStreamSet({"...1111.........................",
@@ -33,11 +34,11 @@ auto depth_e2  = BinaryStreamSet({"...1.1.............111...1111111",
 auto errs_e2      = BinaryStream({"................................1"});
 
 TEST_CASE(unclosed, brackets2, depth_e2, errs_e2) {
-    auto DepthResult = T->CreateStreamSet(3);
-    auto ErrResult = T->CreateStreamSet(1);
-    P->CreateKernelCall<NestingDepth>(Input<0>(T), DepthResult, ErrResult, 5);
-    AssertEQ(T, DepthResult, Input<1>(T));
-    AssertEQ(T, ErrResult, Input<2>(T));
+    auto DepthResult = P.CreateStreamSet(3);
+    auto ErrResult = P.CreateStreamSet(1);
+    P.CreateKernelCall<NestingDepth>(Input<0>(T), DepthResult, ErrResult, 5);
+    AssertEQ(P, DepthResult, Input<1>(T));
+    AssertEQ(P, ErrResult, Input<2>(T));
 }
 
 auto brackets3 = BinaryStreamSet({"...1111.........................",
@@ -48,11 +49,11 @@ auto depth_e3  = BinaryStreamSet({"...1.1.............111...111....",
 auto errs_e3      = BinaryStream({"..............................1.."});
 
 TEST_CASE(unmatchedR, brackets3, depth_e3, errs_e3) {
-    auto DepthResult = T->CreateStreamSet(3);
-    auto ErrResult = T->CreateStreamSet(1);
-    P->CreateKernelCall<NestingDepth>(Input<0>(T), DepthResult, ErrResult, 5);
-    AssertEQ(T, DepthResult, Input<1>(T));
-    AssertEQ(T, ErrResult, Input<2>(T));
+    auto DepthResult = P.CreateStreamSet(3);
+    auto ErrResult = P.CreateStreamSet(1);
+    P.CreateKernelCall<NestingDepth>(Input<0>(T), DepthResult, ErrResult, 5);
+    AssertEQ(P, DepthResult, Input<1>(T));
+    AssertEQ(P, ErrResult, Input<2>(T));
 }
 
 auto long_brak =  BinaryStreamSet({"..1.111...... .{333} ...................",
@@ -63,11 +64,11 @@ auto long_depth = BinaryStreamSet({"..11.1....... .{333} .........111...111.",
 auto long_errs     = BinaryStream({"............. .{333} ...................."});
 
 TEST_CASE(multiblock, long_brak, long_depth, long_errs) {
-    auto DepthResult = T->CreateStreamSet(3);
-    auto ErrResult = T->CreateStreamSet(1);
-    P->CreateKernelCall<NestingDepth>(Input<0>(T), DepthResult, ErrResult, 5);
-    AssertEQ(T, DepthResult, Input<1>(T));
-    AssertEQ(T, ErrResult, Input<2>(T));
+    auto DepthResult = P.CreateStreamSet(3);
+    auto ErrResult = P.CreateStreamSet(1);
+    P.CreateKernelCall<NestingDepth>(Input<0>(T), DepthResult, ErrResult, 5);
+    AssertEQ(P, DepthResult, Input<1>(T));
+    AssertEQ(P, ErrResult, Input<2>(T));
 }
 
 

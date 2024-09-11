@@ -11,7 +11,7 @@
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_kernel.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/basis/p2s_kernel.h>
 #include <kernel/basis/s2p_kernel.h>
@@ -124,15 +124,14 @@ namespace iso_8859_5 {
 
 class TranscoderKernelBuilder : public PabloKernel {
 public:
-    TranscoderKernelBuilder(KernelBuilder & b, cc::UnicodeMappableAlphabet & a, StreamSet * sourceBasis, StreamSet * UnicodeBasis);
+    TranscoderKernelBuilder(LLVMTypeSystemInterface & ts, cc::UnicodeMappableAlphabet & a, StreamSet * sourceBasis, StreamSet * UnicodeBasis);
     void generatePabloMethod() override;
 private:
     cc::UnicodeMappableAlphabet & mAlphabet;
 };
 
-TranscoderKernelBuilder::TranscoderKernelBuilder(
-        KernelBuilder & b, cc::UnicodeMappableAlphabet & a, StreamSet * sourceBasis, StreamSet * UnicodeBasis)
-: PabloKernel(b, a.getName() + "ToUnicode",
+TranscoderKernelBuilder::TranscoderKernelBuilder(LLVMTypeSystemInterface & ts, cc::UnicodeMappableAlphabet & a, StreamSet * sourceBasis, StreamSet * UnicodeBasis)
+: PabloKernel(ts, a.getName() + "ToUnicode",
 {Binding{"sourceBasis", sourceBasis}},
 {Binding{"UnicodeBasis", UnicodeBasis}},
 {}, {}), mAlphabet(a) {}
@@ -165,30 +164,30 @@ void TranscoderKernelBuilder::generatePabloMethod() {
 
 typedef void (*x8u16FunctionType)(uint32_t fd, const char *);
 
-x8u16FunctionType generatePipeline(CPUDriver & pxDriver) {
+x8u16FunctionType generatePipeline(CPUDriver & driver) {
 
-    auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}, Binding{b.getInt8PtrTy(), "outputFileName"}}, {});
-    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    auto P = CreatePipeline(driver, Input<uint32_t>("inputFileDecriptor"), Input<const char *>("outputFileName"));
+
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     // Transposed bits from s2p
-    StreamSet * BasisBits = P->CreateStreamSet(8);
+    StreamSet * BasisBits = P.CreateStreamSet(8);
     Selected_S2P(P, ByteStream, BasisBits);
 
-    StreamSet * u16bits = P->CreateStreamSet(16);
+    StreamSet * u16bits = P.CreateStreamSet(16);
 
-    P->CreateKernelCall<TranscoderKernelBuilder>(iso_8859_5::alphabet, BasisBits, u16bits);
+    P.CreateKernelCall<TranscoderKernelBuilder>(iso_8859_5::alphabet, BasisBits, u16bits);
 
-    StreamSet * UTF16_out = P->CreateStreamSet(1, 16);
+    StreamSet * UTF16_out = P.CreateStreamSet(1, 16);
 
-    P->CreateKernelCall<P2S16Kernel>(u16bits, UTF16_out);
+    P.CreateKernelCall<P2S16Kernel>(u16bits, UTF16_out);
 
-    Scalar * outputFileName = P->getInputScalar("outputFileName");
-    P->CreateKernelCall<FileSink>(outputFileName, UTF16_out);
+    Scalar * outputFileName = P.getInputScalar("outputFileName");
+    P.CreateKernelCall<FileSink>(outputFileName, UTF16_out);
 
-    return reinterpret_cast<x8u16FunctionType>(P->compile());
+    return P.compile();
 }
 
 size_t file_size(const int fd) {
@@ -201,8 +200,8 @@ size_t file_size(const int fd) {
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&x8u16Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
-    CPUDriver pxDriver("x8u16");
-    x8u16FunctionType x8u16Function = generatePipeline(pxDriver);
+    CPUDriver driver("x8u16");
+    x8u16FunctionType x8u16Function = generatePipeline(driver);
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         std::cerr << "Error: cannot open " << inputFile << " for processing. Skipped.\n";

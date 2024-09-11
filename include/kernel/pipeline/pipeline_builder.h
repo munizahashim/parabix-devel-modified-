@@ -1,6 +1,7 @@
 #pragma once
 
 #include <kernel/pipeline/pipeline_kernel.h>
+#include <llvm/IR/Constants.h>
 #include <boost/integer.hpp>
 
 class BaseDriver;
@@ -9,7 +10,7 @@ namespace kernel {
 
 class OptimizationBranchBuilder;
 
-class PipelineBuilder {
+class PipelineBuilder : public LLVMTypeSystemInterface {
     friend class PipelineKernel;
     friend class PipelineAnalysis;
     friend class PipelineCompiler;
@@ -27,26 +28,20 @@ public:
 
     template<typename KernelType, typename... Args>
     Kernel * CreateKernelCall(Args &&... args) {
-        return initializeKernel(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), 0U);
+        return initializeKernel(new KernelType(mDriver, std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::None);
     }
 
     template<typename KernelType, typename... Args>
     Kernel * CreateKernelFamilyCall(Args &&... args) {
-        return initializeKernel(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::Family);
+        return initializeKernel(new KernelType(mDriver, std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::Family);
     }
 
-    Kernel * AddKernelCall(Kernel * kernel, const unsigned flags) {
-        return initializeKernel(kernel, flags);
+    Kernel * AddKernelCall(Kernel * kernel) {
+        return initializeKernel(kernel, PipelineKernel::KernelBindingFlag::None);
     }
 
-    template<typename KernelType, typename... Args>
-    PipelineKernel * CreateNestedPipelineCall(Args &&... args) {
-        return initializeNestedPipeline(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), 0U);
-    }
-
-    template<typename KernelType, typename... Args>
-    PipelineKernel * CreateNestedPipelineFamilyCall(Args &&... args) {
-        return initializeNestedPipeline(new KernelType(mDriver.getBuilder(), std::forward<Args>(args) ...), PipelineKernel::KernelBindingFlag::Family);
+    Kernel * AddKernelFamilyCall(Kernel * kernel) {
+        return initializeKernel(kernel, PipelineKernel::KernelBindingFlag::Family);
     }
 
     std::shared_ptr<OptimizationBranchBuilder>
@@ -60,6 +55,10 @@ public:
 
     Scalar * CreateConstant(llvm::Constant * value) {
         return mDriver.CreateConstant(value);
+    }
+
+    Scalar * CreateScalar(llvm::Type * type) {
+        return mDriver.CreateScalar(type);
     }
 
     using pattern_t = std::vector<uint64_t>;
@@ -123,17 +122,19 @@ public:
         return static_cast<StreamSet *>(mTarget->mInputStreamSets[i].getRelationship());
     }
 
+    StreamSet * getInputStreamSet(const llvm::StringRef name);
+
     StreamSet * getOutputStreamSet(const unsigned i) {
         return static_cast<StreamSet *>(mTarget->mOutputStreamSets[i].getRelationship());
     }
+
+    StreamSet * getOutputStreamSet(const llvm::StringRef name);
 
     Scalar * getInputScalar(const unsigned i) {
         return static_cast<Scalar *>(mTarget->mInputScalars[i].getRelationship());
     }
 
     Scalar * getInputScalar(const llvm::StringRef name);
-
-    void setInputScalar(const llvm::StringRef name, Scalar * value);
 
     Scalar * getOutputScalar(const unsigned i) {
         return static_cast<Scalar *>(mTarget->mOutputScalars[i].getRelationship());
@@ -165,13 +166,39 @@ public:
 
     void captureBixNum(llvm::StringRef streamName, StreamSet * bixnum, char hexBase = 'A');
 
+    llvm::LLVMContext & getContext() const final {
+        return mDriver.getContext();
+    }
+
+    unsigned getBitBlockWidth() const final {
+        return mDriver.getBitBlockWidth();
+    }
+
+    llvm::VectorType * getBitBlockType() const final {
+        return mDriver.getBitBlockType();
+    }
+
+    llvm::VectorType * getStreamTy(const unsigned FieldWidth = 1) final {
+        return mDriver.getStreamTy(FieldWidth);
+    }
+
+    llvm::ArrayType * getStreamSetTy(const unsigned NumElements = 1, const unsigned FieldWidth = 1) final {
+        return mDriver.getStreamSetTy(NumElements, FieldWidth);
+    }
+
 protected:
 
     PipelineBuilder(BaseDriver & driver, PipelineKernel * const kernel);
 
     Kernel * initializeKernel(Kernel * const kernel, const unsigned flags);
 
-    PipelineKernel * initializeNestedPipeline(PipelineKernel * const kernel, const unsigned flags);
+    llvm::Function * addLinkFunction(llvm::Module * mod, llvm::StringRef name, llvm::FunctionType * type, void * functionPtr) const {
+        return mDriver.addLinkFunction(mod, name, type, functionPtr);
+    }
+
+    bool hasExternalFunction(const llvm::StringRef functionName) const {
+        return mDriver.hasExternalFunction(functionName);
+    }
 
 protected:
 
@@ -180,24 +207,6 @@ protected:
     PipelineKernel * const  mTarget;
 
     bool                    mExternallySynchronized = false;
-};
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief ProgramBuilder
- ** ------------------------------------------------------------------------------------------------------------- */
-class ProgramBuilder final : public PipelineBuilder {
-    friend class ::BaseDriver;
-public:
-
-    void * compile();
-
-    Kernel * makeKernel() override;
-
-    ProgramBuilder(BaseDriver & driver, PipelineKernel * const kernel);
-
-private:
-
-    void * compileKernel(Kernel * const kernel);
 };
 
 /** ------------------------------------------------------------------------------------------------------------- *

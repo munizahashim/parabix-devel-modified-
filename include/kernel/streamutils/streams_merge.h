@@ -13,14 +13,14 @@ namespace kernel {
 
 class StreamsMerge : public BlockOrientedKernel {
 public:
-    StreamsMerge(KernelBuilder & b, const std::vector<StreamSet *> & inputs, StreamSet * output);
+    StreamsMerge(LLVMTypeSystemInterface & ts, const std::vector<StreamSet *> & inputs, StreamSet * output);
 protected:
     void generateDoBlockMethod(KernelBuilder & b) override;
 };
 
 class StreamsCombineKernel : public BlockOrientedKernel {
 public:
-    StreamsCombineKernel(KernelBuilder & b, std::vector<unsigned> streamsNumOfSets);
+    StreamsCombineKernel(LLVMTypeSystemInterface & ts, std::vector<unsigned> streamsNumOfSets);
 protected:
     void generateDoBlockMethod(KernelBuilder & b) override;
 private:
@@ -29,7 +29,7 @@ private:
 
 class StreamsSplitKernel : public BlockOrientedKernel {
 public:
-    StreamsSplitKernel(KernelBuilder & b, std::vector<unsigned> streamsNumOfSets);
+    StreamsSplitKernel(LLVMTypeSystemInterface & ts, std::vector<unsigned> streamsNumOfSets);
 protected:
     void generateDoBlockMethod(KernelBuilder & b) override;
 private:
@@ -38,7 +38,7 @@ private:
 
 class StreamsIntersect : public BlockOrientedKernel {
 public:
-    StreamsIntersect(KernelBuilder & b, const std::vector<StreamSet *> & inputs, StreamSet * output);
+    StreamsIntersect(LLVMTypeSystemInterface & ts, const std::vector<StreamSet *> & inputs, StreamSet * output);
 protected:
     void generateDoBlockMethod(KernelBuilder & b) override;
 };

@@ -1516,7 +1516,7 @@ std::string Kernel::getFamilyName() const {
 }
 
 // CONSTRUCTOR
-Kernel::Kernel(KernelBuilder & b,
+Kernel::Kernel(LLVMTypeSystemInterface & ts,
                const TypeId typeId,
                std::string && kernelName,
                Bindings && stream_inputs,
@@ -1525,7 +1525,7 @@ Kernel::Kernel(KernelBuilder & b,
                Bindings && scalar_outputs,
                InternalScalars && internal_scalars)
 : mTypeId(typeId)
-, mStride(b.getBitBlockWidth())
+, mStride(ts.getBitBlockWidth())
 , mInputStreamSets(std::move(stream_inputs))
 , mOutputStreamSets(std::move(stream_outputs))
 , mInputScalars(std::move(scalar_inputs))
@@ -1535,14 +1535,16 @@ Kernel::Kernel(KernelBuilder & b,
 
 }
 
-Kernel::Kernel(KernelBuilder & b,
+Kernel::Kernel(LLVMTypeSystemInterface & ts,
                const TypeId typeId,
+               AttributeSet && attributes,
                Bindings && stream_inputs,
                Bindings && stream_outputs,
                Bindings && scalar_inputs,
                Bindings && scalar_outputs)
-: mTypeId(typeId)
-, mStride(b.getBitBlockWidth())
+: AttributeSet(std::move(attributes))
+, mTypeId(typeId)
+, mStride(ts.getBitBlockWidth())
 , mInputStreamSets(std::move(stream_inputs))
 , mOutputStreamSets(std::move(stream_outputs))
 , mInputScalars(std::move(scalar_inputs))
@@ -1555,14 +1557,14 @@ Kernel::Kernel(KernelBuilder & b,
 Kernel::~Kernel() { }
 
 // CONSTRUCTOR
-SegmentOrientedKernel::SegmentOrientedKernel(KernelBuilder & b,
+SegmentOrientedKernel::SegmentOrientedKernel(LLVMTypeSystemInterface & ts,
                                              std::string && kernelName,
                                              Bindings && stream_inputs,
                                              Bindings && stream_outputs,
                                              Bindings && scalar_parameters,
                                              Bindings && scalar_outputs,
                                              InternalScalars && internal_scalars)
-: Kernel(b,
+: Kernel(ts,
 TypeId::SegmentOriented, std::move(kernelName),
 std::move(stream_inputs), std::move(stream_outputs),
 std::move(scalar_parameters), std::move(scalar_outputs),

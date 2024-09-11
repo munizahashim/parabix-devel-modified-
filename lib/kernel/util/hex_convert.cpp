@@ -11,8 +11,8 @@
 using namespace kernel;
 using namespace llvm;
 
-HexToBinary::HexToBinary(KernelBuilder & b, StreamSet * hexStream, StreamSet * binStream)
-: BlockOrientedKernel(b, "HexToBinary",
+HexToBinary::HexToBinary(LLVMTypeSystemInterface & ts, StreamSet * hexStream, StreamSet * binStream)
+: BlockOrientedKernel(ts, "HexToBinary",
                    {Binding{"hexdata", hexStream, FixedRate()}},
                    {Binding{"binary_data", binStream, FixedRate(4)}},
 {}, {}, {}) {}
@@ -45,8 +45,8 @@ void HexToBinary::generateDoBlockMethod(KernelBuilder & b) {
     }
 }
 
-BinaryToHex::BinaryToHex(KernelBuilder & b, StreamSet * binStream, StreamSet * hexStream)
-: BlockOrientedKernel(b, "BinaryToHex",
+BinaryToHex::BinaryToHex(LLVMTypeSystemInterface & ts, StreamSet * binStream, StreamSet * hexStream)
+: BlockOrientedKernel(ts, "BinaryToHex",
                    {Binding{"binary_data", binStream, FixedRate(4)}},
                    {Binding{"hexdata", hexStream, FixedRate(), RoundUpTo(1)}},
                    {}, {}, {}) {}

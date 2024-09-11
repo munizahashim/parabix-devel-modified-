@@ -917,7 +917,7 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
-PipelineKernel::PipelineKernel(KernelBuilder & b,
+PipelineKernel::PipelineKernel(LLVMTypeSystemInterface & ts,
                                std::string && signature,
                                const unsigned numOfKernelFamilyCalls,
                                Kernels && kernels, CallBindings && callBindings,
@@ -926,7 +926,7 @@ PipelineKernel::PipelineKernel(KernelBuilder & b,
                                Relationships && internallyGenerated,
                                LengthAssertions && lengthAssertions)
 : PipelineKernel(Internal{}
-, b
+, ts
 , annotateSignatureWithPipelineFlags(std::move(signature))
 , numOfKernelFamilyCalls
 , std::move(kernels)
@@ -942,7 +942,7 @@ PipelineKernel::PipelineKernel(KernelBuilder & b,
 
 }
 
-PipelineKernel::PipelineKernel(Internal, KernelBuilder & b,
+PipelineKernel::PipelineKernel(Internal, LLVMTypeSystemInterface & ts,
                std::string && signature,
                const unsigned numOfKernelFamilyCalls,
                Kernels && kernels, CallBindings && callBindings,
@@ -950,7 +950,7 @@ PipelineKernel::PipelineKernel(Internal, KernelBuilder & b,
                Bindings && scalar_inputs, Bindings && scalar_outputs,
                Relationships && internallyGenerated,
                LengthAssertions && lengthAssertions)
-: Kernel(b, TypeId::Pipeline,
+: Kernel(ts, TypeId::Pipeline,
          makePipelineHashName(signature),
          std::move(stream_inputs), std::move(stream_outputs),
          std::move(scalar_inputs), std::move(scalar_outputs),
@@ -967,13 +967,16 @@ PipelineKernel::PipelineKernel(Internal, KernelBuilder & b,
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
-PipelineKernel::PipelineKernel(KernelBuilder & b,
+PipelineKernel::PipelineKernel(LLVMTypeSystemInterface & ts,
+               std::string && signature,
+               AttributeSet && attributes,
                Bindings && stream_inputs, Bindings && stream_outputs,
                Bindings && scalar_inputs, Bindings && scalar_outputs)
-: Kernel(b, TypeId::Pipeline,
+: Kernel(ts, TypeId::Pipeline,
+         std::move(attributes),
          std::move(stream_inputs), std::move(stream_outputs),
          std::move(scalar_inputs), std::move(scalar_outputs))
-{
+, mSignature(std::move(signature)) {
 
 }
 

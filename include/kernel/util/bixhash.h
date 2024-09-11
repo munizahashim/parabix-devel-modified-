@@ -23,9 +23,9 @@ namespace kernel {
 
 class BixHash final: public pablo::PabloKernel {
 public:
-    BixHash(KernelBuilder & b,
+    BixHash(LLVMTypeSystemInterface & ts,
             StreamSet * basis, StreamSet * run, StreamSet * hashes, unsigned steps=4, unsigned seed = 179321)
-    : PabloKernel(b, "BixHash" + std::to_string(hashes->getNumElements()) + "_" + std::to_string(steps) + "_" + std::to_string(seed),
+    : PabloKernel(ts, "BixHash" + std::to_string(hashes->getNumElements()) + "_" + std::to_string(steps) + "_" + std::to_string(seed),
                   {Binding{"basis", basis}, Binding{"run", run}},
                   {Binding{"hashes", hashes}}),
     mHashBits(hashes->getNumElements()), mHashSteps(steps), mSeed(seed) {}

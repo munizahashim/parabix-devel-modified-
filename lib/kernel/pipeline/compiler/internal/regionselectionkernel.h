@@ -20,11 +20,11 @@ public:
     STREAMSET_WITH_INDEX(Selectors);
     #undef STREAMSET_WITH_INDEX
 
-    explicit RegionSelectionKernel(KernelBuilder & b, Starts starts, Ends ends, StreamSet * const regionSpans);
+    explicit RegionSelectionKernel(LLVMTypeSystemInterface & ts, Starts starts, Ends ends, StreamSet * const regionSpans);
 
-    explicit RegionSelectionKernel(KernelBuilder & b, Demarcators, Selectors selectors, StreamSet * const regionSpans);
+    explicit RegionSelectionKernel(LLVMTypeSystemInterface & ts, Demarcators, Selectors selectors, StreamSet * const regionSpans);
 
-    explicit RegionSelectionKernel(KernelBuilder & b, Starts starts, Ends ends, Selectors selectors, StreamSet * const regionSpans);
+    explicit RegionSelectionKernel(LLVMTypeSystemInterface & ts, Starts starts, Ends ends, Selectors selectors, StreamSet * const regionSpans);
 
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final;
 

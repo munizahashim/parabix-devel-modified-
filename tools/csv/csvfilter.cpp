@@ -13,7 +13,7 @@
 #include <re/adt/re_name.h>
 #include <re/adt/re_re.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/run_index.h>
@@ -162,11 +162,11 @@ void filtration(string inputFile, string HeaderInput, string DataInput, bool dro
     myFile.close();
 }
 
-//CSVFunctionType generatePipeline(CPUDriver & pxDriver, std::vector<std::string> templateStrs) {
+//CSVFunctionType generatePipeline(CPUDriver & driver, std::vector<std::string> templateStrs) {
 //    // A Parabix program is build as a set of kernel calls called a pipeline.
 //    // A pipeline is construction using a Parabix driver object.
-//    auto & b = pxDriver.getBuilder();
-//    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}}, {});
+//    auto & b = driver.getBuilder();
+//    auto P = driver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}}, {});
 //    //  The program will use a file descriptor as an input.
 //    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
 //    StreamSet * ByteStream = P->CreateStreamSet(1, 8);

@@ -40,7 +40,7 @@ public:
 
 protected:
 
-    OptimizationBranch(KernelBuilder & b,
+    OptimizationBranch(LLVMTypeSystemInterface & ts,
                        std::string && signature,
                        not_null<Relationship *> condition,
                        Kernel * const nonZeroKernel,

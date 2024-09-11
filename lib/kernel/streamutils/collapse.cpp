@@ -20,15 +20,15 @@ void CollapseStreamSet::generateDoBlockMethod(KernelBuilder & b) {
     b.storeOutputStreamBlock("output", b.getInt32(0), accum);
 }
 
-CollapseStreamSet::CollapseStreamSet(KernelBuilder & b, StreamSet * input, StreamSet * output)
-: BlockOrientedKernel(b, "CollapseStreamSet_x" + std::to_string(input->getNumElements()), {{"input", input}}, {{"output", output}}, {}, {}, {})
+CollapseStreamSet::CollapseStreamSet(LLVMTypeSystemInterface & ts, StreamSet * input, StreamSet * output)
+: BlockOrientedKernel(ts, "CollapseStreamSet_x" + std::to_string(input->getNumElements()), {{"input", input}}, {{"output", output}}, {}, {}, {})
 {}
 
 namespace streamutils {
 
-StreamSet * Collapse(const std::unique_ptr<ProgramBuilder> & P, StreamSet * i) {
-    StreamSet * const result = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<CollapseStreamSet>(i, result);
+StreamSet * Collapse(PipelineBuilder & P, StreamSet * i) {
+    StreamSet * const result = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<CollapseStreamSet>(i, result);
     return result;
 }
 

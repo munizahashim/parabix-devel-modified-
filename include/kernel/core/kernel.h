@@ -16,15 +16,13 @@
 #include <llvm/Support/Compiler.h>
 #include <kernel/illustrator/illustrator.h>
 #include <codegen/FunctionTypeBuilder.h>
+#include <codegen/LLVMTypeSystemInterface.h>
 #include <memory>
 #include <string>
 #include <vector>
 
-
 namespace llvm { class IndirectBrInst; }
 namespace llvm { class PHINode; }
-
-class BaseDriver;
 
 namespace kernel {
 
@@ -547,15 +545,16 @@ protected:
 protected:
 
     // Constructor
-    Kernel(KernelBuilder & b,
+    Kernel(LLVMTypeSystemInterface & ts,
            const TypeId typeId, std::string && kernelName,
            Bindings &&stream_inputs, Bindings &&stream_outputs,
            Bindings &&scalar_inputs, Bindings &&scalar_outputs,
            InternalScalars && internal_scalars);
 
     // Constructor used by pipeline
-    Kernel(KernelBuilder & b,
+    Kernel(LLVMTypeSystemInterface & ts,
            const TypeId typeId,
+           AttributeSet && attributes,
            Bindings &&stream_inputs, Bindings &&stream_outputs,
            Bindings &&scalar_inputs, Bindings &&scalar_outputs);
 
@@ -598,7 +597,7 @@ public:
 
 protected:
 
-    SegmentOrientedKernel(KernelBuilder & b,
+    SegmentOrientedKernel(LLVMTypeSystemInterface & ts,
                           std::string && kernelName,
                           Bindings &&stream_inputs,
                           Bindings &&stream_outputs,
@@ -626,7 +625,7 @@ public:
 
 protected:
 
-    MultiBlockKernel(KernelBuilder & b,
+    MultiBlockKernel(LLVMTypeSystemInterface & ts,
                      std::string && kernelName,
                      Bindings && stream_inputs,
                      Bindings && stream_outputs,
@@ -634,7 +633,7 @@ protected:
                      Bindings && scalar_outputs,
                      InternalScalars && internal_scalars);
 
-    MultiBlockKernel(KernelBuilder & b,
+    MultiBlockKernel(LLVMTypeSystemInterface & ts,
                      const TypeId kernelTypId,
                      std::string && kernelName,
                      Bindings && stream_inputs,
@@ -681,7 +680,7 @@ protected:
 
     virtual void generateFinalBlockMethod(KernelBuilder & b, llvm::Value * remainingItems);
 
-    BlockOrientedKernel(KernelBuilder & b,
+    BlockOrientedKernel(LLVMTypeSystemInterface & ts,
                         std::string && kernelName,
                         Bindings && stream_inputs,
                         Bindings && stream_outputs,

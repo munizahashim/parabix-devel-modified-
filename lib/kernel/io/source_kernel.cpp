@@ -14,17 +14,7 @@
 #include <boost/interprocess/mapped_region.hpp>
 #include <llvm/Support/raw_ostream.h>
 #include <unistd.h>
-
-#ifdef __APPLE__
-
-#else
-
-
-#endif
-
-#if !defined(__APPLE__) && _POSIX_C_SOURCE >= 200809L
-#define PREAD pread64
-#endif
+#include <sys/mman.h>
 
 using namespace llvm;
 
@@ -39,19 +29,6 @@ extern "C" uint64_t file_size(const uint32_t fd) {
     }
     return st.st_size;
 }
-extern "C" void *mmap(void *addr, size_t len, int prot, int flags,
-           int fildes, off_t off);
-extern "C" int munmap(void *addr, size_t len);
-extern "C" int madvise(void *addr, size_t length, int advice);
-
-//int madvise_wrapper(void * addr, size_t length, int flags) {
-//    const auto r = madvise(addr, length, flags);
-//    if (r) {
-//        const auto e = errno;
-//        errs() << "MADV:" << strerror(e) << "\n";
-//    }
-//    return r;
-//}
 
 namespace kernel {
 
@@ -202,11 +179,7 @@ constexpr char __MAKE_CIRCULAR_BUFFER[] = "__make_circular_buffer";
 constexpr char __DESTROY_CIRCULAR_BUFFER[] = "__destroy_circular_buffer";
 
 void ReadSourceKernel::generatLinkExternalFunctions(KernelBuilder & b) {
-    #ifdef PREAD
-    b.LinkFunction("pread64", PREAD);
-    #else
     b.LinkFunction("read", read);
-    #endif
     b.LinkFunction("file_size", file_size);
     b.LinkFunction(__MAKE_CIRCULAR_BUFFER, make_circular_buffer);
     b.LinkFunction(__DESTROY_CIRCULAR_BUFFER, destroy_circular_buffer);
@@ -345,20 +318,12 @@ void ReadSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
 
     Value * const sourceBuffer = b.CreatePointerCast(b.getRawOutputPointer("sourceBuffer", producedSoFar), b.getInt8PtrTy());
 
-    #ifdef PREAD
-    Function *  const preadFunc = b.getModule()->getFunction("pread64");
-    FixedArray<Value *, 4> args;
-    args[0] = fd;
-    args[1] = sourceBuffer;
-    args[2] = bytesToRead;
-    args[3] = b.CreateMul(producedSoFar, codeUnitBytes);
-    #else
     Function *  const preadFunc = b.getModule()->getFunction("read");
     FixedArray<Value *, 3> args;
     args[0] = fd;
     args[1] = sourceBuffer;
     args[2] = bytesToRead;
-    #endif
+
     Value * const bytesRead = b.CreateCall(preadFunc, args);
 
     // There are 4 possibile results from read:
@@ -569,8 +534,8 @@ std::string makeSourceName(StringRef prefix, const unsigned fieldWidth, const un
     return tmp;
 }
 
-MMapSourceKernel::MMapSourceKernel(KernelBuilder & b, Scalar * const fd, StreamSet * const outputStream)
-: SegmentOrientedKernel(b, makeSourceName("mmap_source", outputStream->getFieldWidth())
+MMapSourceKernel::MMapSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const fd, StreamSet * const outputStream)
+: SegmentOrientedKernel(ts, makeSourceName("mmap_source", outputStream->getFieldWidth())
 // input streams
 ,{}
 // output streams
@@ -578,11 +543,11 @@ MMapSourceKernel::MMapSourceKernel(KernelBuilder & b, Scalar * const fd, StreamS
 // input scalars
 ,{Binding{"fileDescriptor", fd}}
 // output scalars
-,{Binding{b.getSizeTy(), "fileItems"}}
+,{Binding{ts.getSizeTy(), "fileItems"}}
 // internal scalars
 ,{})
 , mCodeUnitWidth(outputStream->getFieldWidth()) {
-    PointerType * const codeUnitPtrTy = b.getIntNTy(mCodeUnitWidth)->getPointerTo();
+    PointerType * const codeUnitPtrTy = ts.getIntNTy(mCodeUnitWidth)->getPointerTo();
     addInternalScalar(codeUnitPtrTy, "buffer");
     addInternalScalar(codeUnitPtrTy, "ancillaryBuffer");
     addAttribute(MustExplicitlyTerminate());
@@ -590,8 +555,8 @@ MMapSourceKernel::MMapSourceKernel(KernelBuilder & b, Scalar * const fd, StreamS
     setStride(codegen::SegmentSize);
 }
 
-ReadSourceKernel::ReadSourceKernel(KernelBuilder & b, Scalar * const fd, StreamSet * const outputStream)
-: SegmentOrientedKernel(b, makeSourceName("read_source", outputStream->getFieldWidth())
+ReadSourceKernel::ReadSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const fd, StreamSet * const outputStream)
+: SegmentOrientedKernel(ts, makeSourceName("read_source", outputStream->getFieldWidth())
 // input streams
 ,{}
 // output streams
@@ -599,14 +564,14 @@ ReadSourceKernel::ReadSourceKernel(KernelBuilder & b, Scalar * const fd, StreamS
 // input scalars
 ,{Binding{"fileDescriptor", fd}}
 // output scalars
-,{Binding{b.getSizeTy(), "fileItems"}}
+,{Binding{ts.getSizeTy(), "fileItems"}}
 // internal scalars
 ,{})
 , mCodeUnitWidth(outputStream->getFieldWidth()) {
-    PointerType * const codeUnitPtrTy = b.getIntNTy(mCodeUnitWidth)->getPointerTo();
+    PointerType * const codeUnitPtrTy = ts.getIntNTy(mCodeUnitWidth)->getPointerTo();
     addInternalScalar(codeUnitPtrTy, "buffer");
     addInternalScalar(codeUnitPtrTy, "ancillaryBuffer");
-    IntegerType * const sizeTy = b.getSizeTy();
+    IntegerType * const sizeTy = ts.getSizeTy();
     addInternalScalar(sizeTy, "effectiveCapacity");
     addInternalScalar(sizeTy, "ancillaryCapacity");
     addAttribute(MustExplicitlyTerminate());
@@ -616,8 +581,8 @@ ReadSourceKernel::ReadSourceKernel(KernelBuilder & b, Scalar * const fd, StreamS
 
 
 
-FDSourceKernel::FDSourceKernel(KernelBuilder & b, Scalar * const useMMap, Scalar * const fd, StreamSet * const outputStream)
-: SegmentOrientedKernel(b, makeSourceName("FD_source", outputStream->getFieldWidth())
+FDSourceKernel::FDSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const useMMap, Scalar * const fd, StreamSet * const outputStream)
+: SegmentOrientedKernel(ts, makeSourceName("FD_source", outputStream->getFieldWidth())
 // input streams
 ,{}
 // output stream
@@ -626,14 +591,14 @@ FDSourceKernel::FDSourceKernel(KernelBuilder & b, Scalar * const useMMap, Scalar
 ,{Binding{"useMMap", useMMap}
 , Binding{"fileDescriptor", fd}}
 // output scalar
-,{Binding{b.getSizeTy(), "fileItems"}}
+,{Binding{ts.getSizeTy(), "fileItems"}}
 // internal scalars
 ,{})
 , mCodeUnitWidth(outputStream->getFieldWidth()) {
-    PointerType * const codeUnitPtrTy = b.getIntNTy(mCodeUnitWidth)->getPointerTo();
+    PointerType * const codeUnitPtrTy = ts.getIntNTy(mCodeUnitWidth)->getPointerTo();
     addInternalScalar(codeUnitPtrTy, "buffer");
     addInternalScalar(codeUnitPtrTy, "ancillaryBuffer");
-    IntegerType * const sizeTy = b.getSizeTy();
+    IntegerType * const sizeTy = ts.getSizeTy();
     addInternalScalar(sizeTy, "effectiveCapacity");
     addInternalScalar(sizeTy, "ancillaryCapacity");
     addAttribute(MustExplicitlyTerminate());
@@ -641,8 +606,8 @@ FDSourceKernel::FDSourceKernel(KernelBuilder & b, Scalar * const useMMap, Scalar
     setStride(codegen::SegmentSize);
 }
 
-MemorySourceKernel::MemorySourceKernel(KernelBuilder & b, Scalar * fileSource, Scalar * fileItems, StreamSet * const outputStream)
-: SegmentOrientedKernel(b, makeSourceName("memory_source", outputStream->getFieldWidth(), outputStream->getNumElements()),
+MemorySourceKernel::MemorySourceKernel(LLVMTypeSystemInterface & ts, Scalar * fileSource, Scalar * fileItems, StreamSet * const outputStream)
+: SegmentOrientedKernel(ts, makeSourceName("memory_source", outputStream->getFieldWidth(), outputStream->getNumElements()),
 // input streams
 {},
 // output stream

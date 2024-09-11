@@ -269,8 +269,8 @@ void PopCountKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * co
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
-PopCountKernel::PopCountKernel(KernelBuilder & b, const PopCountType type, const unsigned stepFactor, StreamSet * input, StreamSet * const output)
-: MultiBlockKernel(b, TypeId::PopCountKernel, "PopCount" + std::string{type == PopCountType::POSITIVE ? "P" : "N"} + std::to_string(stepFactor)
+PopCountKernel::PopCountKernel(LLVMTypeSystemInterface & ts, const PopCountType type, const unsigned stepFactor, StreamSet * input, StreamSet * const output)
+: MultiBlockKernel(ts, TypeId::PopCountKernel, "PopCount" + std::string{type == PopCountType::POSITIVE ? "P" : "N"} + std::to_string(stepFactor)
 // input streams
 ,{Binding{INPUT, input, FixedRate(stepFactor) }}
 // output stream
@@ -284,15 +284,15 @@ PopCountKernel::PopCountKernel(KernelBuilder & b, const PopCountType type, const
     setStride(1);
     assert (type != PopCountType::BOTH);
     #ifndef USE_LOOKBEHIND_FOR_LAST_VALUE
-    addInternalScalar(b.getSizeTy(), "count");
+    addInternalScalar(ts.getSizeTy(), "count");
     #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
-PopCountKernel::PopCountKernel(KernelBuilder & b, const PopCountType type, const unsigned stepFactor, StreamSet * input, StreamSet * const positive, StreamSet * const negative)
-: MultiBlockKernel(b, TypeId::PopCountKernel, ".PopCountB" + std::to_string(stepFactor)
+PopCountKernel::PopCountKernel(LLVMTypeSystemInterface & ts, const PopCountType type, const unsigned stepFactor, StreamSet * input, StreamSet * const positive, StreamSet * const negative)
+: MultiBlockKernel(ts, TypeId::PopCountKernel, ".PopCountB" + std::to_string(stepFactor)
 // input streams
 ,{Binding{INPUT, input, FixedRate(stepFactor), Add1() }}
 // output stream
@@ -307,8 +307,8 @@ PopCountKernel::PopCountKernel(KernelBuilder & b, const PopCountType type, const
     setStride(1);
     assert (type == PopCountType::BOTH);
     #ifndef USE_LOOKBEHIND_FOR_LAST_VALUE
-    addInternalScalar(b.getSizeTy(), "posCount");
-    addInternalScalar(b.getSizeTy(), "negCount");
+    addInternalScalar(ts.getSizeTy(), "posCount");
+    addInternalScalar(ts.getSizeTy(), "negCount");
     #endif
 }
 

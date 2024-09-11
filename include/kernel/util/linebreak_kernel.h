@@ -19,7 +19,7 @@
 #include <re/alphabet/alphabet.h>
 
 namespace kernel { class KernelBuilder; }
-namespace kernel { class ProgramBuilder; }
+namespace kernel { class PipelineBuilder; }
 
 /*  An input file may contain a final line without a line terminator.
     Line break kernels can add logic to produce a mark one past EOF
@@ -41,7 +41,7 @@ enum class NullCharMode {Data, Break, Abort};
 
 class UnixLinesKernelBuilder final : public pablo::PabloKernel {
 public:
-    UnixLinesKernelBuilder(KernelBuilder & b,
+    UnixLinesKernelBuilder(LLVMTypeSystemInterface & ts,
                            kernel::StreamSet * Source,
                            kernel::StreamSet * UnixLineEnds,
                            UnterminatedLineAtEOF m = UnterminatedLineAtEOF::Ignore,
@@ -53,7 +53,7 @@ protected:
     NullCharMode mNullMode;
 };
 
-void UnicodeLinesLogic(const std::unique_ptr<kernel::ProgramBuilder> & P,
+void UnicodeLinesLogic(kernel::PipelineBuilder & P,
                        kernel::StreamSet * Basis,
                        kernel::StreamSet * LineEnds,
                        kernel::StreamSet * u8index,
@@ -63,7 +63,7 @@ void UnicodeLinesLogic(const std::unique_ptr<kernel::ProgramBuilder> & P,
 
 class NullDelimiterKernel final : public pablo::PabloKernel {
 public:
-    NullDelimiterKernel(KernelBuilder & b,
+    NullDelimiterKernel(LLVMTypeSystemInterface & ts,
                         kernel::StreamSet * Source,
                         kernel::StreamSet * NullDelimiters,
                         UnterminatedLineAtEOF m = UnterminatedLineAtEOF::Ignore);
@@ -83,7 +83,7 @@ protected:
 // stream.
 class LineStartsKernel final : public pablo::PabloKernel {
 public:
-    LineStartsKernel(KernelBuilder & b, kernel::StreamSet * LineEnds, kernel::StreamSet * LineStarts, kernel::StreamSet * index = nullptr);
+    LineStartsKernel(LLVMTypeSystemInterface & ts, kernel::StreamSet * LineEnds, kernel::StreamSet * LineStarts, kernel::StreamSet * index = nullptr);
 protected:
     void generatePabloMethod() override;
 private:
@@ -92,7 +92,7 @@ private:
 
 class LineSpansKernel final : public pablo::PabloKernel {
 public:
-    LineSpansKernel(KernelBuilder & b, kernel::StreamSet * LineStarts, kernel::StreamSet * LineEnds, kernel::StreamSet * LineSpans);
+    LineSpansKernel(LLVMTypeSystemInterface & ts, kernel::StreamSet * LineStarts, kernel::StreamSet * LineEnds, kernel::StreamSet * LineSpans);
 protected:
     void generatePabloMethod() override;
 };

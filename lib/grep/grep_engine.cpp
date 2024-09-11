@@ -23,7 +23,7 @@
 #include <kernel/core/idisa_target.h>
 #include <kernel/core/streamset.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/core/callback.h>
 #include <kernel/unicode/charclasses.h>
@@ -103,29 +103,29 @@ void GrepCallBackObject::handle_signal(unsigned s) {
     }
 }
 
-extern "C" void accumulate_match_wrapper(intptr_t accum_addr, const size_t lineNum, char * line_start, char * line_end) {
+extern "C" void accumulate_match_wrapper(MatchAccumulator * accum_addr, const size_t lineNum, char * line_start, char * line_end) {
     assert ("passed a null accumulator" && accum_addr);
-    reinterpret_cast<MatchAccumulator *>(accum_addr)->accumulate_match(lineNum, line_start, line_end);
+    accum_addr->accumulate_match(lineNum, line_start, line_end);
 }
 
-extern "C" void finalize_match_wrapper(intptr_t accum_addr, char * buffer_end) {
+extern "C" void finalize_match_wrapper(MatchAccumulator * accum_addr, char * buffer_end) {
     assert ("passed a null accumulator" && accum_addr);
-    reinterpret_cast<MatchAccumulator *>(accum_addr)->finalize_match(buffer_end);
+    accum_addr->finalize_match(buffer_end);
 }
 
-extern "C" unsigned get_file_count_wrapper(intptr_t accum_addr) {
+extern "C" unsigned get_file_count_wrapper(MatchAccumulator * accum_addr) {
     assert ("passed a null accumulator" && accum_addr);
-    return reinterpret_cast<MatchAccumulator *>(accum_addr)->getFileCount();
+    return accum_addr->getFileCount();
 }
 
-extern "C" size_t get_file_start_pos_wrapper(intptr_t accum_addr, unsigned fileNo) {
+extern "C" size_t get_file_start_pos_wrapper(MatchAccumulator *accum_addr, unsigned fileNo) {
     assert ("passed a null accumulator" && accum_addr);
-    return reinterpret_cast<MatchAccumulator *>(accum_addr)->getFileStartPos(fileNo);
+    return accum_addr->getFileStartPos(fileNo);
 }
 
-extern "C" void set_batch_line_number_wrapper(intptr_t accum_addr, unsigned fileNo, size_t batchLine) {
+extern "C" void set_batch_line_number_wrapper(MatchAccumulator *accum_addr, unsigned fileNo, size_t batchLine) {
     assert ("passed a null accumulator" && accum_addr);
-    reinterpret_cast<MatchAccumulator *>(accum_addr)->setBatchLineNumber(fileNo, batchLine);
+    accum_addr->setBatchLineNumber(fileNo, batchLine);
 }
 
 // Grep Engine construction and initialization.
@@ -148,6 +148,7 @@ GrepEngine::GrepEngine(BaseDriver &driver) :
     mNullMode(NullCharMode::Data),
     mGrepDriver(driver),
     mMainMethod(nullptr),
+    mBatchMethod(nullptr),
     mNextFileToGrep(0),
     mNextFileToPrint(0),
     grepMatchFound(false),
@@ -474,14 +475,14 @@ void GrepEngine::initRE(re::RE * re) {
     }
 }
 
-StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
+StreamSet * GrepEngine::getBasis(kernel::PipelineBuilder & P, StreamSet * ByteStream) {
     StreamSet * Source = ByteStream;
-    if (codegen::EnableIllustrator) {
-        P->captureByteData("Source", ByteStream);
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        P.captureByteData("Source", ByteStream);
     }
     auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
     if (hasComponent(mExternalComponents, Component::S2P)) {
-        StreamSet * BasisBits = P->CreateStreamSet(ENCODING_BITS, 1);
+        StreamSet * BasisBits = P.CreateStreamSet(ENCODING_BITS, 1);
         Selected_S2P(P, ByteStream, BasisBits);
         Source = BasisBits;
         mExternalTable.declareExternal(u8, "basis", new PreDefined(BasisBits));
@@ -491,11 +492,11 @@ StreamSet * GrepEngine::getBasis(ProgBuilderRef P, StreamSet * ByteStream) {
     return Source;
 }
 
-void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
+void GrepEngine::grepPrologue(kernel::PipelineBuilder & P, StreamSet * SourceStream) {
     mLineBreakStream = nullptr;
     mU8index = nullptr;
 
-    Scalar * const callbackObject = P->getInputScalar("callbackObject");
+    Scalar * const callbackObject = P.getInputScalar("callbackObject");
     if (mBinaryFilesMode == argv::Text) {
         mNullMode = NullCharMode::Data;
     } else if (mBinaryFilesMode == argv::WithoutMatch) {
@@ -503,38 +504,38 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
     } else {
         mNullMode = NullCharMode::Break;
     }
-    mLineBreakStream = P->CreateStreamSet(1, 1);
-    if (codegen::EnableIllustrator && hasComponent(mExternalComponents, Component::S2P)) {
-        P->captureBixNum("basis", SourceStream);
+    mLineBreakStream = P.CreateStreamSet(1, 1);
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator && hasComponent(mExternalComponents, Component::S2P))) {
+        P.captureBixNum("basis", SourceStream);
     }
     if (mGrepRecordBreak == GrepRecordBreakKind::Unicode) {
-        mU8index = P->CreateStreamSet(1, 1);
+        mU8index = P.CreateStreamSet(1, 1);
         UnicodeLinesLogic(P, SourceStream, mLineBreakStream, mU8index, UnterminatedLineAtEOF::Add1, mNullMode, callbackObject);
     }
     else {
         if (mGrepRecordBreak == GrepRecordBreakKind::LF) {
-            Kernel * k = P->CreateKernelCall<UnixLinesKernelBuilder>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1, mNullMode, callbackObject);
+            Kernel * k = P.CreateKernelCall<UnixLinesKernelBuilder>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1, mNullMode, callbackObject);
             if (mNullMode == NullCharMode::Abort) {
-                k->link("signal_dispatcher", kernel::signal_dispatcher);
+                k->link("signal_dispatcher", signal_dispatcher);
             }
         } else { // if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
-            P->CreateKernelCall<NullDelimiterKernel>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1);
+            P.CreateKernelCall<NullDelimiterKernel>(SourceStream, mLineBreakStream, UnterminatedLineAtEOF::Add1);
         }
         if (hasComponent(mExternalComponents, Component::UTF8index)) {
-            mU8index = P->CreateStreamSet(1, 1);
-            P->CreateKernelCall<UTF8_index>(SourceStream, mU8index, mLineBreakStream);
+            mU8index = P.CreateStreamSet(1, 1);
+            P.CreateKernelCall<UTF8_index>(SourceStream, mU8index, mLineBreakStream);
         }
     }
     auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
     if (mU8index) {
-        if (codegen::EnableIllustrator) {
-            P->captureBitstream("mU8index", mU8index);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("mU8index", mU8index);
         }
         auto u8 = mExternalTable.getStreamIndex(cc::UTF8.getCode());
         mExternalTable.declareExternal(u8, "u8index", new PreDefined(mU8index));
     }
-    if (codegen::EnableIllustrator) {
-        P->captureBitstream("mLineBreakStream", mLineBreakStream);
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        P.captureBitstream("mLineBreakStream", mLineBreakStream);
     }
     auto u8_LB = new PreDefined(mLineBreakStream);//, std::make_pair(0, 0), 1);
     mExternalTable.declareExternal(u8, "$", u8_LB);
@@ -544,11 +545,11 @@ void GrepEngine::grepPrologue(ProgBuilderRef P, StreamSet * SourceStream) {
     }
 }
 
-void GrepEngine::prepareExternalStreams(ProgBuilderRef P, StreamSet * SourceStream) {
+void GrepEngine::prepareExternalStreams(PipelineBuilder & P, StreamSet * SourceStream) {
     mExternalTable.resolveExternals(P);
 }
 
-void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * indexAlphabet, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
+void GrepEngine::addExternalStreams(PipelineBuilder & P, const cc::Alphabet * indexAlphabet, std::unique_ptr<GrepKernelOptions> & options, re::RE * regexp, StreamSet * indexMask) {
     auto indexing = mExternalTable.getStreamIndex(indexAlphabet->getCode());
     re::Alphabet_Set alphas;
     re::collectAlphabets(regexp, alphas);
@@ -577,8 +578,8 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * index
         if (const MultiplexedAlphabet * mpx = dyn_cast<MultiplexedAlphabet>(a)) {
             std::string basisName = a->getName() + "_basis";
             StreamSet * alphabetBasis = mExternalTable.getStreamSet(P, indexing, basisName);
-            if (codegen::EnableIllustrator) {
-                P->captureBixNum(basisName, alphabetBasis);
+            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+                P.captureBixNum(basisName, alphabetBasis);
             }
             options->addAlphabet(mpx, alphabetBasis);
         } else {
@@ -588,7 +589,7 @@ void GrepEngine::addExternalStreams(ProgBuilderRef P, const cc::Alphabet * index
     }
 }
 
-StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * MatchResults) {
+StreamSet * GrepEngine::getMatchSpan(kernel::PipelineBuilder & P, re::RE * r, StreamSet * MatchResults) {
     auto indexing = mExternalTable.getStreamIndex(mIndexAlphabet->getCode());
     if (mSpanNames.empty() == false) {
         std::vector<StreamSet *> allSpans;
@@ -596,8 +597,8 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
             allSpans.push_back(mExternalTable.getStreamSet(P, indexing, mSpanNames[i]));
         }
         if (allSpans.size() == 1) return allSpans[0];
-        StreamSet * mergedSpans = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<StreamsMerge>(allSpans, mergedSpans);
+        StreamSet * mergedSpans = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<StreamsMerge>(allSpans, mergedSpans);
         return mergedSpans;
     }
     if (re::Alt * alt = dyn_cast<re::Alt>(r)) {
@@ -607,24 +608,24 @@ StreamSet * GrepEngine::getMatchSpan(ProgBuilderRef P, re::RE * r, StreamSet * M
         for (auto & e : *alt) {
             auto a = getMatchSpan(P, e, MatchResults);
             std::string ct = std::to_string(i);
-            if (codegen::EnableIllustrator) {
-                P->captureBitstream(ct, a);
+            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+                P.captureBitstream(ct, a);
             }
             allSpans.push_back(a);
             i++;
         }
-        StreamSet * mergedSpans = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<StreamsMerge>(allSpans, mergedSpans);
+        StreamSet * mergedSpans = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<StreamsMerge>(allSpans, mergedSpans);
         return mergedSpans;
     } else {
         int spanLgth = re::getLengthRange(r, mIndexAlphabet).first;
-        StreamSet * spans = P->CreateStreamSet(1, 1);
-        P->CreateKernelFamilyCall<FixedMatchSpansKernel>(spanLgth, grepOffset(r), MatchResults, spans);
+        StreamSet * spans = P.CreateStreamSet(1, 1);
+        P.CreateKernelFamilyCall<FixedMatchSpansKernel>(spanLgth, grepOffset(r), MatchResults, spans);
         return spans;
     }
 }
 
-unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabet, re::RE * re, StreamSet * Results) {
+unsigned GrepEngine::RunGrep(kernel::PipelineBuilder & P, const cc::Alphabet * indexAlphabet, re::RE * re, StreamSet * Results) {
     auto options = std::make_unique<GrepKernelOptions>(indexAlphabet);
     StreamSet * indexStream = nullptr;
     if (indexAlphabet == &cc::UTF8) {
@@ -638,81 +639,80 @@ unsigned GrepEngine::RunGrep(ProgBuilderRef P, const cc::Alphabet * indexAlphabe
     options->setBarrier(mExternalTable.getStreamSet(P, indexing, "$"));
     addExternalStreams(P, indexAlphabet, options, re, indexStream);
     options->setResults(Results);
-    Kernel * k = P->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
-    if (codegen::EnableIllustrator) {
-        P->captureBitstream("RunGrep", Results);
+    Kernel * k = P.CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        P.captureBitstream("RunGrep", Results);
     }
     return reinterpret_cast<ICGrepKernel *>(k)->getOffset();
 }
 
-StreamSet * GrepEngine::initialMatches(ProgBuilderRef P, StreamSet * InputStream) {
+StreamSet * GrepEngine::initialMatches(kernel::PipelineBuilder & P, StreamSet * InputStream) {
     mExternalTable.resetExternals();
     StreamSet * SourceStream = getBasis(P, InputStream);
     grepPrologue(P, SourceStream);
     prepareExternalStreams(P, SourceStream);
-    StreamSet * Matches = P->CreateStreamSet();
+    StreamSet * Matches = P.CreateStreamSet();
     RunGrep(P, mIndexAlphabet, mRE, Matches);
     if (mIndexAlphabet == &cc::Unicode) {
-        StreamSet * u8index1 = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<AddSentinel>(mU8index, u8index1);
-        StreamSet * Results = P->CreateStreamSet(1, 1);
+        StreamSet * u8index1 = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<AddSentinel>(mU8index, u8index1);
+        StreamSet * Results = P.CreateStreamSet(1, 1);
         SpreadByMask(P, u8index1, Matches, Results);
         Matches = Results;
     }
-    if (codegen::EnableIllustrator) {
-        P->captureBitstream("ICgrep kernel matches", Matches);
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        P.captureBitstream("ICgrep kernel matches", Matches);
     }
     return Matches;
 }
 
-StreamSet * GrepEngine::matchedLines(ProgBuilderRef P, StreamSet * initialMatches) {
+StreamSet * GrepEngine::matchedLines(kernel::PipelineBuilder & P, StreamSet * initialMatches) {
     StreamSet * MatchedLineEnds = nullptr;
     if (hasComponent(mExternalComponents, Component::MoveMatchesToEOL)) {
-        StreamSet * const MovedMatches = P->CreateStreamSet();
-        P->CreateKernelCall<MatchedLinesKernel>(initialMatches, mLineBreakStream, MovedMatches);
-        if (codegen::EnableIllustrator) {
-            P->captureBitstream("MovedMatches", MovedMatches);
+        StreamSet * const MovedMatches = P.CreateStreamSet();
+        P.CreateKernelCall<MatchedLinesKernel>(initialMatches, mLineBreakStream, MovedMatches);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("MovedMatches", MovedMatches);
         }
         MatchedLineEnds = MovedMatches;
     } else {
         MatchedLineEnds = initialMatches;
     }
     if (mInvertMatches) {
-        StreamSet * const InvertedMatches = P->CreateStreamSet();
-        P->CreateKernelCall<InvertMatchesKernel>(MatchedLineEnds, mLineBreakStream, InvertedMatches);
-        if (codegen::EnableIllustrator) {
-            P->captureBitstream("InvertedMatches", InvertedMatches);
+        StreamSet * const InvertedMatches = P.CreateStreamSet();
+        P.CreateKernelCall<InvertMatchesKernel>(MatchedLineEnds, mLineBreakStream, InvertedMatches);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("InvertedMatches", InvertedMatches);
         }
         MatchedLineEnds = InvertedMatches;
     }
     if (mMaxCount > 0) {
         StreamSet * MaxCountLines = nullptr;
-        Scalar * const maxCount = P->getInputScalar("maxCount");
+        Scalar * const maxCount = P.getInputScalar("maxCount");
         const UntilNMode m = MaxLimitTerminationMode;
         if (m == UntilNMode::ReportAcceptedLengthAtAndBeforeN) {
-            MaxCountLines = P->CreateTruncatedStreamSet(MatchedLineEnds);
+            MaxCountLines = P.CreateTruncatedStreamSet(MatchedLineEnds);
         } else {
-            MaxCountLines = P->CreateStreamSet();
+            MaxCountLines = P.CreateStreamSet();
         }
-        P->CreateKernelCall<UntilNkernel>(maxCount, MatchedLineEnds, MaxCountLines, m);
-        if (codegen::EnableIllustrator) {
-            P->captureBitstream("MaxCountLines", MaxCountLines);
+        P.CreateKernelCall<UntilNkernel>(maxCount, MatchedLineEnds, MaxCountLines, m);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("MaxCountLines", MaxCountLines);
         }
         MatchedLineEnds = MaxCountLines;
-        StreamSet * TruncatedLines =
-            streamutils::Merge(P, {{MaxCountLines, {0}}, {mLineBreakStream, {0}}});
-        if (codegen::EnableIllustrator) {
-            P->captureBitstream("TruncatedLines", TruncatedLines);
+        StreamSet * TruncatedLines = streamutils::Merge(P, {{MaxCountLines, {0}}, {mLineBreakStream, {0}}});
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("TruncatedLines", TruncatedLines);
         }
         mLineBreakStream = TruncatedLines;
     }
-    if (codegen::EnableIllustrator) {
-        P->captureBitstream("MatchedLineEnds", MatchedLineEnds);
+    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+        P.captureBitstream("MatchedLineEnds", MatchedLineEnds);
     }
     return MatchedLineEnds;
 }
 
-StreamSet * GrepEngine::grepPipeline(ProgBuilderRef P, StreamSet * InputStream) {
+StreamSet * GrepEngine::grepPipeline(kernel::PipelineBuilder & P, StreamSet * InputStream) {
     StreamSet * Matches = initialMatches(P, InputStream);
     return matchedLines(P, Matches);
 }
@@ -724,25 +724,19 @@ StreamSet * GrepEngine::grepPipeline(ProgBuilderRef P, StreamSet * InputStream) 
 //
 
 void GrepEngine::grepCodeGen() {
-    auto & b = mGrepDriver.getBuilder();
 
-    auto P = mGrepDriver.makePipeline(
-                // inputs
-                {Binding{b.getSizeTy(), "useMMap"},
-                Binding{b.getInt32Ty(), "fileDescriptor"},
-                Binding{b.getIntAddrTy(), "callbackObject"},
-                Binding{b.getSizeTy(), "maxCount"}}
-                ,// output
-                {Binding{b.getInt64Ty(), "countResult"}});
+    auto P = CreatePipeline(mGrepDriver,
+                            Input<uint32_t>{"useMMap"}, Input<uint32_t>{"fileDescriptor"},
+                            Input<GrepCallBackObject &>{"callbackObject"}, Input<size_t>{"maxCount"},
+                            Output<uint64_t>{"countResult"});
 
-    Scalar * const useMMap = P->getInputScalar("useMMap");
-    Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
-    StreamSet * const ByteStream = P->CreateStreamSet(1, ENCODING_BITS);
-    P->CreateKernelCall<FDSourceKernel>(useMMap, fileDescriptor, ByteStream);
+    Scalar * const useMMap = P.getInputScalar("useMMap");
+    Scalar * const fileDescriptor = P.getInputScalar("fileDescriptor");
+    StreamSet * const ByteStream = P.CreateStreamSet(1, ENCODING_BITS);
+    P.CreateKernelCall<FDSourceKernel>(useMMap, fileDescriptor, ByteStream);
     StreamSet * const Matches = grepPipeline(P, ByteStream);
-    P->CreateKernelCall<PopcountKernel>(Matches, P->getOutputScalar("countResult"));
-
-    mMainMethod = P->compile();
+    P.CreateKernelCall<PopcountKernel>(Matches, P.getOutputScalar("countResult"));
+    mMainMethod = P.compile();
 }
 
 //
@@ -829,175 +823,103 @@ void EmitMatch::finalize_match(char * buffer_end) {
     if (!mTerminated) *mResultStr << "\n";
 }
 
-class GrepColourizationPipeline : public PipelineKernel {
-public:
-    GrepColourizationPipeline(KernelBuilder & b,
-                              StreamSet * SourceCoords,
-                              StreamSet * MatchSpans,
-                              StreamSet * Basis,
-                              Scalar * const callbackObject)
-        : PipelineKernel(b
-                         // signature
-                         , [&]() -> std::string {
-                             return pablo::annotateKernelNameWithPabloDebugFlags("GrepColourization");
-                         }()
-                         // contains kernel family calls
-                         , false
-                         // kernel list
-                         , {}
-                         // called functions
-                         , {}
-                         // stream inputs
-                         , {Bind("SourceCoords", SourceCoords, GreedyRate(1), Deferred()),
-                            Bind("MatchSpans", MatchSpans, GreedyRate(), Deferred()),
-                            Bind("Basis", Basis, GreedyRate(), Deferred())}
-                         // stream outputs
-                         , {}
-                         // input scalars
-                         , {Binding{b.getIntAddrTy(), "callbackObject", callbackObject}}
-                         // output scalars
-                         , {}
-                         // internally generated streamsets
-                         , {}
-                         // length assertions
-                         , {}) {
-        addAttribute(InternallySynchronized());
-        addAttribute(MustExplicitlyTerminate());
-        addAttribute(SideEffecting());
-        // TODO: study the I/O settings to see what the best balance is for memory vs. throughput.
-
-        // TODO: I'm not sure how safe the greedyrate is here. When compiling the nested kernel,
-        // the pipeline compiler doesn't really understand how to treat the greedy input rate
-        // as a "production" rate. The simulator inside needs more information to understand it
-        // as a dataflow rate but current modelling system isn't very good for that.
-
-    }
-
-protected:
-
-    void instantiateInternalKernels(const std::unique_ptr<PipelineBuilder> & E) final {
-        const std::string ESC = "\x1B";
-        const std::vector<std::string> colorEscapes = {ESC + "[01;31m" + ESC + "[K", ESC + "[m"};
-        std::vector<uint64_t> colorEscapeBytes;
-        const  unsigned insertLengthBits = 4;
-        std::vector<unsigned> insertAmts;
-        for (auto & s : colorEscapes) {
-            insertAmts.push_back(s.size());
-            for (auto & ch : s) {
-                colorEscapeBytes.push_back(static_cast<uint64_t>(ch));
-            }
-        }
-
-        StreamSet * const MatchSpans = getInputStreamSet(1);
-        StreamSet * const InsertMarks = E->CreateStreamSet(2, 1);
-        E->CreateKernelCall<SpansToMarksKernel>(MatchSpans, InsertMarks);
-
-        StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
-        E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, InsertMarks, InsertBixNum);
-        StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
-
-        StreamSet * const Basis = getInputStreamSet(2);
-        StreamSet * ColorEscapeBasis = E->CreateRepeatingBixNum(8, colorEscapeBytes);
-        StreamSet * ColorizedBasis = E->CreateStreamSet(8);
-        MergeByMask(E, SpreadMask, Basis, ColorEscapeBasis, ColorizedBasis);
-
-        StreamSet * const ColorizedBytes  = E->CreateStreamSet(1, 8);
-        E->CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);
-
-        StreamSet * ColorizedBreaks = E->CreateStreamSet(1);
-        E->CreateKernelCall<UnixLinesKernelBuilder>(ColorizedBasis, ColorizedBreaks, UnterminatedLineAtEOF::Add1);
-
-        StreamSet * const ColorizedCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
-        E->CreateKernelCall<MatchCoordinatesKernel>(ColorizedBreaks, ColorizedBreaks, ColorizedCoords, 1);
-
-        // TODO: source coords >= colorized coords until the final stride?
-        // E->AssertEqualLength(SourceCoords, ColorizedCoords);
-
-        StreamSet * const SourceCoords = getInputStreamSet(0);
-        Scalar * const callbackObject = getInputScalarAt(0);
-        Kernel * const matchK = E->CreateKernelCall<ColorizedReporter>(ColorizedBytes, SourceCoords, ColorizedCoords, callbackObject);
-        matchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
-        matchK->link("finalize_match_wrapper", finalize_match_wrapper);
-    }
-
-};
-
-void GrepEngine::applyColorization(const std::unique_ptr<ProgramBuilder> & E,
+void GrepEngine::applyColorization(PipelineBuilder & P,
                                    StreamSet * SourceCoords,
                                    StreamSet * MatchSpans,
                                    StreamSet * Basis) {
 
-    Scalar * const callbackObject = E->getInputScalar("callbackObject");
+    Scalar * const callbackObject = P.getInputScalar("callbackObject");
 
-    if (UseNestedColourizationPipeline) {
-        E->CreateNestedPipelineCall<GrepColourizationPipeline>(SourceCoords, MatchSpans, Basis, callbackObject);
-    } else {
+    auto makeNestedColourizationPipeline = [&](PipelineBuilder & E) {
+
         std::string ESC = "\x1B";
         std::vector<std::string> colorEscapes = {ESC + "[01;31m" + ESC + "[K", ESC + "[m"};
         unsigned insertLengthBits = 4;
         std::vector<unsigned> insertAmts;
         for (auto & s : colorEscapes) {insertAmts.push_back(s.size());}
 
-        StreamSet * const SpanMarks = E->CreateStreamSet(2, 1);
-        E->CreateKernelCall<SpansToMarksKernel>(MatchSpans, SpanMarks);
-        if (codegen::EnableIllustrator) {
-            E->captureBixNum("SpanMarks", SpanMarks);
+        StreamSet * const SpanMarks = E.CreateStreamSet(2, 1);
+        E.CreateKernelCall<SpansToMarksKernel>(MatchSpans, SpanMarks);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBixNum("SpanMarks", SpanMarks);
         }
 
-        StreamSet * const InsertBixNum = E->CreateStreamSet(insertLengthBits, 1);
-        E->CreateKernelCall<ZeroInsertBixNum>(insertAmts, SpanMarks, InsertBixNum);
+        StreamSet * const InsertBixNum = E.CreateStreamSet(insertLengthBits, 1);
+        E.CreateKernelCall<ZeroInsertBixNum>(insertAmts, SpanMarks, InsertBixNum);
         StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
-        if (codegen::EnableIllustrator) {
-            E->captureBitstream("SpreadMask", SpreadMask);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBitstream("SpreadMask", SpreadMask);
         }
 
         // For each run of 0s marking insert positions, create a parallel
         // bixnum sequentially numbering the string insert positions.
-        StreamSet * const InsertIndex = E->CreateStreamSet(insertLengthBits);
-        E->CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
+        StreamSet * const InsertIndex = E.CreateStreamSet(insertLengthBits);
+        E.CreateKernelCall<RunIndex>(SpreadMask, InsertIndex, nullptr, RunIndex::Kind::RunOf0);
         // Basis bit streams expanded with 0 bits for each string to be inserted.
-        if (codegen::EnableIllustrator) {
-            E->captureBixNum("InsertIndex", InsertIndex);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBixNum("InsertIndex", InsertIndex);
         }
 
-        StreamSet * ExpandedBasis = E->CreateStreamSet(8);
+        StreamSet * ExpandedBasis = E.CreateStreamSet(8);
         SpreadByMask(E, SpreadMask, Basis, ExpandedBasis);
 
         // Map the match start/end marks to their positions in the expanded basis.
-        StreamSet * ExpandedMarks = E->CreateStreamSet(2);
+        StreamSet * ExpandedMarks = E.CreateStreamSet(2);
         SpreadByMask(E, SpreadMask, SpanMarks, ExpandedMarks);
-        if (codegen::EnableIllustrator) {
-            E->captureBixNum("ExpandedMarks", ExpandedMarks);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBixNum("ExpandedMarks", ExpandedMarks);
         }
 
-        StreamSet * ColorizedBasis = E->CreateStreamSet(8);
-        E->CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
-        if (codegen::EnableIllustrator) {
-            E->captureBixNum("ColorizedBasis", ColorizedBasis);
+        StreamSet * ColorizedBasis = E.CreateStreamSet(8);
+        E.CreateKernelCall<StringReplaceKernel>(colorEscapes, ExpandedBasis, SpreadMask, ExpandedMarks, InsertIndex, ColorizedBasis, -1);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBixNum("ColorizedBasis", ColorizedBasis);
         }
-        StreamSet * const ColorizedBytes  = E->CreateStreamSet(1, 8);
-        E->CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);
+        StreamSet * const ColorizedBytes  = E.CreateStreamSet(1, 8);
+        E.CreateKernelCall<P2SKernel>(ColorizedBasis, ColorizedBytes);
 
-        StreamSet * ColorizedBreaks = E->CreateStreamSet(1);
-        E->CreateKernelCall<UnixLinesKernelBuilder>(ColorizedBasis, ColorizedBreaks, UnterminatedLineAtEOF::Add1);
+        StreamSet * ColorizedBreaks = E.CreateStreamSet(1);
+        E.CreateKernelCall<UnixLinesKernelBuilder>(ColorizedBasis, ColorizedBreaks, UnterminatedLineAtEOF::Add1);
 
-        StreamSet * const ColorizedCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
-        E->CreateKernelCall<MatchCoordinatesKernel>(ColorizedBreaks, ColorizedBreaks, ColorizedCoords, 1);
-        if (codegen::EnableIllustrator) {
-            E->captureBitstream("ColorizedBreaks", ColorizedBreaks);
+        StreamSet * const ColorizedCoords = E.CreateStreamSet(3, sizeof(size_t) * 8);
+        E.CreateKernelCall<MatchCoordinatesKernel>(ColorizedBreaks, ColorizedBreaks, ColorizedCoords, 1);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBitstream("ColorizedBreaks", ColorizedBreaks);
         }
 
         // TODO: source coords >= colorized coords until the final stride?
-        // E->AssertEqualLength(SourceCoords, ColorizedCoords);
+        // E.AssertEqualLength(SourceCoords, ColorizedCoords);
 
-        Kernel * const matchK = E->CreateKernelCall<ColorizedReporter>(ColorizedBytes, SourceCoords, ColorizedCoords, callbackObject);
+        Kernel * const matchK = E.CreateKernelCall<ColorizedReporter>(ColorizedBytes, SourceCoords, ColorizedCoords, callbackObject);
         matchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
         matchK->link("finalize_match_wrapper", finalize_match_wrapper);
+        return E.makeKernel();
+    };
+
+
+    if (UseNestedColourizationPipeline) {
+
+        auto E = CreatePipeline(mGrepDriver,
+                                Input<streamset_t>("SourceCoords", SourceCoords, GreedyRate(1), Deferred()),
+                                Input<streamset_t>("MatchSpans", MatchSpans, GreedyRate(), Deferred()),
+                                Input<streamset_t>("Basis", Basis, GreedyRate(), Deferred()),
+                                Input<grep::GrepCallBackObject &>("callbackObject", callbackObject),
+                                InternallySynchronized(),
+                                MustExplicitlyTerminate(),
+                                SideEffecting()
+                                );
+
+        P.AddKernelCall(makeNestedColourizationPipeline(E));
+
+    } else {
+
+        makeNestedColourizationPipeline(P);
+
     }
 
 }
 
-void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
+void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & E, StreamSet * ByteStream) {
     StreamSet * Matches = initialMatches(E, ByteStream);
     StreamSet * MatchedLineEnds = matchedLines(E, Matches);
 
@@ -1005,95 +927,95 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
     bool needsColoring = mColoring && !mInvertMatches;
     StreamSet * MatchesByLine = nullptr;
     if (needsColoring | hasContext) {
-        MatchesByLine = E->CreateStreamSet(1, 1);
+        MatchesByLine = E.CreateStreamSet(1, 1);
         FilterByMask(E, mLineBreakStream, MatchedLineEnds, MatchesByLine);
-        if (codegen::EnableIllustrator) {
-            E->captureBitstream("MatchesByLine", MatchesByLine);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBitstream("MatchesByLine", MatchesByLine);
         }
     }
     if (hasContext) {
-        StreamSet * ContextByLine = E->CreateStreamSet(1, 1);
-        E->CreateKernelCall<ContextSpan>(MatchesByLine, ContextByLine, mBeforeContext, mAfterContext);
-        StreamSet * SelectedLines = E->CreateStreamSet(1, 1);
+        StreamSet * ContextByLine = E.CreateStreamSet(1, 1);
+        E.CreateKernelCall<ContextSpan>(MatchesByLine, ContextByLine, mBeforeContext, mAfterContext);
+        StreamSet * SelectedLines = E.CreateStreamSet(1, 1);
         SpreadByMask(E, mLineBreakStream, ContextByLine, SelectedLines);
         MatchedLineEnds = SelectedLines;
         MatchesByLine = ContextByLine;
     }
 
     if (needsColoring) {
-        StreamSet * SourceCoords = E->CreateStreamSet(1, sizeof(size_t) * 8);
-        Scalar * const callbackObject = E->getInputScalar("callbackObject");
-        Kernel * const batchK = E->CreateKernelCall<BatchCoordinatesKernel>(MatchedLineEnds, mLineBreakStream, SourceCoords, callbackObject);
+        StreamSet * SourceCoords = E.CreateStreamSet(1, sizeof(size_t) * 8);
+        Scalar * const callbackObject = E.getInputScalar("callbackObject");
+        Kernel * const batchK = E.CreateKernelCall<BatchCoordinatesKernel>(MatchedLineEnds, mLineBreakStream, SourceCoords, callbackObject);
         batchK->link("get_file_count_wrapper", get_file_count_wrapper);
         batchK->link("get_file_start_pos_wrapper", get_file_start_pos_wrapper);
         batchK->link("set_batch_line_number_wrapper", set_batch_line_number_wrapper);
 
-        StreamSet * MatchedLineStarts = E->CreateStreamSet(1, 1);
-        StreamSet * lineStarts = E->CreateStreamSet(1, 1);
-        E->CreateKernelCall<LineStartsKernel>(mLineBreakStream, lineStarts);
+        StreamSet * MatchedLineStarts = E.CreateStreamSet(1, 1);
+        StreamSet * lineStarts = E.CreateStreamSet(1, 1);
+        E.CreateKernelCall<LineStartsKernel>(mLineBreakStream, lineStarts);
         SpreadByMask(E, lineStarts, MatchesByLine, MatchedLineStarts);
-        if (codegen::EnableIllustrator) {
-            E->captureBitstream("MatchedLineStarts", MatchedLineStarts);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBitstream("MatchedLineStarts", MatchedLineStarts);
         }
-        StreamSet * MatchedLineSpans = E->CreateStreamSet(1, 1);
-        E->CreateKernelCall<LineSpansKernel>(MatchedLineStarts, MatchedLineEnds, MatchedLineSpans);
+        StreamSet * MatchedLineSpans = E.CreateStreamSet(1, 1);
+        E.CreateKernelCall<LineSpansKernel>(MatchedLineStarts, MatchedLineEnds, MatchedLineSpans);
 
-        StreamSet * Filtered = E->CreateStreamSet(1, 8);
+        StreamSet * Filtered = E.CreateStreamSet(1, 8);
         if (UseByteFilterByMask) {
             FilterByMask(E, MatchedLineSpans, ByteStream, Filtered, 0, 64, true);
         } else {
-            E->CreateKernelCall<MatchFilterKernel>(MatchedLineStarts, mLineBreakStream, ByteStream, Filtered);
+            E.CreateKernelCall<MatchFilterKernel>(MatchedLineStarts, mLineBreakStream, ByteStream, Filtered);
         }
-        if (codegen::EnableIllustrator) {
-            E->captureBixNum("Filtered", Filtered);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBixNum("Filtered", Filtered);
         }
         StreamSet * MatchSpans;
         MatchSpans = getMatchSpan(E, mRE, Matches);
-        if (codegen::EnableIllustrator) {
-            E->captureBitstream("Matches", Matches);
-            E->captureBitstream("MatchSpans", MatchSpans);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBitstream("Matches", Matches);
+            E.captureBitstream("MatchSpans", MatchSpans);
         }
         if (UnicodeIndexing) {
-            StreamSet * u8index1 = E->CreateStreamSet(1, 1);
-            E->CreateKernelCall<AddSentinel>(mU8index, u8index1);
-            StreamSet * ExpandedSpans = E->CreateStreamSet(1, 1);
+            StreamSet * u8index1 = E.CreateStreamSet(1, 1);
+            E.CreateKernelCall<AddSentinel>(mU8index, u8index1);
+            StreamSet * ExpandedSpans = E.CreateStreamSet(1, 1);
             SpreadByMask(E, u8index1, MatchSpans, ExpandedSpans);
-            if (codegen::EnableIllustrator) {
-                E->captureBitstream("ExpandedSpans", ExpandedSpans);
+            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+                E.captureBitstream("ExpandedSpans", ExpandedSpans);
             }
-            StreamSet * FilledSpans = E->CreateStreamSet(1, 1);
-            E->CreateKernelCall<U8Spans>(ExpandedSpans, u8index1, FilledSpans);
-            if (codegen::EnableIllustrator) {
-                E->captureBitstream("FilledSpans", FilledSpans);
+            StreamSet * FilledSpans = E.CreateStreamSet(1, 1);
+            E.CreateKernelCall<U8Spans>(ExpandedSpans, u8index1, FilledSpans);
+            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+                E.captureBitstream("FilledSpans", FilledSpans);
             }
             MatchSpans = FilledSpans;
         }
 
-        StreamSet * FilteredMatchSpans = E->CreateStreamSet(1, 1);
+        StreamSet * FilteredMatchSpans = E.CreateStreamSet(1, 1);
         FilterByMask(E, MatchedLineSpans, MatchSpans, FilteredMatchSpans);
-        if (codegen::EnableIllustrator) {
-            E->captureBitstream("FilteredMatchSpans", FilteredMatchSpans);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            E.captureBitstream("FilteredMatchSpans", FilteredMatchSpans);
         }
-        StreamSet * FilteredBasis = E->CreateStreamSet(8, 1);
+        StreamSet * FilteredBasis = E.CreateStreamSet(8, 1);
         if (codegen::SplitTransposition) {
             Staged_S2P(E, Filtered, FilteredBasis);
         } else {
-            E->CreateKernelCall<S2PKernel>(Filtered, FilteredBasis);
+            E.CreateKernelCall<S2PKernel>(Filtered, FilteredBasis);
         }
 
         applyColorization(E, SourceCoords, FilteredMatchSpans, FilteredBasis);
 
     } else { // Non colorized output
         if (MatchCoordinateBlocks > 0) {
-            StreamSet * MatchCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
-            E->CreateKernelCall<MatchCoordinatesKernel>(MatchedLineEnds, mLineBreakStream, MatchCoords, MatchCoordinateBlocks);
-            Scalar * const callbackObject = E->getInputScalar("callbackObject");
-            Kernel * const matchK = E->CreateKernelCall<MatchReporter>(ByteStream, MatchCoords, callbackObject);
+            StreamSet * MatchCoords = E.CreateStreamSet(3, sizeof(size_t) * 8);
+            E.CreateKernelCall<MatchCoordinatesKernel>(MatchedLineEnds, mLineBreakStream, MatchCoords, MatchCoordinateBlocks);
+            Scalar * const callbackObject = E.getInputScalar("callbackObject");
+            Kernel * const matchK = E.CreateKernelCall<MatchReporter>(ByteStream, MatchCoords, callbackObject);
             matchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
             matchK->link("finalize_match_wrapper", finalize_match_wrapper);
         } else {
-            Scalar * const callbackObject = E->getInputScalar("callbackObject");
-            Kernel * const scanBatchK = E->CreateKernelCall<ScanBatchKernel>(MatchedLineEnds, mLineBreakStream, ByteStream, callbackObject, ScanMatchBlocks);
+            Scalar * const callbackObject = E.getInputScalar("callbackObject");
+            Kernel * const scanBatchK = E.CreateKernelCall<ScanBatchKernel>(MatchedLineEnds, mLineBreakStream, ByteStream, callbackObject, ScanMatchBlocks);
             scanBatchK->link("get_file_count_wrapper", get_file_count_wrapper);
             scanBatchK->link("get_file_start_pos_wrapper", get_file_start_pos_wrapper);
             scanBatchK->link("set_batch_line_number_wrapper", set_batch_line_number_wrapper);
@@ -1105,24 +1027,20 @@ void EmitMatchesEngine::grepPipeline(ProgBuilderRef E, StreamSet * ByteStream) {
 
 
 void EmitMatchesEngine::grepCodeGen() {
-    auto & b = mGrepDriver.getBuilder();
 
-    auto E2 = mGrepDriver.makePipeline(
-                    // inputs
-                    {Binding{b.getInt8PtrTy(), "buffer"},
-                    Binding{b.getSizeTy(), "length"},
-                    Binding{b.getIntAddrTy(), "callbackObject"},
-                    Binding{b.getSizeTy(), "maxCount"}}
-                    ,// output
-                    {Binding{b.getInt64Ty(), "countResult"}});
+    auto P = CreatePipeline(mGrepDriver,
+                            Input<const char*>{"buffer"}, Input<size_t>{"length"},
+                            Input<EmitMatch &>{"callbackObject"}, Input<size_t>{"maxCount"},
+                            Output<uint64_t>{"countResult"});
 
-    Scalar * const buffer = E2->getInputScalar("buffer");
-    Scalar * const length = E2->getInputScalar("length");
-    StreamSet * const InternalBytes = E2->CreateStreamSet(1, 8);
-    E2->CreateKernelCall<MemorySourceKernel>(buffer, length, InternalBytes);
-    grepPipeline(E2, InternalBytes);
-    E2->setOutputScalar("countResult", E2->CreateConstant(b.getInt64(0)));
-    mBatchMethod = E2->compile();
+    Scalar * const buffer = P.getInputScalar("buffer");
+    Scalar * const length = P.getInputScalar("length");
+    StreamSet * const InternalBytes = P.CreateStreamSet(1, 8);
+
+    P.CreateKernelCall<MemorySourceKernel>(buffer, length, InternalBytes);
+    grepPipeline(P, InternalBytes);
+    P.setOutputScalar("countResult", P.CreateConstant(mGrepDriver.getInt64(0)));
+    mBatchMethod = P.compile();
 }
 
 bool canMMap(const std::string & fileName) {
@@ -1136,8 +1054,7 @@ bool canMMap(const std::string & fileName) {
 
 
 uint64_t GrepEngine::doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm) {
-    typedef uint64_t (*GrepFunctionType)(bool useMMap, int32_t fileDescriptor, GrepCallBackObject *, size_t maxCount);
-    auto f = reinterpret_cast<GrepFunctionType>(mMainMethod);
+    auto f = mMainMethod;
     uint64_t resultTotal = 0;
 
     for (auto fileName : fileNames) {
@@ -1145,7 +1062,7 @@ uint64_t GrepEngine::doGrep(const std::vector<std::string> & fileNames, std::ost
         bool useMMap = mPreferMMap && canMMap(fileName);
         int32_t fileDescriptor = openFile(fileName, strm);
         if (fileDescriptor == -1) return 0;
-        uint64_t grepResult = f(useMMap, fileDescriptor, &handler, mMaxCount);
+        uint64_t grepResult = f(useMMap, fileDescriptor, handler, mMaxCount);
         close(fileDescriptor);
         if (handler.binaryFileSignalled()) {
             llvm::errs() << "Binary file " << fileName << "\n";
@@ -1185,8 +1102,7 @@ void MatchOnlyEngine::showResult(uint64_t grepResult, const std::string & fileNa
 }
 
 uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm) {
-    typedef uint64_t (*GrepBatchFunctionType)(char * buffer, size_t length, EmitMatch *, size_t maxCount);
-    auto f = reinterpret_cast<GrepBatchFunctionType>(mBatchMethod);
+    auto f = mBatchMethod;
     EmitMatch accum(mShowFileNames, mShowLineNumbers, ((mBeforeContext > 0) || (mAfterContext > 0)), mInitialTab);
     accum.setStringStream(&strm);
     std::vector<int32_t> fileDescriptor(fileNames.size());
@@ -1259,7 +1175,7 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
         for (unsigned i = 0; i < accum.mFileStartLineNumbers.size(); i++) {
             accum.mFileStartLineNumbers[i] = ~static_cast<size_t>(0);
         }
-        f(accum.mBatchBuffer, cumulativeSize, &accum, mMaxCount);
+        f(accum.mBatchBuffer, cumulativeSize, accum, mMaxCount);
     }
     if (singleFileMMapMode) {
         munmap(reinterpret_cast<void *>(accum.mBatchBuffer), fileSize[lastOpened]);
@@ -1411,7 +1327,6 @@ mMainMethod(nullptr) {
 }
 
 void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
-    auto & b = mGrepDriver.getBuilder();
 
     re::CC * breakCC = nullptr;
     if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
@@ -1426,48 +1341,48 @@ void InternalSearchEngine::grepCodeGen(re::RE * matchingRE) {
     matchingRE = regular_expression_passes(matchingRE);
     matchingRE = toUTF8(matchingRE);
 
-    auto E = mGrepDriver.makePipeline({Binding{b.getInt8PtrTy(), "buffer"},
-                                       Binding{b.getSizeTy(), "length"},
-                                       Binding{b.getIntAddrTy(), "accumulator"}});
+    auto E = CreatePipeline(mGrepDriver,
+                            Input<const char*>{"buffer"}, Input<size_t>{"length"},
+                            Input<MatchAccumulator *>{"accumulator"});
 
-    Scalar * const buffer = E->getInputScalar(0);
-    Scalar * const length = E->getInputScalar(1);
-    Scalar * const callbackObject = E->getInputScalar(2);
-    StreamSet * ByteStream = E->CreateStreamSet(1, 8);
-    E->CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
+    Scalar * const buffer = E.getInputScalar(0);
+    Scalar * const length = E.getInputScalar(1);
+    Scalar * const callbackObject = E.getInputScalar(2);
+    StreamSet * ByteStream = E.CreateStreamSet(1, 8);
+    E.CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
 
-    StreamSet * RecordBreakStream = E->CreateStreamSet();
-    StreamSet * BasisBits = E->CreateStreamSet(8);
-    E->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
-    E->CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{breakCC}, BasisBits, RecordBreakStream);
+    StreamSet * RecordBreakStream = E.CreateStreamSet();
+    StreamSet * BasisBits = E.CreateStreamSet(8);
+    E.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    E.CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{breakCC}, BasisBits, RecordBreakStream);
 
-    StreamSet * u8index = E->CreateStreamSet();
-    E->CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    StreamSet * u8index = E.CreateStreamSet();
+    E.CreateKernelCall<UTF8_index>(BasisBits, u8index);
 
-    StreamSet * MatchResults = E->CreateStreamSet();
+    StreamSet * MatchResults = E.CreateStreamSet();
     auto options = std::make_unique<GrepKernelOptions>(&cc::UTF8);
     options->setBarrier(RecordBreakStream);
     options->setRE(matchingRE);
     options->addAlphabet(&cc::UTF8, BasisBits);
     options->setResults(MatchResults);
     options->addExternal("UTF8_index", u8index);
-    E->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
-    StreamSet * MatchingRecords = E->CreateStreamSet();
-    E->CreateKernelCall<MatchedLinesKernel>(MatchResults, RecordBreakStream, MatchingRecords);
+    E.CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
+    StreamSet * MatchingRecords = E.CreateStreamSet();
+    E.CreateKernelCall<MatchedLinesKernel>(MatchResults, RecordBreakStream, MatchingRecords);
 
     if (MatchCoordinateBlocks > 0) {
-        StreamSet * MatchCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
-        E->CreateKernelCall<MatchCoordinatesKernel>(MatchingRecords, RecordBreakStream, MatchCoords, MatchCoordinateBlocks);
-        Kernel * const matchK = E->CreateKernelCall<MatchReporter>(ByteStream, MatchCoords, callbackObject);
+        StreamSet * MatchCoords = E.CreateStreamSet(3, sizeof(size_t) * 8);
+        E.CreateKernelCall<MatchCoordinatesKernel>(MatchingRecords, RecordBreakStream, MatchCoords, MatchCoordinateBlocks);
+        Kernel * const matchK = E.CreateKernelCall<MatchReporter>(ByteStream, MatchCoords, callbackObject);
         matchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
         matchK->link("finalize_match_wrapper", finalize_match_wrapper);
     } else {
-        Kernel * const scanMatchK = E->CreateKernelCall<ScanMatchKernel>(MatchingRecords, RecordBreakStream, ByteStream, callbackObject, ScanMatchBlocks);
+        Kernel * const scanMatchK = E.CreateKernelCall<ScanMatchKernel>(MatchingRecords, RecordBreakStream, ByteStream, callbackObject, ScanMatchBlocks);
         scanMatchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
         scanMatchK->link("finalize_match_wrapper", finalize_match_wrapper);
     }
 
-    mMainMethod = E->compile();
+    mMainMethod = E.compile();
 }
 
 InternalSearchEngine::InternalSearchEngine(const std::unique_ptr<grep::GrepEngine> & engine)
@@ -1477,9 +1392,7 @@ InternalSearchEngine::~InternalSearchEngine() { }
 
 
 void InternalSearchEngine::doGrep(const char * search_buffer, size_t bufferLength, MatchAccumulator & accum) {
-    typedef void (*GrepFunctionType)(const char * buffer, const size_t length, MatchAccumulator *);
-    auto f = reinterpret_cast<GrepFunctionType>(mMainMethod);
-    f(search_buffer, bufferLength, &accum);
+    mMainMethod(search_buffer, bufferLength, &accum);
 }
 
 InternalMultiSearchEngine::InternalMultiSearchEngine(BaseDriver &driver) :
@@ -1494,7 +1407,6 @@ InternalMultiSearchEngine::InternalMultiSearchEngine(const std::unique_ptr<grep:
     InternalMultiSearchEngine(engine->mGrepDriver) {}
 
 void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) {
-    auto & b = mGrepDriver.getBuilder();
 
     re::CC * breakCC = nullptr;
     if (mGrepRecordBreak == GrepRecordBreakKind::Null) {
@@ -1503,30 +1415,30 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
         breakCC = re::makeByte(0x0A);
     }
 
-    auto E = mGrepDriver.makePipeline({Binding{b.getInt8PtrTy(), "buffer"},
-        Binding{b.getSizeTy(), "length"},
-        Binding{b.getIntAddrTy(), "accumulator"}});
+    auto E = CreatePipeline(mGrepDriver,
+                            Input<const char*>{"buffer"}, Input<size_t>{"length"},
+                            Input<MatchAccumulator *>{"accumulator"});
 
-    Scalar * const buffer = E->getInputScalar(0);
-    Scalar * const length = E->getInputScalar(1);
-    Scalar * const callbackObject = E->getInputScalar(2);
-    StreamSet * ByteStream = E->CreateStreamSet(1, 8);
-    E->CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
+    Scalar * const buffer = E.getInputScalar(0);
+    Scalar * const length = E.getInputScalar(1);
+    Scalar * const callbackObject = E.getInputScalar(2);
+    StreamSet * ByteStream = E.CreateStreamSet(1, 8);
+    E.CreateKernelCall<MemorySourceKernel>(buffer, length, ByteStream);
 
-    StreamSet * RecordBreakStream = E->CreateStreamSet();
-    StreamSet * BasisBits = E->CreateStreamSet(8);
-    E->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
-    E->CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{breakCC}, BasisBits, RecordBreakStream);
+    StreamSet * RecordBreakStream = E.CreateStreamSet();
+    StreamSet * BasisBits = E.CreateStreamSet(8);
+    E.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    E.CreateKernelCall<CharacterClassKernelBuilder>(std::vector<re::CC *>{breakCC}, BasisBits, RecordBreakStream);
 
-    StreamSet * u8index = E->CreateStreamSet();
-    E->CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    StreamSet * u8index = E.CreateStreamSet();
+    E.CreateKernelCall<UTF8_index>(BasisBits, u8index);
 
     StreamSet * resultsSoFar = RecordBreakStream;
 
     const auto n = patterns.size();
 
     for (unsigned i = 0; i < n; i++) {
-        StreamSet * const MatchResults = E->CreateStreamSet();
+        StreamSet * const MatchResults = E.CreateStreamSet();
 
         auto options = std::make_unique<GrepKernelOptions>();
 
@@ -1545,29 +1457,27 @@ void InternalMultiSearchEngine::grepCodeGen(const re::PatternVector & patterns) 
             options->setCombiningStream(isExclude ? GrepCombiningType::Exclude : GrepCombiningType::Include, resultsSoFar);
         }
         options->addExternal("UTF8_index", u8index);
-        E->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
+        E.CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
         resultsSoFar = MatchResults;
     }
 
     if (MatchCoordinateBlocks > 0) {
-        StreamSet * MatchCoords = E->CreateStreamSet(3, sizeof(size_t) * 8);
-        E->CreateKernelCall<MatchCoordinatesKernel>(resultsSoFar, RecordBreakStream, MatchCoords, MatchCoordinateBlocks);
-        Kernel * const matchK = E->CreateKernelCall<MatchReporter>(ByteStream, MatchCoords, callbackObject);
+        StreamSet * MatchCoords = E.CreateStreamSet(3, sizeof(size_t) * 8);
+        E.CreateKernelCall<MatchCoordinatesKernel>(resultsSoFar, RecordBreakStream, MatchCoords, MatchCoordinateBlocks);
+        Kernel * const matchK = E.CreateKernelCall<MatchReporter>(ByteStream, MatchCoords, callbackObject);
         matchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
         matchK->link("finalize_match_wrapper", finalize_match_wrapper);
     } else {
-        Kernel * const scanMatchK = E->CreateKernelCall<ScanMatchKernel>(resultsSoFar, RecordBreakStream, ByteStream, callbackObject, ScanMatchBlocks);
+        Kernel * const scanMatchK = E.CreateKernelCall<ScanMatchKernel>(resultsSoFar, RecordBreakStream, ByteStream, callbackObject, ScanMatchBlocks);
         scanMatchK->link("accumulate_match_wrapper", accumulate_match_wrapper);
         scanMatchK->link("finalize_match_wrapper", finalize_match_wrapper);
     }
 
-    mMainMethod = E->compile();
+    mMainMethod = E.compile();
 }
 
 void InternalMultiSearchEngine::doGrep(const char * search_buffer, size_t bufferLength, MatchAccumulator & accum) {
-    typedef void (*GrepFunctionType)(const char * buffer, const size_t length, MatchAccumulator *);
-    auto f = reinterpret_cast<GrepFunctionType>(mMainMethod);
-    f(search_buffer, bufferLength, &accum);
+    mMainMethod(search_buffer, bufferLength, &accum);
 }
 
 class LineNumberAccumulator : public grep::MatchAccumulator {

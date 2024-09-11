@@ -760,7 +760,12 @@ std::string KernelBuilder::getKernelName() const noexcept {
  ** ------------------------------------------------------------------------------------------------------------- */
 bool isFromCurrentFunction(const KernelBuilder & b, const Value * const value, const bool allowNull) {
     if (value == nullptr) {
+        assert ("value is null?" && allowNull);
         return allowNull;
+    }
+    if (LLVM_UNLIKELY(&b.getContext() != &value->getContext())) {
+        assert (!"not from same context?");
+        return false;
     }
     BasicBlock * const ip = b.GetInsertBlock();
     assert (ip);
@@ -776,9 +781,7 @@ bool isFromCurrentFunction(const KernelBuilder & b, const Value * const value, c
         function = cast<Instruction>(value)->getParent()->getParent();
     }
     assert (function);
-    if (LLVM_UNLIKELY(&b.getContext() != &value->getContext())) {
-        return false;
-    }
+    assert ("not from same function?" && (builderFunction == function));
     return (builderFunction == function);
 }
 #endif

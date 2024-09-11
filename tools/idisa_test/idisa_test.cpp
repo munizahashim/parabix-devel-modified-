@@ -19,7 +19,7 @@
 #include <kernel/io/stdout_kernel.h>
 #include <toolchain/toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <boost/filesystem.hpp>
@@ -43,7 +43,7 @@ static cl::opt<int> Immediate("i", cl::desc("Immediate value for mvmd_dslli"), c
 
 class ShiftMaskKernel : public BlockOrientedKernel {
 public:
-    ShiftMaskKernel(KernelBuilder & b, unsigned fw, unsigned limit, StreamSet * input, StreamSet * output);
+    ShiftMaskKernel(LLVMTypeSystemInterface & ts, unsigned fw, unsigned limit, StreamSet * input, StreamSet * output);
 protected:
     void generateDoBlockMethod(KernelBuilder & kb) override;
 private:
@@ -51,8 +51,8 @@ private:
     const unsigned mShiftMask;
 };
 
-ShiftMaskKernel::ShiftMaskKernel(KernelBuilder & b, unsigned fw, unsigned mask, StreamSet *input, StreamSet *output)
-: BlockOrientedKernel(b, "shiftMask" + std::to_string(fw) + "_" + std::to_string(mask),
+ShiftMaskKernel::ShiftMaskKernel(LLVMTypeSystemInterface & ts, unsigned fw, unsigned mask, StreamSet *input, StreamSet *output)
+: BlockOrientedKernel(ts, "shiftMask" + std::to_string(fw) + "_" + std::to_string(mask),
                               {Binding{"shiftOperand", input}},
                               {Binding{"limitedShift", output}},
                               {}, {}, {}),
@@ -69,7 +69,7 @@ void ShiftMaskKernel::generateDoBlockMethod(KernelBuilder & b) {
 
 class IdisaBinaryOpTestKernel : public MultiBlockKernel {
 public:
-    IdisaBinaryOpTestKernel(KernelBuilder & b, std::string idisa_op, unsigned fw, unsigned imm,
+    IdisaBinaryOpTestKernel(LLVMTypeSystemInterface & ts, std::string idisa_op, unsigned fw, unsigned imm,
                             StreamSet * Operand1, StreamSet * Operand2, StreamSet * result);
 protected:
     void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfStrides) override;
@@ -79,9 +79,9 @@ private:
     const unsigned mImmediateShift;
 };
 
-IdisaBinaryOpTestKernel::IdisaBinaryOpTestKernel(KernelBuilder & b, std::string idisa_op, unsigned fw, unsigned imm,
+IdisaBinaryOpTestKernel::IdisaBinaryOpTestKernel(LLVMTypeSystemInterface & ts, std::string idisa_op, unsigned fw, unsigned imm,
                                                  StreamSet *Operand1, StreamSet *Operand2, StreamSet *result)
-: MultiBlockKernel(b, idisa_op + std::to_string(fw) + "_test",
+: MultiBlockKernel(ts, idisa_op + std::to_string(fw) + "_test",
      {Binding{"operand1", Operand1}, Binding{"operand2", Operand2}},
      {Binding{"result", result}},
      {}, {}, {}),
@@ -176,7 +176,7 @@ void IdisaBinaryOpTestKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::V
 
 class IdisaBinaryOpCheckKernel : public BlockOrientedKernel {
 public:
-    IdisaBinaryOpCheckKernel(KernelBuilder & b, std::string idisa_op, unsigned fw, unsigned imm,
+    IdisaBinaryOpCheckKernel(LLVMTypeSystemInterface & ts, std::string idisa_op, unsigned fw, unsigned imm,
                              StreamSet * Operand1, StreamSet * Operand2, StreamSet * result,
                              StreamSet * expected, Scalar * failures);
 protected:
@@ -187,10 +187,10 @@ private:
     const unsigned mImmediateShift;
 };
 
-IdisaBinaryOpCheckKernel::IdisaBinaryOpCheckKernel(KernelBuilder & b, std::string idisa_op, unsigned fw, unsigned imm,
+IdisaBinaryOpCheckKernel::IdisaBinaryOpCheckKernel(LLVMTypeSystemInterface & ts, std::string idisa_op, unsigned fw, unsigned imm,
                                                    StreamSet *Operand1, StreamSet *Operand2, StreamSet *result,
                                                    StreamSet *expected, Scalar *failures)
-: BlockOrientedKernel(b, idisa_op + std::to_string(fw) + "_check" + std::to_string(QuietMode),
+: BlockOrientedKernel(ts, idisa_op + std::to_string(fw) + "_check" + std::to_string(QuietMode),
                            {Binding{"operand1", Operand1},
                             Binding{"operand2", Operand2},
                             Binding{"test_result", result}},
@@ -393,79 +393,68 @@ int32_t openFile(const std::string & fileName, llvm::raw_ostream & msgstrm) {
     }
 }
 
-typedef size_t (*IDISAtestFunctionType)(int32_t fd1, int32_t fd2);
+typedef size_t (*IDISAtestFunctionType)(uint32_t fd1, uint32_t fd2, const char * outputFileName);
 
-StreamSet * readHexToBinary(std::unique_ptr<ProgramBuilder> & P, const std::string & fd) {
-    StreamSet * const hexStream = P->CreateStreamSet(1, 8);
-    Scalar * const fileDecriptor = P->getInputScalar(fd);
-    P->CreateKernelCall<ReadSourceKernel>(fileDecriptor, hexStream);
-    StreamSet * const bitStream = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<HexToBinary>(hexStream, bitStream);
+inline StreamSet * readHexToBinary(PipelineBuilder & P, const std::string & fd) {
+    StreamSet * const hexStream = P.CreateStreamSet(1, 8);
+    Scalar * const fileDecriptor = P.getInputScalar(fd);
+    P.CreateKernelCall<ReadSourceKernel>(fileDecriptor, hexStream);
+    StreamSet * const bitStream = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<HexToBinary>(hexStream, bitStream);
     return bitStream;
 }
 
-inline StreamSet * applyShiftMask(std::unique_ptr<ProgramBuilder> & P, StreamSet * input) {
+inline StreamSet * applyShiftMask(kernel::PipelineBuilder & P, StreamSet * input) {
     if (ShiftMask > 0) {
-        StreamSet * output = P->CreateStreamSet(1, 1);
-        P->CreateKernelCall<ShiftMaskKernel>(TestFieldWidth, ShiftMask, input, output);
+        StreamSet * output = P.CreateStreamSet(1, 1);
+        P.CreateKernelCall<ShiftMaskKernel>(TestFieldWidth, ShiftMask, input, output);
         return output;
     }
     return input;
 }
 
-IDISAtestFunctionType pipelineGen(CPUDriver & pxDriver) {
+IDISAtestFunctionType pipelineGen(CPUDriver & driver) {
 
-    auto & b = pxDriver.getBuilder();
-
-    Type * const sizeTy = b.getSizeTy();
-    Type * const int32Ty = b.getInt32Ty();
-
-    Bindings inputs;
-    inputs.emplace_back(int32Ty, "operand1FileDecriptor");
-    inputs.emplace_back(int32Ty, "operand2FileDecriptor");
-    if (!TestOutputFile.empty()) {
-        inputs.emplace_back(b.getInt8PtrTy(), "outputFileName");
-    }
-
-    auto P = pxDriver.makePipeline(std::move(inputs), {Binding{sizeTy, "totalFailures"}});
-
+    auto P = CreatePipeline(driver,
+                            Input<uint32_t>{"operand1FileDecriptor"}, Input<uint32_t>{"operand2FileDecriptor"}, Input<const char *>{"outputFileName"},
+                            Output<size_t>{"totalFailures"});
 
     StreamSet * Operand1BitStream = readHexToBinary(P, "operand1FileDecriptor");
     StreamSet * Operand2BitStream = applyShiftMask(P, readHexToBinary(P, "operand2FileDecriptor"));
 
-    StreamSet * ResultBitStream = P->CreateStreamSet(1, 1);
+    StreamSet * ResultBitStream = P.CreateStreamSet(1, 1);
 
-    P->CreateKernelCall<IdisaBinaryOpTestKernel>(TestOperation, TestFieldWidth, Immediate
+    P.CreateKernelCall<IdisaBinaryOpTestKernel>(TestOperation, TestFieldWidth, Immediate
                                                  , Operand1BitStream, Operand2BitStream
                                                  , ResultBitStream);
 
-    StreamSet * ExpectedResultBitStream = P->CreateStreamSet(1, 1);
+    StreamSet * ExpectedResultBitStream = P.CreateStreamSet(1, 1);
 
-    P->CreateKernelCall<IdisaBinaryOpCheckKernel>(TestOperation, TestFieldWidth, Immediate
+    P.CreateKernelCall<IdisaBinaryOpCheckKernel>(TestOperation, TestFieldWidth, Immediate
                                                  , Operand1BitStream, Operand2BitStream, ResultBitStream
-                                                 , ExpectedResultBitStream, P->getOutputScalar("totalFailures"));
+                                                 , ExpectedResultBitStream, P.getOutputScalar("totalFailures"));
 
     if (!TestOutputFile.empty()) {
-        StreamSet * ResultHexStream = P->CreateStreamSet(1, 8);
-        P->CreateKernelCall<BinaryToHex>(ResultBitStream, ResultHexStream);
-        Scalar * outputFileName = P->getInputScalar("outputFileName");
-        P->CreateKernelCall<FileSink>(outputFileName, ResultHexStream);
+        StreamSet * ResultHexStream = P.CreateStreamSet(1, 8);
+        P.CreateKernelCall<BinaryToHex>(ResultBitStream, ResultHexStream);
+        Scalar * outputFileName = P.getInputScalar("outputFileName");
+        P.CreateKernelCall<FileSink>(outputFileName, ResultHexStream);
     }
 
-    return reinterpret_cast<IDISAtestFunctionType>(P->compile());
+    return P.compile();
 }
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&testFlags, codegen::codegen_flags()});
-    CPUDriver pxDriver("idisa_test");
+    CPUDriver driver("idisa_test");
     if (ShiftMask == 0) {
         ShiftMask = TestFieldWidth - 1;
     }
-    auto idisaTestFunction = pipelineGen(pxDriver);
+    auto idisaTestFunction = pipelineGen(driver);
 
     const int32_t fd1 = openFile(Operand1TestFile, llvm::outs());
     const int32_t fd2 = openFile(Operand2TestFile, llvm::outs());
-    const size_t failure_count = idisaTestFunction(fd1, fd2);
+    const size_t failure_count = idisaTestFunction(fd1, fd2, TestOutputFile.ValueStr.data());
     if (!QuietMode) {
         if (failure_count == 0) {
             llvm::outs() << "Test success: " << TestOperation << "<" << TestFieldWidth << ">\n";

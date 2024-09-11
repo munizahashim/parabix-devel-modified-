@@ -21,8 +21,8 @@ using namespace pablo;
 using namespace cc;
 
 
-UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * Source, StreamSet * property, pablo::BitMovementMode mode)
-: UnicodePropertyKernelBuilder(b, property_value_name, Source, property, mode, [&]() -> std::string {
+UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(LLVMTypeSystemInterface & ts, re::Name * property_value_name, StreamSet * Source, StreamSet * property, pablo::BitMovementMode mode)
+: UnicodePropertyKernelBuilder(ts, property_value_name, Source, property, mode, [&]() -> std::string {
     return std::to_string(Source->getNumElements()) +
            "x" + std::to_string(Source->getFieldWidth()) +
             property_value_name->getFullName() +
@@ -32,8 +32,8 @@ UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(KernelBuilder & b, re
 
 }
 
-UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(KernelBuilder & b, re::Name * property_value_name, StreamSet * Source, StreamSet * property, pablo::BitMovementMode mode, std::string && propValueName)
-: PabloKernel(b,
+UnicodePropertyKernelBuilder::UnicodePropertyKernelBuilder(LLVMTypeSystemInterface & ts, re::Name * property_value_name, StreamSet * Source, StreamSet * property, pablo::BitMovementMode mode, std::string && propValueName)
+: PabloKernel(ts,
 "UCD:" + getStringHash(propValueName) ,
 {Binding{"source", Source, FixedRate(1), LookAhead(3)}},
 {Binding{"property_stream", property}})
@@ -65,8 +65,8 @@ void UnicodePropertyKernelBuilder::generatePabloMethod() {
     pb.createAssign(pb.createExtract(property_stream, pb.getInteger(0)), propertyVar);
 }
 
-UnicodePropertyBasis::UnicodePropertyBasis(KernelBuilder & b, UCD::EnumeratedPropertyObject * enumObj, StreamSet * Source, StreamSet * PropertyBasis)
-: PabloKernel(b,
+UnicodePropertyBasis::UnicodePropertyBasis(LLVMTypeSystemInterface & ts, UCD::EnumeratedPropertyObject * enumObj, StreamSet * Source, StreamSet * PropertyBasis)
+: PabloKernel(ts,
 "UCD:" + getPropertyFullName(enumObj->getPropertyCode()) + "_basis",
 {Binding{"source", Source}},
 {Binding{"property_basis", PropertyBasis}})

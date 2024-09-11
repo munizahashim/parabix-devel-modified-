@@ -22,7 +22,7 @@ void PabloSourceKernel::generatePabloMethod() {
     }
 }
 
-PabloSourceKernel::PabloSourceKernel(kernel::KernelBuilder & b,
+PabloSourceKernel::PabloSourceKernel(LLVMTypeSystemInterface & ts,
                                      std::shared_ptr<parse::PabloParser> & parser,
                                      std::shared_ptr<parse::SourceFile> & sourceFile,
                                      std::string const & kernelName,
@@ -30,13 +30,13 @@ PabloSourceKernel::PabloSourceKernel(kernel::KernelBuilder & b,
                                      kernel::Bindings outputStreamBindings,
                                      kernel::Bindings inputScalarBindings,
                                      kernel::Bindings outputScalarBindings)
-: PabloKernel(b, std::string(kernelName), inputStreamBindings, outputStreamBindings, inputScalarBindings, outputScalarBindings)
+: PabloKernel(ts, std::string(kernelName), inputStreamBindings, outputStreamBindings, inputScalarBindings, outputScalarBindings)
 , mParser(parser)
 , mSource(sourceFile)
 , mKernelName(kernelName)
 {}
 
-PabloSourceKernel::PabloSourceKernel(kernel::KernelBuilder & b,
+PabloSourceKernel::PabloSourceKernel(LLVMTypeSystemInterface & ts,
                                      std::shared_ptr<parse::PabloParser>  & parser,
                                      std::string const & sourceFile,
                                      std::string const & kernelName,
@@ -44,7 +44,7 @@ PabloSourceKernel::PabloSourceKernel(kernel::KernelBuilder & b,
                                      kernel::Bindings outputStreamBindings,
                                      kernel::Bindings inputScalarBindings,
                                      kernel::Bindings outputScalarBindings)
-: PabloKernel(b, std::string(kernelName), inputStreamBindings, outputStreamBindings, inputScalarBindings, outputScalarBindings)
+: PabloKernel(ts, std::string(kernelName), inputStreamBindings, outputStreamBindings, inputScalarBindings, outputScalarBindings)
 , mParser(parser)
 , mSource(new parse::SourceFile(sourceFile))
 , mKernelName(kernelName)

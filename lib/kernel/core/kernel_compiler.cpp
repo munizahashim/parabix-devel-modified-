@@ -143,7 +143,8 @@ void KernelCompiler::addBaseInternalProperties(KernelBuilder & b) {
         bool isShared = false;
         bool isManaged = false;
         bool isReturned = false;
-        if (LLVM_UNLIKELY(Kernel::isLocalBuffer(output, isShared, isManaged, isReturned))) {
+        const auto isLocal = Kernel::isLocalBuffer(output, isShared, isManaged, isReturned);
+        if (LLVM_UNLIKELY(isLocal)) {
             mTarget->addInternalScalar(handleTy, output.getName() + BUFFER_HANDLE_SUFFIX);
         } else {
             mTarget->addNonPersistentScalar(handleTy, output.getName() + BUFFER_HANDLE_SUFFIX);
@@ -508,7 +509,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         const Binding & input = mInputStreamSets[i];
         Value * const virtualBaseAddress = b.CreatePointerCast(nextArg(), buffer->getPointerType());
         Value * const localHandle = b.CreateAllocaAtEntryPoint(buffer->getHandleType(b));
-        buffer->setHandle(localHandle);
+        buffer->setHandle(localHandle); assert (localHandle);
         buffer->setBaseAddress(b, virtualBaseAddress);
 
         if (LLVM_UNLIKELY(internallySynchronized)) {
@@ -587,7 +588,6 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         bool isManaged = false;
         bool isReturned = false;
         const auto isLocal =  Kernel::isLocalBuffer(output, isShared, isManaged, isReturned);
-
         if (LLVM_UNLIKELY(isShared)) {
             Value * const handle = nextArg();
             assert (isa<DynamicBuffer>(buffer));

@@ -33,7 +33,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <pablo/builder.hpp>
 #include <fcntl.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 
 using namespace pablo;
 using namespace kernel;
@@ -47,60 +47,52 @@ static cl::opt<std::string> OutputEncoding("encoding", cl::desc("Output encoding
 typedef void (*u32u16FunctionType)(uint32_t fd);
 
 u32u16FunctionType u32u16_gen (CPUDriver & driver, cc::ByteNumbering byteNumbering) {
-    auto & b = driver.getBuilder();
-    Type * const int32Ty = b.getInt32Ty();
-    auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
 
-    Scalar * const fileDescriptor = P->getInputScalar("fd");
+    auto P = CreatePipeline(driver, Input<uint32_t>("fd"));
+
+    Scalar * const fileDescriptor = P.getInputScalar("fd");
 
     // Source data
-    StreamSet * const codeUnitStream = P->CreateStreamSet(1, 32);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
+    StreamSet * const codeUnitStream = P.CreateStreamSet(1, 32);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
 
     // Source buffers for transposed UTF-32 basis bits.
-    StreamSet * const u32basis = P->CreateStreamSet(21);
-    P->CreateKernelCall<S2P_21Kernel>(codeUnitStream, u32basis);
+    StreamSet * const u32basis = P.CreateStreamSet(21);
+    P.CreateKernelCall<S2P_21Kernel>(codeUnitStream, u32basis);
     
     // Buffer for supplementary plane basis bits.
-    StreamSet * const u16_SMP_basis = P->CreateStreamSet(4);
-    P->CreateKernelCall<UTF16_SupplementaryBasis>(u32basis, u16_SMP_basis);
+    StreamSet * const u16_SMP_basis = P.CreateStreamSet(4);
+    P.CreateKernelCall<UTF16_SupplementaryBasis>(u32basis, u16_SMP_basis);
 
     // Buffers for calculated deposit masks.
-    StreamSet * const u16fieldMask = P->CreateStreamSet();
-    StreamSet * const u16final = P->CreateStreamSet();
-    StreamSet * const u16initial = P->CreateStreamSet();
+    StreamSet * const u16fieldMask = P.CreateStreamSet();
+    StreamSet * const u16final = P.CreateStreamSet();
+    StreamSet * const u16initial = P.CreateStreamSet();
 
     // Intermediate buffers for deposited bits
-    StreamSet * const SMP4_0 = P->CreateStreamSet(4);
-    StreamSet * const deposit15_10 = P->CreateStreamSet(6);
-    StreamSet * const deposit9_0 = P->CreateStreamSet(10);
+    StreamSet * const SMP4_0 = P.CreateStreamSet(4);
+    StreamSet * const deposit15_10 = P.CreateStreamSet(6);
+    StreamSet * const deposit9_0 = P.CreateStreamSet(10);
 
     // Final buffers for computed UTF-16 basis bits and code unit stream.
-    StreamSet * const u16basis = P->CreateStreamSet(16);
-    StreamSet * const u16bytes = P->CreateStreamSet(1, 16);
+    StreamSet * const u16basis = P.CreateStreamSet(16);
+    StreamSet * const u16bytes = P.CreateStreamSet(1, 16);
 
     // Calculate the u16final deposit mask.
-    StreamSet * const extractionMask = P->CreateStreamSet();
-    P->CreateKernelCall<UTF16fieldDepositMask>(u32basis, u16fieldMask, extractionMask);
-    P->CreateKernelCall<StreamCompressKernel>(extractionMask, u16fieldMask, u16final);
-    P->CreateKernelCall<UTF16_InitialMask>(u16final, u16initial);
+    StreamSet * const extractionMask = P.CreateStreamSet();
+    P.CreateKernelCall<UTF16fieldDepositMask>(u32basis, u16fieldMask, extractionMask);
+    P.CreateKernelCall<StreamCompressKernel>(extractionMask, u16fieldMask, u16final);
+    P.CreateKernelCall<UTF16_InitialMask>(u16final, u16initial);
 
     SpreadByMask(P, u16initial, u16_SMP_basis, SMP4_0);
     SpreadByMask(P, u16initial, u32basis, deposit15_10,  /* inputOffset = */ 10);
     SpreadByMask(P, u16final, u32basis, deposit9_0);
 
-//    void SpreadByMask(PipelineBuilder & P,
-//                      StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
-//                      unsigned streamOffset = 0,
-//                      StreamExpandOptimization opt = StreamExpandOptimization::None,
-//                      unsigned expansionFieldWidth = 64,
-//                      ProcessingRateProbabilityDistribution itemsPerOutputUnit = GammaDistribution(5.0f, 0.1f));
-
-    P->CreateKernelCall<UTF16assembly>(SMP4_0, deposit15_10, deposit9_0, u16final,
+    P.CreateKernelCall<UTF16assembly>(SMP4_0, deposit15_10, deposit9_0, u16final,
                                       u16basis);
-    P->CreateKernelCall<P2S16Kernel>(u16basis, u16bytes, byteNumbering);
-    P->CreateKernelCall<StdOutKernel>(u16bytes);
-    return reinterpret_cast<u32u16FunctionType>(P->compile());
+    P.CreateKernelCall<P2S16Kernel>(u16basis, u16bytes, byteNumbering);
+    P.CreateKernelCall<StdOutKernel>(u16bytes);
+    return reinterpret_cast<u32u16FunctionType>(P.compile());
 }
 
 int main(int argc, char *argv[]) {
@@ -114,8 +106,8 @@ int main(int argc, char *argv[]) {
     } else if ((OutputEncoding != "UTF16") &&  (OutputEncoding != "UTF-16")) {
         llvm::report_fatal_error("Unsupported encoding.");
     }
-    CPUDriver pxDriver("u32u16");
-    auto u32u16Function = u32u16_gen(pxDriver, byteNumbering);
+    CPUDriver driver("u32u16");
+    auto u32u16Function = u32u16_gen(driver, byteNumbering);
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";

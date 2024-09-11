@@ -8,7 +8,7 @@
 #include <kernel/core/kernel_builder.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/pipeline/driver/cpudriver.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/IR/Constant.h>
@@ -36,13 +36,13 @@ static cl::opt<bool> optVerbose("v", cl::desc("Verbose output"), cl::init(false)
 
 class CopyKernel final : public SegmentOrientedKernel {
 public:
-    CopyKernel(KernelBuilder & b, StreamSet * input, StreamSet * output, Scalar * upTo);
+    CopyKernel(LLVMTypeSystemInterface & ts, StreamSet * input, StreamSet * output, Scalar * upTo);
 protected:
     void generateDoSegmentMethod(KernelBuilder & b) override;
 };
 
-CopyKernel::CopyKernel(KernelBuilder & b, StreamSet * input, StreamSet * output, Scalar * upTo)
-: SegmentOrientedKernel(b, [&]() {
+CopyKernel::CopyKernel(LLVMTypeSystemInterface & ts, StreamSet * input, StreamSet * output, Scalar * upTo)
+: SegmentOrientedKernel(ts, [&]() {
     std::string backing;
     raw_string_ostream str(backing);
     str << "copykernel"
@@ -133,13 +133,13 @@ void CopyKernel::generateDoSegmentMethod(KernelBuilder & b) {
 
 class PassThroughKernel final : public SegmentOrientedKernel {
 public:
-    PassThroughKernel(KernelBuilder & b, TruncatedStreamSet * output, Scalar * upTo);
+    PassThroughKernel(LLVMTypeSystemInterface & ts, TruncatedStreamSet * output, Scalar * upTo);
 protected:
     void generateDoSegmentMethod(KernelBuilder & b) override;
 };
 
-PassThroughKernel::PassThroughKernel(KernelBuilder & b, TruncatedStreamSet * output, Scalar * upTo)
-: SegmentOrientedKernel(b, "passThroughKernel",
+PassThroughKernel::PassThroughKernel(LLVMTypeSystemInterface & ts, TruncatedStreamSet * output, Scalar * upTo)
+: SegmentOrientedKernel(ts, "passThroughKernel",
 // input streams
 {},
 // output stream
@@ -174,19 +174,18 @@ class StreamEq : public MultiBlockKernel {
 public:
     enum class Mode { EQ, NE };
 
-    StreamEq(KernelBuilder & b, StreamSet * x, StreamSet * y, Scalar * outPtr);
+    StreamEq(LLVMTypeSystemInterface & ts, StreamSet * x, StreamSet * y, Scalar * outPtr);
     void generateInitializeMethod(KernelBuilder & b) override;
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
     void generateFinalizeMethod(KernelBuilder & b) override;
 
 };
 
-StreamEq::StreamEq(
-    KernelBuilder & b,
+StreamEq::StreamEq(LLVMTypeSystemInterface & ts,
     StreamSet * lhs,
     StreamSet * rhs,
     Scalar * outPtr)
-    : MultiBlockKernel(b, [&]() -> std::string {
+    : MultiBlockKernel(ts, [&]() -> std::string {
        std::string backing;
        raw_string_ostream str(backing);
        str << "StreamEq::["
@@ -201,7 +200,7 @@ StreamEq::StreamEq(
     {},
     {{"result_ptr", outPtr}},
     {},
-    {InternalScalar(b.getInt1Ty(), "accum")})
+    {InternalScalar(ts.getInt1Ty(), "accum")})
 {
     assert(lhs->getFieldWidth() == rhs->getFieldWidth());
     assert(lhs->getNumElements() == rhs->getNumElements());
@@ -298,7 +297,7 @@ void StreamEq::generateFinalizeMethod(KernelBuilder & b) {
 
 typedef void (*TestFunctionType)(uint64_t copyCount, uint64_t passCount, uint32_t * output);
 
-bool runRepeatingStreamSetTest(CPUDriver & pxDriver,
+bool runRepeatingStreamSetTest(CPUDriver & driver,
                                uint64_t numElements,
                                uint64_t fieldWidth,
                                uint64_t patternLength,
@@ -306,16 +305,7 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver,
                                uint64_t passCountVal,
                                std::default_random_engine & rng) {
 
-    auto & b = pxDriver.getBuilder();
-
-    IntegerType * const int64Ty = b.getInt64Ty();
-    PointerType * const int32PtrTy = b.getInt32Ty()->getPointerTo();
-
-    auto P = pxDriver.makePipeline(
-                {Binding{int64Ty, "copyCount"},
-                 Binding{int64Ty, "passCount"},
-                 Binding{int32PtrTy, "output"}},
-                {});
+    auto P = CreatePipeline(driver, Input<uint64_t>{"copyCount"}, Input<uint64_t>{"passCount"}, Input<uint32_t*>{"output"});
 
     const auto maxVal = (1ULL << static_cast<uint64_t>(fieldWidth)) - 1ULL;
 
@@ -330,29 +320,29 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver,
         }
     }
 
-    Scalar * const copyCountScalar = P->getInputScalar("copyCount");
+    Scalar * const copyCountScalar = P.getInputScalar("copyCount");
 
-    RepeatingStreamSet * const RepeatingStream = P->CreateRepeatingStreamSet(fieldWidth, pattern);
+    RepeatingStreamSet * const RepeatingStream = P.CreateRepeatingStreamSet(fieldWidth, pattern);
 
-    StreamSet * const Output = P->CreateStreamSet(numElements, fieldWidth);
+    StreamSet * const Output = P.CreateStreamSet(numElements, fieldWidth);
 
-    P->CreateKernelCall<CopyKernel>(RepeatingStream, Output, copyCountScalar);
+    P.CreateKernelCall<CopyKernel>(RepeatingStream, Output, copyCountScalar);
 
-    TruncatedStreamSet * const Trunc1 = P->CreateTruncatedStreamSet(RepeatingStream);
+    TruncatedStreamSet * const Trunc1 = P.CreateTruncatedStreamSet(RepeatingStream);
 
-    TruncatedStreamSet * const Trunc2 = P->CreateTruncatedStreamSet(Output);
+    TruncatedStreamSet * const Trunc2 = P.CreateTruncatedStreamSet(Output);
 
-    P->CreateKernelCall<PassThroughKernel>(Trunc1, copyCountScalar);
+    P.CreateKernelCall<PassThroughKernel>(Trunc1, copyCountScalar);
 
-    Scalar * const passCountScalar = P->getInputScalar("passCount");
+    Scalar * const passCountScalar = P.getInputScalar("passCount");
 
-    P->CreateKernelCall<PassThroughKernel>(Trunc2, passCountScalar);
+    P.CreateKernelCall<PassThroughKernel>(Trunc2, passCountScalar);
 
-    Scalar * output = P->getInputScalar("output");
+    Scalar * output = P.getInputScalar("output");
 
-    P->CreateKernelCall<StreamEq>(Trunc1, Trunc2, output);
+    P.CreateKernelCall<StreamEq>(Trunc1, Trunc2, output);
 
-    const auto f = reinterpret_cast<TestFunctionType>(P->compile());
+    const auto f = P.compile();
 
     uint32_t result = 0;
 
@@ -385,7 +375,7 @@ bool runRepeatingStreamSetTest(CPUDriver & pxDriver,
     return (result != 0);
 }
 
-bool runRandomRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_engine & rng) {
+bool runRandomRepeatingStreamSetTest(CPUDriver & driver, std::default_random_engine & rng) {
 
     size_t numElements = optNumElements;
     if (numElements == 0) {
@@ -417,19 +407,19 @@ bool runRandomRepeatingStreamSetTest(CPUDriver & pxDriver, std::default_random_e
         passCountVal = countDist(rng);
     }
 
-    return runRepeatingStreamSetTest(pxDriver, numElements, fieldWidth, patternLength, copyCountVal, passCountVal, rng);
+    return runRepeatingStreamSetTest(driver, numElements, fieldWidth, patternLength, copyCountVal, passCountVal, rng);
 }
 
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {});
-    CPUDriver pxDriver("test");
+    CPUDriver driver("test");
     std::random_device rd;
     std::default_random_engine rng(rd());
 
     bool testResult = false;
     for (unsigned rounds = 0; rounds < 10; ++rounds) {
-        testResult |= runRandomRepeatingStreamSetTest(pxDriver, rng);
+        testResult |= runRandomRepeatingStreamSetTest(driver, rng);
     }
     return testResult ? -1 : 0;
 }

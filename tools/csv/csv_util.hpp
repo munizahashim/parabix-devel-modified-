@@ -58,8 +58,8 @@ char charComma = 0x2C;
 
 class CSVlexer : public PabloKernel {
 public:
-    CSVlexer(KernelBuilder & kb, StreamSet * Source, StreamSet * CSVlexical)
-        : PabloKernel(kb, "CSVlexer",
+    CSVlexer(LLVMTypeSystemInterface & ts, StreamSet * Source, StreamSet * CSVlexical)
+        : PabloKernel(ts, "CSVlexer",
                       {Binding{"Source", Source}},
                       {Binding{"CSVlexical", CSVlexical, FixedRate(), Add1()}}) {}
 protected:
@@ -87,8 +87,8 @@ void CSVlexer::generatePabloMethod() {
 
 class CSVparser : public PabloKernel {
 public:
-    CSVparser(KernelBuilder & kb, StreamSet * csvMarks, StreamSet * recordSeparators, StreamSet * fieldSeparators, StreamSet * quoteEscape)
-        : PabloKernel(kb, "CSVparser",
+    CSVparser(LLVMTypeSystemInterface & ts, StreamSet * csvMarks, StreamSet * recordSeparators, StreamSet * fieldSeparators, StreamSet * quoteEscape)
+        : PabloKernel(ts, "CSVparser",
                       {Binding{"csvMarks", csvMarks, FixedRate(), LookAhead(1)}},
                       {Binding{"recordSeparators", recordSeparators},
                        Binding{"fieldSeparators", fieldSeparators},
@@ -118,8 +118,8 @@ void CSVparser::generatePabloMethod() {
 
 class CSVdataFieldMask : public PabloKernel {
 public:
-    CSVdataFieldMask(KernelBuilder & kb, StreamSet * csvMarks, StreamSet * recordSeparators, StreamSet * quoteEscape, StreamSet * toKeep, bool deleteHeader = true)
-        : PabloKernel(kb, "CSVdataFieldMask" + std::to_string(deleteHeader),
+    CSVdataFieldMask(LLVMTypeSystemInterface & ts, StreamSet * csvMarks, StreamSet * recordSeparators, StreamSet * quoteEscape, StreamSet * toKeep, bool deleteHeader = true)
+        : PabloKernel(ts, "CSVdataFieldMask" + std::to_string(deleteHeader),
                       {Binding{"csvMarks", csvMarks, FixedRate(), LookAhead(1)},
                        Binding{"recordSeparators", recordSeparators},
                        Binding{"quoteEscape", quoteEscape}},
@@ -160,14 +160,14 @@ void CSVdataFieldMask::generatePabloMethod() {
 
 class FieldNumberingKernel : public PabloKernel {
 public:
-    FieldNumberingKernel(KernelBuilder & kb, StreamSet * SeparatorNum, StreamSet * RecordMarks, StreamSet * FieldBixNum);
+    FieldNumberingKernel(LLVMTypeSystemInterface & ts, StreamSet * SeparatorNum, StreamSet * RecordMarks, StreamSet * FieldBixNum);
 protected:
     void generatePabloMethod() override;
     unsigned mNumberingBits;
 };
 
-FieldNumberingKernel::FieldNumberingKernel(KernelBuilder & kb, StreamSet * SeparatorNum, StreamSet * RecordMarks, StreamSet * FieldBixNum)
-   : PabloKernel(kb, "FieldNumbering" + std::to_string(SeparatorNum->getNumElements()),
+FieldNumberingKernel::FieldNumberingKernel(LLVMTypeSystemInterface & ts, StreamSet * SeparatorNum, StreamSet * RecordMarks, StreamSet * FieldBixNum)
+   : PabloKernel(ts, "FieldNumbering" + std::to_string(SeparatorNum->getNumElements()),
                  {Binding{"RecordMarks", RecordMarks}, Binding{"SeparatorNum", SeparatorNum}}, {Binding{"FieldBixNum", FieldBixNum}}),
    mNumberingBits(SeparatorNum->getNumElements()) { }
 
@@ -188,9 +188,9 @@ void FieldNumberingKernel::generatePabloMethod() {
 
 class CSV_Char_Replacement : public PabloKernel {
 public:
-    CSV_Char_Replacement(KernelBuilder & kb, StreamSet * quoteEscape, StreamSet * basis,
+    CSV_Char_Replacement(LLVMTypeSystemInterface & ts, StreamSet * quoteEscape, StreamSet * basis,
                          StreamSet * translatedBasis)
-        : PabloKernel(kb, "CSV_Char_Replacement",
+        : PabloKernel(ts, "CSV_Char_Replacement",
                       {Binding{"quoteEscape", quoteEscape}, Binding{"basis", basis}},
                       {Binding{"translatedBasis", translatedBasis}}) {}
 protected:
@@ -221,9 +221,9 @@ void CSV_Char_Replacement::generatePabloMethod() {
 
 class AddFieldSuffix : public PabloKernel {
 public:
-    AddFieldSuffix(KernelBuilder & kb, StreamSet * suffixSpreadMask, StreamSet * basis,
+    AddFieldSuffix(LLVMTypeSystemInterface & ts, StreamSet * suffixSpreadMask, StreamSet * basis,
                          StreamSet * updatedBasis)
-        : PabloKernel(kb, "AddFieldSuffix",
+        : PabloKernel(ts, "AddFieldSuffix",
                       {Binding{"suffixSpreadMask", suffixSpreadMask}, Binding{"basis", basis}},
                       {Binding{"updatedBasis", updatedBasis}}) {}
 protected:

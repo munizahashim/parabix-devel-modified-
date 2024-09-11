@@ -2,18 +2,8 @@
 
 namespace audio
 {
-    void CreateOnes::generatePabloMethod()
-    {
-        pablo::PabloBuilder pb(getEntryScope());
-        PabloAST *inputStream = getInputStreamSet("dataStream")[0];
 
-        PabloAST *ones = pb.createOr(pb.createOnes(), inputStream);
-
-        Var *onesVar = getOutputStreamVar("onesStream");
-        pb.createAssign(pb.createExtract(onesVar, pb.getInteger(0)), ones);
-    }
-
-    MergeKernel::MergeKernel(KernelBuilder &b, const unsigned int bitsPerSample, StreamSet *const firstInputStream, StreamSet *const secondInputStream, StreamSet *const outputStream)
+    MergeKernel::MergeKernel(LLVMTypeSystemInterface &b, const unsigned int bitsPerSample, StreamSet *const firstInputStream, StreamSet *const secondInputStream, StreamSet *const outputStream)
         : MultiBlockKernel(b, "MergeKernel_" + std::to_string(bitsPerSample),
                            {Binding{"firstInputStream", firstInputStream}, Binding{"secondInputStream", secondInputStream}},
                            {Binding{"outputStream", outputStream}}, {}, {}, {}),
@@ -35,15 +25,15 @@ namespace audio
         PHINode *blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
         blockOffsetPhi->addIncoming(ZERO, entry);
 
-        Value *bytepack_1[inputPacksPerStride];
-        Value *bytepack_2[inputPacksPerStride];
+        std::vector<Value *> bytepack_1(inputPacksPerStride);
+        std::vector<Value *> bytepack_2(inputPacksPerStride);
         for (unsigned i = 0; i < inputPacksPerStride; i++)
         {
             bytepack_1[i] = b.loadInputStreamPack("firstInputStream", ZERO, b.getInt32(i), blockOffsetPhi);
             bytepack_2[i] = b.loadInputStreamPack("secondInputStream", ZERO, b.getInt32(i), blockOffsetPhi);
         }
 
-        Value *output[outputPacksPerStride];
+        std::vector<Value *> output(outputPacksPerStride);
         for (unsigned i = 0; i < inputPacksPerStride; i++)
         {
             output[2*i] = b.esimd_mergel(bitsPerSample, bytepack_1[i], bytepack_2[i]);
@@ -63,7 +53,7 @@ namespace audio
         b.SetInsertPoint(packFinalize);
     }
     
-    Split2Kernel::Split2Kernel(KernelBuilder &b, const unsigned int bitsPerSample, StreamSet *const inputStream, StreamSet *const outputStream_1, StreamSet *const outputStream_2)
+    Split2Kernel::Split2Kernel(LLVMTypeSystemInterface &b, const unsigned int bitsPerSample, StreamSet *const inputStream, StreamSet *const outputStream_1, StreamSet *const outputStream_2)
         : MultiBlockKernel(b, "Split2Kernel_" + std::to_string(bitsPerSample),
                            {Binding{"inputStream", inputStream}},
                            {Binding{"outputStream_1", outputStream_1}, Binding{"outputStream_2", outputStream_2}}, {}, {}, {}), bitsPerSample(bitsPerSample) 
@@ -89,7 +79,10 @@ namespace audio
         b.SetInsertPoint(packLoop);
         PHINode *blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
         blockOffsetPhi->addIncoming(ZERO, entry);
-        Value *bytepack[inputPacksPerStride];
+
+
+
+        std::vector<Value *> bytepack(inputPacksPerStride);
         for (unsigned i = 0; i < inputPacksPerStride; i++)
         {
             bytepack[i] = b.loadInputStreamPack("inputStream", ZERO, b.getInt32(i), blockOffsetPhi);
@@ -112,7 +105,7 @@ namespace audio
         b.SetInsertPoint(packFinalize);
     }
 
-    SplitKernel::SplitKernel(KernelBuilder &b, const unsigned int bitsPerSample, StreamSet *const inputStreams, StreamSet *const outputStreams)
+    SplitKernel::SplitKernel(LLVMTypeSystemInterface &b, const unsigned int bitsPerSample, StreamSet *const inputStreams, StreamSet *const outputStreams)
         : MultiBlockKernel(b, "SplitKernel_" + std::to_string(inputStreams->getNumElements()) + "_" + std::to_string(bitsPerSample),
                            {Binding{"inputStreams", inputStreams}},
                            {Binding{"outputStreams", outputStreams}}, {}, {}, {}),
@@ -133,9 +126,11 @@ namespace audio
         b.SetInsertPoint(packLoop);
         PHINode *blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
         blockOffsetPhi->addIncoming(ZERO, entry);
+        std::vector<Value *> bytepack(inputPacksPerStride);
+        std::vector<Value *> lo(outputPacksPerStride);
+        std::vector<Value *> hi(outputPacksPerStride);
         for (int streamIndex = 0; streamIndex < numInputStreams; ++streamIndex)
         {
-            Value *bytepack[inputPacksPerStride];
             Constant *const STREAMINDEX = b.getSize(streamIndex);
             Constant *const LOWSTREAMINDEX = b.getSize(2 * streamIndex);
             Constant *const HIGHSTREAMINDEX = b.getSize(2 * streamIndex + 1);
@@ -144,8 +139,6 @@ namespace audio
                 bytepack[i] = b.loadInputStreamPack("inputStreams", STREAMINDEX, b.getInt32(i), blockOffsetPhi);
             }
 
-            Value *lo[outputPacksPerStride];
-            Value *hi[outputPacksPerStride];
             for (unsigned i = 0; i < outputPacksPerStride; i++)
             {
                 lo[i] = b.hsimd_packl(2 * bitsPerSample, bytepack[2 * i], bytepack[2 * i + 1]);

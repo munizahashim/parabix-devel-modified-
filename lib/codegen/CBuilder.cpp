@@ -4,7 +4,7 @@
  */
 
 #include <codegen/CBuilder.h>
-
+#include <kernel/pipeline/driver/driver.h>
 #include <llvm/IR/Mangler.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Constants.h>

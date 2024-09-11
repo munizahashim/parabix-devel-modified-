@@ -7,7 +7,7 @@
 #include <re/adt/re_name.h>
 #include <re/adt/re_re.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/core/streamsetptr.h>
@@ -29,47 +29,48 @@ using namespace audio;
 
 #define SHOW_STREAM(name)           \
     if (codegen::EnableIllustrator) \
-    P->captureBitstream(#name, name)
+    P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name)           \
     if (codegen::EnableIllustrator) \
-    P->captureBixNum(#name, name)
+    P.captureBixNum(#name, name)
 #define SHOW_BYTES(name)            \
     if (codegen::EnableIllustrator) \
-    P->captureByteData(#name, name)
+    P.captureByteData(#name, name)
 
 static cl::OptionCategory DemoOptions("Demo Options", "Demo control options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(DemoOptions));
 static cl::opt<int> threshold("t", cl::desc("Difference threshold"), cl::Required, cl::cat(DemoOptions));
 
 typedef void (*PipelineFunctionType)(StreamSetPtr & marker_1, StreamSetPtr & marker_2, int32_t fd);
-PipelineFunctionType generatePipeline(CPUDriver &pxDriver, const unsigned int& threshold, const unsigned int &numChannels, const unsigned int &bitsPerSample)
-{
-    std::vector<StreamSet *> Makers = {pxDriver.CreateStreamSet(1,1), pxDriver.CreateStreamSet(1,1)};
 
-    auto &b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipelineWithIO({}, {Bind("Marker1", Makers[0], ReturnedBuffer(1)), Bind("Marker2", Makers[1], ReturnedBuffer(1))}, 
-                                             {Binding{b.getInt32Ty(), "inputFileDecriptor"}});
-    Scalar * const fileDescriptor = P->getInputScalar("inputFileDecriptor");
+PipelineFunctionType generatePipeline(BaseDriver &pxDriver, const unsigned int threshold, const unsigned int numChannels, const unsigned int bitsPerSample)
+{
+
+    auto P = CreatePipeline(pxDriver, Output<streamset_t>("Marker1", 1, 1, ReturnedBuffer(1)),
+                                      Output<streamset_t>("Marker2", 1, 1, ReturnedBuffer(1)),
+                                      Input<int32_t>("inputFileDecriptor"));
+
+    Scalar * const fileDescriptor = P.getInputScalar("inputFileDecriptor");
 
     std::vector<StreamSet *> ChannelSampleStreams(numChannels);
     for (unsigned i=0;i<numChannels;++i)
     {
-        ChannelSampleStreams[i] = P->CreateStreamSet(1,bitsPerSample);
+        ChannelSampleStreams[i] = P.CreateStreamSet(1, bitsPerSample);
     }
     ParseAudioBuffer(P, fileDescriptor, numChannels, bitsPerSample, ChannelSampleStreams);
 
-    std::vector<StreamSet *> OutputStreams(numChannels);
-
     for (unsigned i = 0; i < numChannels; ++i)
     {
-        StreamSet *BasisBits = P->CreateStreamSet(bitsPerSample);
+        StreamSet *BasisBits = P.CreateStreamSet(bitsPerSample);
         S2P(P, bitsPerSample, ChannelSampleStreams[i], BasisBits);
-        //SHOW_BIXNUM(BasisBits);
-        P->CreateKernelCall<DiscontinuityKernel>(BasisBits, threshold, Makers[i]);
-        
-        SHOW_STREAM(Makers[i]);
+
+        StreamSet * markers = P.getOutputStreamSet(i);
+        P.CreateKernelCall<DiscontinuityKernel>(BasisBits, threshold, markers);
+        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+            P.captureBitstream("markers" + std::to_string(i), markers);
+        }
     }
-    return reinterpret_cast<PipelineFunctionType>(P->compile());
+    return P.compile();
 }
 
 int main(int argc, char *argv[])

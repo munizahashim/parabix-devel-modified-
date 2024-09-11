@@ -7,6 +7,7 @@
 
 #include <kernel/core/kernel_builder.h>
 #include <llvm/Support/raw_ostream.h>
+#include <kernel/pipeline/program_builder.h>
 
 using namespace llvm;
 using namespace kernel;
@@ -25,23 +26,22 @@ std::string KernelName(StreamEquivalenceKernel::Mode mode, StreamSet * x, Stream
     return str.str();
 }
 
-StreamEquivalenceKernel::StreamEquivalenceKernel(
-    KernelBuilder & b,
+StreamEquivalenceKernel::StreamEquivalenceKernel(LLVMTypeSystemInterface & ts,
     Mode mode,
     StreamSet * lhs,
     StreamSet * rhs,
     Scalar * outPtr)
-: MultiBlockKernel(b, KernelName(mode, lhs, rhs),
+: MultiBlockKernel(ts, KernelName(mode, lhs, rhs),
     {{"lhs", lhs, FixedRate(), Principal()}, {"rhs", rhs, FixedRate(), ZeroExtended()}},
     {},
     {{"result_ptr", outPtr}},
     {},
-    {InternalScalar(b.getInt1Ty(), "accum")})
+    {InternalScalar(ts.getInt1Ty(), "accum")})
 , mMode(mode)
 {
     assert(lhs->getFieldWidth() == rhs->getFieldWidth());
     assert(lhs->getNumElements() == rhs->getNumElements());
-    setStride(b.getBitBlockWidth() / lhs->getFieldWidth());
+    setStride(ts.getBitBlockWidth() / lhs->getFieldWidth());
     addAttribute(SideEffecting());
 }
 
@@ -69,7 +69,7 @@ void StreamEquivalenceKernel::generateMultiBlockLogic(KernelBuilder & b, Value *
     PHINode * const accumPhi = b.CreatePHI(b.getInt1Ty(), 2);
     accumPhi->addIncoming(initialAccum, entryBlock);
     Value * nextAccum = accumPhi;
-    for (uint32_t i = 0; i < COUNT; ++i) {
+    for (unsigned i = 0; i < COUNT; ++i) {
         Value * lhs;
         Value * rhs;
         if (FW == 1) {
@@ -84,11 +84,18 @@ void StreamEquivalenceKernel::generateMultiBlockLogic(KernelBuilder & b, Value *
         // Perform vector comparison lhs != rhs.
         // Result will be a vector of all zeros if lhs == rhs
         Value * const vComp = b.CreateICmpNE(lhs, rhs);
-        Value * const vCompAsInt = b.CreateBitCast(vComp, b.getIntNTy(cast<IDISA::FixedVectorType>(vComp->getType())->getNumElements()));
-        // `comp` will be `true` iff lhs == rhs (i.e., `vComp` is a vector of all zeros)
-        Value * const comp = b.CreateICmpEQ(vCompAsInt, Constant::getNullValue(vCompAsInt->getType()));
-        // `and` `comp` into `accum` so that `accum` will be `true` iff lhs == rhs for all blocks in the two streams
-        nextAccum = b.CreateAnd(nextAccum, comp);
+        Value * const vCompAsInt = b.CreateBitCast(vComp, b.getIntNTy(cast<FixedVectorType>(vComp->getType())->getNumElements()));
+        Constant * const ZERO = Constant::getNullValue(vCompAsInt->getType());
+        if (mMode == Mode::EQ) {
+            // `and` `comp` into `accum` so that `accum` will be `true` iff lhs == rhs for all blocks in the two streams
+            // `comp` will be `true` iff lhs == rhs (i.e., `vComp` is a vector of all zeros)
+            Value * const comp = b.CreateICmpEQ(vCompAsInt, ZERO);
+            nextAccum = b.CreateAnd(nextAccum, comp);
+        } else if (mMode == Mode::NE) {
+            // `comp` will be `true` iff lhs == rhs (i.e., `vComp` is a vector of all zeros)
+            Value * const comp = b.CreateICmpNE(vCompAsInt, ZERO);
+            nextAccum = b.CreateOr(nextAccum, comp);
+        }
     }
 
     Value * const nextStrideNo = b.CreateAdd(strideNo, b.getSize(1));
@@ -106,9 +113,6 @@ void StreamEquivalenceKernel::generateMultiBlockLogic(KernelBuilder & b, Value *
 void StreamEquivalenceKernel::generateFinalizeMethod(KernelBuilder & b) {
     // a `result` value of `true` means the assertion passed
     Value * result = b.getScalarField("accum");
-    if (mMode == Mode::NE) {
-        result = b.CreateNot(result);
-    }
 
     // A `ptrVal` value of `0` means that the test is currently passing and a
     // value of `1` means the test is failing. If the test is already failing,
@@ -147,24 +151,24 @@ void StreamEquivalenceKernel::generateFinalizeMethod(KernelBuilder & b) {
 
 namespace testing {
 
-void AssertEQ(const std::unique_ptr<kernel::ProgramBuilder> & P, StreamSet * lhs, StreamSet * rhs) {
-    auto ptr = P->getInputScalar("output");
-    P->CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::EQ, lhs, rhs, ptr);
-    P->CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::EQ, rhs, lhs, ptr);
+void AssertEQ(kernel::PipelineBuilder & P, StreamSet * lhs, StreamSet * rhs) {
+    auto ptr = P.getInputScalar("output");
+    P.CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::EQ, lhs, rhs, ptr);
+    P.CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::EQ, rhs, lhs, ptr);
 }
 
-void AssertNE(const std::unique_ptr<kernel::ProgramBuilder> & P, StreamSet * lhs, StreamSet * rhs) {
-    auto ptr = P->getInputScalar("output");
-    P->CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, lhs, rhs, ptr);
-    P->CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, rhs, lhs, ptr);
+void AssertNE(kernel::PipelineBuilder & P, StreamSet * lhs, StreamSet * rhs) {
+    auto ptr = P.getInputScalar("output");
+    P.CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, lhs, rhs, ptr);
+    P.CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, rhs, lhs, ptr);
 }
 
-void AssertDebug(const std::unique_ptr<kernel::ProgramBuilder> & P, kernel::StreamSet * lhs, kernel::StreamSet * rhs) {
-    P->captureBitstream("lhs", lhs);
-    P->captureBitstream("rhs", rhs);
+void AssertDebug(kernel::PipelineBuilder & P, kernel::StreamSet * lhs, kernel::StreamSet * rhs) {
+    P.captureBitstream("lhs", lhs);
+    P.captureBitstream("rhs", rhs);
     // return false
-    auto ptr = P->getInputScalar("output");
-    P->CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, lhs, lhs, ptr);
+    auto ptr = P.getInputScalar("output");
+    P.CreateKernelCall<StreamEquivalenceKernel>(StreamEquivalenceKernel::Mode::NE, lhs, lhs, ptr);
 }
 
 } // namespace testing

@@ -50,7 +50,7 @@ private:
     unsigned mLastSignal;
 };
 
-extern "C" void signal_dispatcher(intptr_t callback_object_addr, unsigned signal);
+extern "C" void signal_dispatcher(SignallingObject * callback_object_addr, unsigned signal);
 
 }
 

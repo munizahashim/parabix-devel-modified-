@@ -42,13 +42,13 @@ std::string makeSignature(const StreamSet * const basis, std::vector<re::CC *> &
     return tmp;
 }
 
-CharClassesKernel::CharClassesKernel(KernelBuilder & b, std::vector<re::CC *> ccs, StreamSet * BasisBits, StreamSet * CharClasses)
-: CharClassesKernel(b, makeSignature(BasisBits, ccs), std::move(ccs), BasisBits, CharClasses) {
+CharClassesKernel::CharClassesKernel(LLVMTypeSystemInterface & ts, std::vector<re::CC *> ccs, StreamSet * BasisBits, StreamSet * CharClasses)
+: CharClassesKernel(ts, makeSignature(BasisBits, ccs), std::move(ccs), BasisBits, CharClasses) {
 
 }
 
-CharClassesKernel::CharClassesKernel(KernelBuilder & b, std::string signature, std::vector<re::CC *> && ccs, StreamSet * BasisBits, StreamSet * CharClasses)
-: PabloKernel(b, "cc_" + getStringHash(signature)
+CharClassesKernel::CharClassesKernel(LLVMTypeSystemInterface & ts, std::string signature, std::vector<re::CC *> && ccs, StreamSet * BasisBits, StreamSet * CharClasses)
+: PabloKernel(ts, "cc_" + getStringHash(signature)
 , {Binding{"basis", BasisBits}}, {Binding{"charclasses", CharClasses}})
 , mCCs(ccs)
 , mSignature(signature) {
@@ -75,20 +75,20 @@ void CharClassesKernel::generatePabloMethod() {
     }
 }
 
-ByteClassesKernel::ByteClassesKernel(KernelBuilder & b,
+ByteClassesKernel::ByteClassesKernel(LLVMTypeSystemInterface & ts,
                                      std::vector<re::CC *>  ccs,
                                      StreamSet * inputStream,
                                      StreamSet * CharClasses)
-: ByteClassesKernel(b, makeSignature(inputStream, ccs), std::move(ccs), inputStream, CharClasses) {
+: ByteClassesKernel(ts, makeSignature(inputStream, ccs), std::move(ccs), inputStream, CharClasses) {
 
 }
 
-ByteClassesKernel::ByteClassesKernel(KernelBuilder & b,
+ByteClassesKernel::ByteClassesKernel(LLVMTypeSystemInterface & ts,
                                      std::string signature,
                                      std::vector<re::CC *> && ccs,
                                      StreamSet * inputStream,
                                      StreamSet * CharClasses)
-: PabloKernel(b, "bcc_" + getStringHash(signature)
+: PabloKernel(ts, "bcc_" + getStringHash(signature)
 , {Binding{"basis", inputStream}}, {Binding{"charclasses", CharClasses}})
 , mCCs(ccs)
 , mSignature(signature) {

@@ -97,13 +97,13 @@ extern "C" {
 
 typedef void (*WordCountFunctionType)(uint32_t fd, uint32_t fileIdx);
 
-WordCountFunctionType wcPipelineGen(CPUDriver & pxDriver, std::shared_ptr<PabloParser> parser, std::shared_ptr<SourceFile> source) {
+WordCountFunctionType wcPipelineGen(CPUDriver & driver, std::shared_ptr<PabloParser> parser, std::shared_ptr<SourceFile> source) {
 
-    auto & b = pxDriver.getBuilder();
+    auto & b = driver.getBuilder();
 
     Type * const int32Ty = b.getInt32Ty();
 
-    auto P = pxDriver.makePipeline({Binding{int32Ty, "fd"}, Binding{int32Ty, "fileIdx"}});
+    auto P = driver.makePipeline({Binding{int32Ty, "fd"}, Binding{int32Ty, "fileIdx"}});
 
     Scalar * const fileDescriptor = P->getInputScalar("fd");
     Scalar * const fileIdx = P->getInputScalar("fileIdx");
@@ -183,8 +183,8 @@ int main(int argc, char *argv[]) {
         argv::DirectoriesFlag = argv::Recurse;
     }
 
-    CPUDriver pxDriver("wc-pablo");
-    allFiles = argv::getFullFileList(pxDriver, inputFiles);
+    CPUDriver driver("wc-pablo");
+    allFiles = argv::getFullFileList(driver, inputFiles);
 
     const auto fileCount = allFiles.size();
     if (wcOptions.size() == 0) {
@@ -218,7 +218,7 @@ int main(int argc, char *argv[]) {
         std::cerr << "pablo-parser: error loading pablo source file\n";
         return -1;
     }
-    auto wordCountFunctionPtr = wcPipelineGen(pxDriver, parser, source);
+    auto wordCountFunctionPtr = wcPipelineGen(driver, parser, source);
 
     lineCount.resize(fileCount);
     wordCount.resize(fileCount);

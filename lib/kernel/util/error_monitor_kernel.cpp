@@ -110,10 +110,10 @@ void ErrorMonitorKernel::generateMultiBlockLogic(KernelBuilder & b, Value * cons
     b.SetInsertPoint(exitBB);
 }
 
-ErrorMonitorKernel::ErrorMonitorKernel(KernelBuilder & b,
+ErrorMonitorKernel::ErrorMonitorKernel(LLVMTypeSystemInterface & ts,
                                        StreamSet * error,
                                        ErrorMonitorKernel::IOStreamBindings bindings)
-: MultiBlockKernel(b, "ErrorMonitorKernel" + std::to_string(error->getNumElements()),
+: MultiBlockKernel(ts, "ErrorMonitorKernel" + std::to_string(error->getNumElements()),
 // inputs
 {Binding{"errorStream", error}},
 // outputs - populated in constructor body
@@ -121,7 +121,7 @@ ErrorMonitorKernel::ErrorMonitorKernel(KernelBuilder & b,
 // input scalars
 {},
 // output scalars
-{Binding{b.getSizeTy(), "errorCode"}},
+{Binding{ts.getSizeTy(), "errorCode"}},
 // internal scalars
 {}),
 // member fields

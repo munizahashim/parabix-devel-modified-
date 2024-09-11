@@ -11,7 +11,6 @@
 #include <re/unicode/resolve_properties.h>
 #include <unicode/utf/utf_compiler.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/core/streamset.h>
@@ -24,6 +23,7 @@
 #include <pablo/pe_zeroes.h>
 #include <pablo/pablo_toolchain.h>
 #include <kernel/pipeline/driver/cpudriver.h>
+#include <kernel/pipeline/program_builder.h>
 #include <toolchain/toolchain.h>
 #include <fileselect/file_select.h>
 #include <fcntl.h>
@@ -100,17 +100,17 @@ extern "C" {
 
 class WordCountKernel final: public pablo::PabloKernel {
 public:
-    WordCountKernel(KernelBuilder & b, StreamSet * const countable);
+    WordCountKernel(LLVMTypeSystemInterface & ts, StreamSet * const countable);
 protected:
     void generatePabloMethod() override;
 };
 
-WordCountKernel::WordCountKernel (KernelBuilder & b, StreamSet * const countable)
-: PabloKernel(b, "wc_" + wc_modes + UTF::kernelAnnotation(),
+WordCountKernel::WordCountKernel (LLVMTypeSystemInterface & ts, StreamSet * const countable)
+: PabloKernel(ts, "wc_" + wc_modes + UTF::kernelAnnotation(),
     {Bind("countable", countable, Principal())},
     {},
     {},
-    {Bind(b.getSizeTy(), "lineCount"), Bind(b.getSizeTy(), "wordCount"), Bind(b.getSizeTy(), "charCount")}) {
+    {Bind(ts.getSizeTy(), "lineCount"), Bind(ts.getSizeTy(), "wordCount"), Bind(ts.getSizeTy(), "charCount")}) {
 
 }
 
@@ -232,38 +232,34 @@ void WordCountKernel::generatePabloMethod() {
 
 typedef void (*WordCountFunctionType)(uint32_t fd, uint32_t fileIdx);
 
-WordCountFunctionType wcPipelineGen(CPUDriver & pxDriver) {
+auto wcPipelineGen(CPUDriver & driver) {
 
-    auto & b = pxDriver.getBuilder();
+    auto P = CreatePipeline(driver, Input<uint32_t>{"fd"}, Input<uint32_t>{"fileIdx"});
 
-    Type * const int32Ty = b.getInt32Ty();
+    Scalar * const fileDescriptor = P.getInputScalar("fd");
+    Scalar * const fileIdx = P.getInputScalar("fileIdx");
 
-    auto P = pxDriver.makePipeline({Binding{int32Ty, "fd"}, Binding{int32Ty, "fileIdx"}});
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
 
-    Scalar * const fileDescriptor = P->getInputScalar("fd");
-    Scalar * const fileIdx = P->getInputScalar("fileIdx");
-
-    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-
-    Kernel * sourceK = P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    Kernel * sourceK = P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     auto CountableStream = ByteStream;
     if (CountWords || CountChars) {
-        auto BasisBits = P->CreateStreamSet(8, 1);
-        P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+        auto BasisBits = P.CreateStreamSet(8, 1);
+        P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
         CountableStream = BasisBits;
     }
 
-    Kernel * const wck = P->CreateKernelCall<WordCountKernel>(CountableStream);
+    Kernel * const wck = P.CreateKernelCall<WordCountKernel>(CountableStream);
 
     Scalar * const lineCount = wck->getOutputScalarAt(0);
     Scalar * const wordCount = wck->getOutputScalarAt(1);
     Scalar * const charCount = wck->getOutputScalarAt(2);
     Scalar * const fileSize = sourceK->getOutputScalarAt(0);
 
-    P->CreateCall("record_counts", record_counts, {lineCount, wordCount, charCount, fileSize, fileIdx});
+    P.CreateCall("record_counts", record_counts, {lineCount, wordCount, charCount, fileSize, fileIdx});
 
-    return reinterpret_cast<WordCountFunctionType>(P->compile());
+    return P.compile();
 }
 
 void wc(WordCountFunctionType fn_ptr, const uint32_t fileIdx) {
@@ -296,9 +292,9 @@ int main(int argc, char *argv[]) {
     if (argv::RecursiveFlag || argv::DereferenceRecursiveFlag) {
         argv::DirectoriesFlag = argv::Recurse;
     }
-    CPUDriver pxDriver("wc");
+    CPUDriver driver("wc");
 
-    allFiles = argv::getFullFileList(pxDriver, inputFiles);
+    allFiles = argv::getFullFileList(driver, inputFiles);
 
     const auto fileCount = allFiles.size();
     if (wcOptions.size() == 0) {
@@ -324,7 +320,7 @@ int main(int argc, char *argv[]) {
     if (CountChars) wc_modes += "m";
     if (CountBytes) wc_modes += "c";
 
-    auto wordCountFunctionPtr = wcPipelineGen(pxDriver);
+    auto wordCountFunctionPtr = wcPipelineGen(driver);
 
     lineCount.resize(fileCount);
     wordCount.resize(fileCount);

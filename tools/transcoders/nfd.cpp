@@ -17,7 +17,7 @@
 #include <pablo/bixnum/bixnum.h>
 #include <grep/grep_kernel.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/run_index.h>
@@ -59,9 +59,9 @@ using namespace pablo;
 static cl::OptionCategory NFD_Options("Decompositon Options", "Decompositon Options.");
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(NFD_Options));
 
-#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
-#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
-#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
 const UCD::codepoint_t Hangul_SBase = 0xAC00;
 const UCD::codepoint_t Hangul_LBase = 0x1100;
@@ -149,16 +149,16 @@ unicode::BitTranslationSets NFD_BixData::NFD_4th_BitCCs() {
 
 class NFD_Translation : public pablo::PabloKernel {
 public:
-    NFD_Translation(KernelBuilder & b, NFD_BixData & BixData,
+    NFD_Translation(LLVMTypeSystemInterface & ts, NFD_BixData & BixData,
                     StreamSet * Basis, StreamSet * Output);
 protected:
     void generatePabloMethod() override;
     NFD_BixData & mBixData;
 };
 
-NFD_Translation::NFD_Translation (KernelBuilder & b, NFD_BixData & BixData,
+NFD_Translation::NFD_Translation (LLVMTypeSystemInterface & ts, NFD_BixData & BixData,
                                   StreamSet * Basis, StreamSet * Output)
-: PabloKernel(b, "NFD_Translation" + std::to_string(Basis->getNumElements()) + "x1" + UTF::kernelAnnotation(),
+: PabloKernel(ts, "NFD_Translation" + std::to_string(Basis->getNumElements()) + "x1" + UTF::kernelAnnotation(),
 // inputs
 {Binding{"basis", Basis}},
 // output
@@ -273,17 +273,17 @@ std::vector<re::CC *> VIndexBixNumCCs() {
 
 class Hangul_VT_Indices : public pablo::PabloKernel {
 public:
-    Hangul_VT_Indices(KernelBuilder & b,
+    Hangul_VT_Indices(LLVMTypeSystemInterface & ts,
                       StreamSet * Basis, StreamSet * LV_LVT, StreamSet * L_index,
                       StreamSet * V_index, StreamSet * T_index);
 protected:
     void generatePabloMethod() override;
 };
 
-Hangul_VT_Indices::Hangul_VT_Indices (KernelBuilder & b,
+Hangul_VT_Indices::Hangul_VT_Indices (LLVMTypeSystemInterface & ts,
                                       StreamSet * Basis, StreamSet * LV_LVT, StreamSet * L_index,
                                       StreamSet * V_index, StreamSet * T_index)
-: PabloKernel(b, "Hangul_VT_indices_" + std::to_string(Basis->getNumElements()) + "x1",
+: PabloKernel(ts, "Hangul_VT_indices_" + std::to_string(Basis->getNumElements()) + "x1",
 // inputs
 {Binding{"basis", Basis},
     Binding{"LV_LVT", LV_LVT},
@@ -356,17 +356,17 @@ void Hangul_VT_Indices::generatePabloMethod() {
 
 class Hangul_NFD : public pablo::PabloKernel {
 public:
-    Hangul_NFD(KernelBuilder & b,
+    Hangul_NFD(LLVMTypeSystemInterface & ts,
                StreamSet * Basis, StreamSet * LV_LVT, StreamSet * L_index,
                StreamSet * V_index, StreamSet * T_index, StreamSet * NFD_Basis);
 protected:
     void generatePabloMethod() override;
 };
 
-Hangul_NFD::Hangul_NFD (KernelBuilder & b,
+Hangul_NFD::Hangul_NFD (LLVMTypeSystemInterface & ts,
                         StreamSet * Basis, StreamSet * LV_LVT, StreamSet * L_index,
                         StreamSet * V_index, StreamSet * T_index, StreamSet * NFD_Basis)
-: PabloKernel(b, "Hangul_NFD_" + std::to_string(Basis->getNumElements()) + "x1",
+: PabloKernel(ts, "Hangul_NFD_" + std::to_string(Basis->getNumElements()) + "x1",
 // inputs
 {Binding{"basis", Basis},
     Binding{"L_index", L_index},
@@ -425,15 +425,15 @@ void Hangul_NFD::generatePabloMethod() {
 
 class CCC_Check : public pablo::PabloKernel {
 public:
-    CCC_Check(KernelBuilder & b, StreamSet * CCC_Basis, StreamSet * CCC_Violation);
+    CCC_Check(LLVMTypeSystemInterface & ts, StreamSet * CCC_Basis, StreamSet * CCC_Violation);
 protected:
     void generatePabloMethod() override;
 private:
     unsigned mCCC_basis_size;
 };
 
-CCC_Check::CCC_Check (KernelBuilder & b, StreamSet * CCC_Basis, StreamSet * CCC_Violation)
-: PabloKernel(b, "CCC_Check",
+CCC_Check::CCC_Check (LLVMTypeSystemInterface & ts, StreamSet * CCC_Basis, StreamSet * CCC_Violation)
+: PabloKernel(ts, "CCC_Check",
 // inputs
 {Binding{"CCC_Basis", CCC_Basis, FixedRate(1), LookAhead(1)}},
 // output
@@ -456,93 +456,93 @@ void CCC_Check::generatePabloMethod() {
 
 typedef void (*XfrmFunctionType)(uint32_t fd);
 
-XfrmFunctionType generate_pipeline(CPUDriver & pxDriver) {
+XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     // A Parabix program is build as a set of kernel calls called a pipeline.
     // A pipeline is construction using a Parabix driver object.
-    auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"},
-        Binding{b.getIntAddrTy(), "illustratorAddr"}}, {});
+
+    auto P = CreatePipeline(driver, Input<uint32_t>("inputFileDecriptor"));
+
     //  The program will use a file descriptor as an input.
-    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-    StreamSet * ByteStream = P->CreateStreamSet(1, 8);
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+    StreamSet * ByteStream = P.CreateStreamSet(1, 8);
     //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
     //  from a file descriptor.
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
     SHOW_BYTES(ByteStream);
 
-    StreamSet * BasisBits = P->CreateStreamSet(8, 1);
-    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    StreamSet * BasisBits = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
 
-    StreamSet * u8index = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    StreamSet * u8index = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
     SHOW_STREAM(u8index);
 
-    StreamSet * U21_u8indexed = P->CreateStreamSet(21, 1);
-    P->CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
+    StreamSet * U21_u8indexed = P.CreateStreamSet(21, 1);
+    P.CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
 
-    StreamSet * U21 = P->CreateStreamSet(21, 1);
+    StreamSet * U21 = P.CreateStreamSet(21, 1);
     FilterByMask(P, u8index, U21_u8indexed, U21);
     SHOW_BIXNUM(U21);
 
     NFD_BixData NFD_Data;
     auto insert_ccs = NFD_Data.NFD_Insertion_BixNumCCs();
 
-    StreamSet * Insertion_BixNum = P->CreateStreamSet(insert_ccs.size());
-    P->CreateKernelCall<CharClassesKernel>(insert_ccs, U21, Insertion_BixNum);
+    StreamSet * Insertion_BixNum = P.CreateStreamSet(insert_ccs.size());
+    P.CreateKernelCall<CharClassesKernel>(insert_ccs, U21, Insertion_BixNum);
     SHOW_BIXNUM(Insertion_BixNum);
 
     StreamSet * SpreadMask = InsertionSpreadMask(P, Insertion_BixNum, InsertPosition::After);
     SHOW_STREAM(SpreadMask);
 
-    StreamSet * ExpandedBasis = P->CreateStreamSet(21, 1);
+    StreamSet * ExpandedBasis = P.CreateStreamSet(21, 1);
     SpreadByMask(P, SpreadMask, U21, ExpandedBasis);
     SHOW_BIXNUM(ExpandedBasis);
 
     auto LV_LVT_ccs = NFD_Data.NFD_Hangul_LV_LVT_CCs();
 
-    StreamSet * LV_LVT =  P->CreateStreamSet(LV_LVT_ccs.size());
-    P->CreateKernelCall<CharClassesKernel>(LV_LVT_ccs, ExpandedBasis, LV_LVT);
+    StreamSet * LV_LVT =  P.CreateStreamSet(LV_LVT_ccs.size());
+    P.CreateKernelCall<CharClassesKernel>(LV_LVT_ccs, ExpandedBasis, LV_LVT);
     SHOW_BIXNUM(LV_LVT);
 
     auto Lindex_ccs = LIndexBixNumCCs();
-    StreamSet * LIndexBixNum = P->CreateStreamSet(Lindex_ccs.size());
-    P->CreateKernelCall<CharClassesKernel>(Lindex_ccs, ExpandedBasis, LIndexBixNum);
+    StreamSet * LIndexBixNum = P.CreateStreamSet(Lindex_ccs.size());
+    P.CreateKernelCall<CharClassesKernel>(Lindex_ccs, ExpandedBasis, LIndexBixNum);
     SHOW_BIXNUM(LIndexBixNum);
 
-    StreamSet * VIndexBixNum = P->CreateStreamSet(5);
-    StreamSet * TIndexBixNum = P->CreateStreamSet(5);
-    P->CreateKernelCall<Hangul_VT_Indices>(ExpandedBasis, LV_LVT, LIndexBixNum, VIndexBixNum, TIndexBixNum);
+    StreamSet * VIndexBixNum = P.CreateStreamSet(5);
+    StreamSet * TIndexBixNum = P.CreateStreamSet(5);
+    P.CreateKernelCall<Hangul_VT_Indices>(ExpandedBasis, LV_LVT, LIndexBixNum, VIndexBixNum, TIndexBixNum);
     SHOW_BIXNUM(VIndexBixNum);
     SHOW_BIXNUM(TIndexBixNum);
 
-    StreamSet * Hangul_NFD_Basis = P->CreateStreamSet(21, 1);
-    P->CreateKernelCall<Hangul_NFD>(ExpandedBasis, LV_LVT, LIndexBixNum, VIndexBixNum, TIndexBixNum, Hangul_NFD_Basis);
+    StreamSet * Hangul_NFD_Basis = P.CreateStreamSet(21, 1);
+    P.CreateKernelCall<Hangul_NFD>(ExpandedBasis, LV_LVT, LIndexBixNum, VIndexBixNum, TIndexBixNum, Hangul_NFD_Basis);
     SHOW_BIXNUM(Hangul_NFD_Basis);
 
-    StreamSet * NFD_Basis = P->CreateStreamSet(21, 1);
-    P->CreateKernelCall<NFD_Translation>(NFD_Data, Hangul_NFD_Basis, NFD_Basis);
+    StreamSet * NFD_Basis = P.CreateStreamSet(21, 1);
+    P.CreateKernelCall<NFD_Translation>(NFD_Data, Hangul_NFD_Basis, NFD_Basis);
     SHOW_BIXNUM(NFD_Basis);
 
     UCD::EnumeratedPropertyObject * enumObj = llvm::cast<UCD::EnumeratedPropertyObject>(getPropertyObject(UCD::ccc));
-    StreamSet * CCC_Basis = P->CreateStreamSet(enumObj->GetEnumerationBasisSets().size(), 1);
-    P->CreateKernelCall<UnicodePropertyBasis>(enumObj, NFD_Basis, CCC_Basis);
+    StreamSet * CCC_Basis = P.CreateStreamSet(enumObj->GetEnumerationBasisSets().size(), 1);
+    P.CreateKernelCall<UnicodePropertyBasis>(enumObj, NFD_Basis, CCC_Basis);
     SHOW_BIXNUM(CCC_Basis);
 
-    StreamSet * CCC_Violation = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<CCC_Check>(CCC_Basis, CCC_Violation);
+    StreamSet * CCC_Violation = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<CCC_Check>(CCC_Basis, CCC_Violation);
     SHOW_STREAM(CCC_Violation);
 
-    StreamSet * const OutputBasis = P->CreateStreamSet(8);
+    StreamSet * const OutputBasis = P.CreateStreamSet(8);
     U21_to_UTF8(P, NFD_Basis, OutputBasis);
 
     SHOW_BIXNUM(OutputBasis);
 
-    StreamSet * OutputBytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
-    P->CreateKernelCall<StdOutKernel>(OutputBytes);
+    StreamSet * OutputBytes = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
+    P.CreateKernelCall<StdOutKernel>(OutputBytes);
 
-    return reinterpret_cast<XfrmFunctionType>(P->compile());
+    return P.compile();
 }
 
 

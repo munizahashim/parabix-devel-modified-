@@ -154,9 +154,9 @@ void ZeroExtend::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfS
     b.SetInsertPoint(exit);
 }
 
-ZeroExtend::ZeroExtend(KernelBuilder & b,
+ZeroExtend::ZeroExtend(LLVMTypeSystemInterface & ts,
                        StreamSet * const input, StreamSet * const output)
-: MultiBlockKernel(b, "zeroextend" + std::to_string(input->getFieldWidth()) + "x" + std::to_string(output->getFieldWidth()),
+: MultiBlockKernel(ts, "zeroextend" + std::to_string(input->getFieldWidth()) + "x" + std::to_string(output->getFieldWidth()),
 {Binding{"input", input}},
 {Binding{"output", output}},
 {}, {}, {}) {

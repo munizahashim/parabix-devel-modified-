@@ -26,41 +26,12 @@ inline IntTy round_up_to(const IntTy x, const IntTy y) {
     return (x + y - 1) & -y;
 }
 
-namespace kernel {
-
-using Scalars = PipelineKernel::Scalars;
-
 #define ADD_CL_SCALAR(Id,Type) \
     mTarget->mInputScalars.emplace_back(Id, mDriver.CreateCommandLineScalar(CommandLineScalarType::Type))
 
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief compile()
- ** ------------------------------------------------------------------------------------------------------------- */
-void * ProgramBuilder::compile() {
+namespace kernel {
 
-
-    Kernel * const kernel = makeKernel();
-    if (LLVM_UNLIKELY(kernel == nullptr)) {
-        report_fatal_error("Main pipeline contains no kernels nor function calls.");
-    }
-    void * finalObj;
-    {
-        NamedRegionTimer T(kernel->getSignature(), kernel->getName(),
-                           "pipeline", "Pipeline Compilation",
-                           codegen::TimeKernelsIsEnabled);
-        finalObj = compileKernel(kernel);
-    }
-    return finalObj;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief compileKernel
- ** ------------------------------------------------------------------------------------------------------------- */
-void * ProgramBuilder::compileKernel(Kernel * const kernel) {
-    mDriver.addKernel(kernel);
-    mDriver.generateUncachedKernels();
-    return mDriver.finalizeObject(kernel);
-}
+using Scalars = PipelineKernel::Scalars;
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief initializeKernel
@@ -69,21 +40,6 @@ Kernel * PipelineBuilder::initializeKernel(Kernel * const kernel, const unsigned
     mDriver.addKernel(kernel);
     mTarget->mKernels.emplace_back(kernel, flags);
     return kernel;
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief initializeNestedPipeline
- ** ------------------------------------------------------------------------------------------------------------- */
-PipelineKernel * PipelineBuilder::initializeNestedPipeline(PipelineKernel * const pk, const unsigned flags) {
-    // TODO: this isn't a very good way of doing this but if I want to allow users to always use a builder,
-    // this gives me a safe workaround for the problem.
-    PipelineBuilder nested(mDriver, pk);
-    nested.setExternallySynchronized(true);
-    std::unique_ptr<PipelineBuilder> tmp(&nested);
-    pk->instantiateInternalKernels(tmp);
-    tmp.release();
-    initializeKernel(nested.makeKernel(), flags);
-    return pk;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -192,25 +148,6 @@ void addKernelProperties(const Kernels & kernels, Kernel * const output) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief makeKernel
  ** ------------------------------------------------------------------------------------------------------------- */
-Kernel * ProgramBuilder::makeKernel() {
-
-    if (codegen::EnableDynamicMultithreading) {
-        ADD_CL_SCALAR(MINIMUM_NUM_OF_THREADS, MinThreadCount);
-        ADD_CL_SCALAR(MAXIMUM_NUM_OF_THREADS, MaxThreadCount);
-        ADD_CL_SCALAR(DYNAMIC_MULTITHREADING_SEGMENT_PERIOD, DynamicMultithreadingPeriod);
-        ADD_CL_SCALAR(DYNAMIC_MULTITHREADING_ADDITIONAL_THREAD_SYNCHRONIZATION_THRESHOLD, DynamicMultithreadingAddSynchronizationThreshold);
-        ADD_CL_SCALAR(DYNAMIC_MULTITHREADING_REMOVE_THREAD_SYNCHRONIZATION_THRESHOLD, DynamicMultithreadingRemoveSynchronizationThreshold);
-    } else {
-        ADD_CL_SCALAR(MAXIMUM_NUM_OF_THREADS, MaxThreadCount);
-    }
-    ADD_CL_SCALAR(BUFFER_SEGMENT_LENGTH, BufferSegmentLength);
-    return PipelineBuilder::makeKernel();
-
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief makeKernel
- ** ------------------------------------------------------------------------------------------------------------- */
 Kernel * PipelineBuilder::makeKernel() {
 
     mDriver.generateUncachedKernels();
@@ -220,17 +157,6 @@ Kernel * PipelineBuilder::makeKernel() {
 
     const auto numOfKernels = kernels.size();
     const auto numOfCalls = calls.size();
-
-    // TODO: optimization must be able to synchronize non-InternallySynchronized kernels to
-    // allow the following.
-
-//    if (LLVM_UNLIKELY(numOfKernels <= 1 && numOfCalls == 0 && !mRequiresPipeline)) {
-//        if (numOfKernels == 0) {
-//            return nullptr;
-//        } else {
-//            return mKernels.back();
-//        }
-//    }
 
     auto & signature = mTarget->mSignature;
 
@@ -565,7 +491,6 @@ Kernel * PipelineBuilder::makeKernel() {
     return mTarget;
 }
 
-
 using AttributeCombineSet = flat_map<AttrId, unsigned>;
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -629,24 +554,31 @@ Kernel * OptimizationBranchBuilder::makeKernel() {
 #endif
 }
 
-Scalar * PipelineBuilder::getInputScalar(const StringRef name) {
-    for (Binding & input : mTarget->mInputScalars) {
+StreamSet * PipelineBuilder::getInputStreamSet(const StringRef name) {
+    for (Binding & input : mTarget->mInputStreamSets) {
+        assert (input.getRelationship());
         if (name.equals(input.getName())) {
-            if (input.getRelationship() == nullptr) {
-                input.setRelationship(mDriver.CreateScalar(input.getType()));
-            }
-            return cast<Scalar>(input.getRelationship());
+            return cast<StreamSet>(input.getRelationship());
         }
     }
     report_fatal_error(StringRef("no scalar named ") + name);
 }
 
-void PipelineBuilder::setInputScalar(const StringRef name, Scalar * value) {
-    errs() << "setInputScalar " << name << " ["; errs().write_hex((uintptr_t)value) << "] " << (unsigned)value->getClassTypeId() << "\n";
+StreamSet * PipelineBuilder::getOutputStreamSet(const StringRef name) {
+    for (Binding & output : mTarget->mOutputStreamSets) {
+        assert (output.getRelationship());
+        if (name.equals(output.getName())) {
+            return cast<StreamSet>(output.getRelationship());
+        }
+    }
+    report_fatal_error(StringRef("no scalar named ") + name);
+}
+
+Scalar * PipelineBuilder::getInputScalar(const StringRef name) {
     for (Binding & input : mTarget->mInputScalars) {
+        assert (input.getRelationship());
         if (name.equals(input.getName())) {
-            input.setRelationship(value);
-            return;
+            return cast<Scalar>(input.getRelationship());
         }
     }
     report_fatal_error(StringRef("no scalar named ") + name);
@@ -654,10 +586,8 @@ void PipelineBuilder::setInputScalar(const StringRef name, Scalar * value) {
 
 Scalar * PipelineBuilder::getOutputScalar(const StringRef name) {
     for (Binding & output : mTarget->mOutputScalars) {
+        assert (output.getRelationship());
         if (name.equals(output.getName())) {
-            if (output.getRelationship() == nullptr) {
-                output.setRelationship(mDriver.CreateScalar(output.getType()));
-            }
             return cast<Scalar>(output.getRelationship());
         }
     }
@@ -681,6 +611,7 @@ PipelineBuilder::PipelineBuilder(BaseDriver & driver, PipelineKernel * const ker
     auto & A = mTarget->mInputScalars;
     for (unsigned i = 0; i < A.size(); i++) {
         Binding & input = A[i];
+        assert (input.getRelationship());
         if (input.getRelationship() == nullptr) {
             input.setRelationship(driver.CreateScalar(input.getType()));
         }
@@ -688,6 +619,7 @@ PipelineBuilder::PipelineBuilder(BaseDriver & driver, PipelineKernel * const ker
     auto & B = mTarget->mInputStreamSets;
     for (unsigned i = 0; i < B.size(); i++) {
         Binding & input = B[i];
+        assert (input.getRelationship());
         if (LLVM_UNLIKELY(input.getRelationship() == nullptr)) {
             report_fatal_error(StringRef(input.getName()) + " must be set upon construction");
         }
@@ -695,6 +627,7 @@ PipelineBuilder::PipelineBuilder(BaseDriver & driver, PipelineKernel * const ker
     auto & C = mTarget->mOutputStreamSets;
     for (unsigned i = 0; i < C.size(); i++) {
         Binding & output = C[i];
+        assert (output.getRelationship());
         if (LLVM_UNLIKELY(output.getRelationship() == nullptr)) {
             report_fatal_error(StringRef(output.getName()) + " must be set upon construction");
         }
@@ -702,15 +635,11 @@ PipelineBuilder::PipelineBuilder(BaseDriver & driver, PipelineKernel * const ker
     auto & D = mTarget->mOutputScalars;
     for (unsigned i = 0; i < D.size(); i++) {
         Binding & output = D[i];
+        assert (output.getRelationship());
         if (output.getRelationship() == nullptr) {
             output.setRelationship(driver.CreateScalar(output.getType()));
         }
     }
-
-}
-
-ProgramBuilder::ProgramBuilder(BaseDriver & driver, PipelineKernel * const kernel)
-: PipelineBuilder(driver, kernel) {
 
 }
 
@@ -748,17 +677,17 @@ std::shared_ptr<OptimizationBranchBuilder> PipelineBuilder::CreateOptimizationBr
     auto allZeroScalarOutputs = nonZeroScalarOutputs;
 
     PipelineKernel * const allZero =
-        new PipelineKernel(mDriver.getBuilder(),
+        new PipelineKernel(mDriver, "", {},
                            std::move(allZeroStreamInputs), std::move(allZeroStreamOutputs),
                            std::move(allZeroScalarInputs), std::move(allZeroScalarOutputs));
 
     PipelineKernel * const nonZero =
-        new PipelineKernel(mDriver.getBuilder(),
+        new PipelineKernel(mDriver, "", {},
                            std::move(nonZeroStreamInputs), std::move(nonZeroStreamOutputs),
                            std::move(nonZeroScalarInputs), std::move(nonZeroScalarOutputs));
 
     PipelineKernel * const branch =
-        new PipelineKernel(mDriver.getBuilder(),
+        new PipelineKernel(mDriver, "", {},
                            std::move(stream_inputs), std::move(stream_outputs),
                            std::move(scalar_inputs), std::move(scalar_outputs));
 

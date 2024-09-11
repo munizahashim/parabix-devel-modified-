@@ -495,6 +495,7 @@ void PipelineAnalysis::identifyLinearBuffers() {
         const auto streamSet = source(e, mBufferGraph);
         BufferNode & N = mBufferGraph[streamSet];
         N.IsLinear = true;
+        assert (!N.isReturned());
     }
 
     for (const auto e : make_iterator_range(in_edges(PipelineOutput, mBufferGraph))) {

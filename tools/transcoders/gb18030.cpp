@@ -12,7 +12,7 @@
 #include <re/cc/GB_18030_data.h>
 #include <kernel/unicode/utf8gen.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/basis/p2s_kernel.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/io/source_kernel.h>
@@ -74,13 +74,13 @@ static cl::opt<std::string> OutputEncoding("encoding", cl::desc("Output encoding
 //
 class GB_18030_Parser : public pablo::PabloKernel {
 public:
-    GB_18030_Parser(KernelBuilder & kb, StreamSet * basis, StreamSet * GB_marks);
+    GB_18030_Parser(LLVMTypeSystemInterface & ts, StreamSet * basis, StreamSet * GB_marks);
 protected:
     void generatePabloMethod() override;
 };
 
-GB_18030_Parser::GB_18030_Parser (KernelBuilder & b, StreamSet * basis, StreamSet * GB_marks)
-: PabloKernel(b, "GB_18030_Parser",
+GB_18030_Parser::GB_18030_Parser (LLVMTypeSystemInterface & ts, StreamSet * basis, StreamSet * GB_marks)
+: PabloKernel(ts, "GB_18030_Parser",
 {Binding{"basis", basis}},
               {Binding{"GB_marks", GB_marks}}) {}
 
@@ -172,7 +172,9 @@ enum class GB_18030_IndexingKind {Codepoint, UTF16};
 
 class GB_18030_ExtractionMasks : public pablo::PabloKernel {
 public:
-    GB_18030_ExtractionMasks(KernelBuilder & kb, StreamSet * GB_marks, StreamSet * basis, StreamSet * GB_1, StreamSet * GB_2, StreamSet * GB_3, StreamSet * GB_4, StreamSet * GB_prefix4, StreamSet * error, GB_18030_IndexingKind k = GB_18030_IndexingKind::Codepoint);
+    GB_18030_ExtractionMasks(LLVMTypeSystemInterface & ts, StreamSet * GB_marks, StreamSet * basis,
+                             StreamSet * GB_1, StreamSet * GB_2, StreamSet * GB_3, StreamSet * GB_4, StreamSet * GB_prefix4, StreamSet * error,
+                             GB_18030_IndexingKind k = GB_18030_IndexingKind::Codepoint);
 protected:
     void generatePabloMethod() override;
 private:
@@ -181,9 +183,9 @@ private:
 
 
 GB_18030_ExtractionMasks::GB_18030_ExtractionMasks
-    (KernelBuilder & b,
+    (LLVMTypeSystemInterface & ts,
      StreamSet * GB_marks, StreamSet * basis, StreamSet * GB_1, StreamSet * GB_2, StreamSet * GB_3, StreamSet * GB_4, StreamSet * GB_prefix4, StreamSet * error, GB_18030_IndexingKind k)
-: PabloKernel(b, (k == GB_18030_IndexingKind::UTF16) ? "GB_18030_ExtractionMasks_u16" : "GB_18030_ExtractionMasks",
+: PabloKernel(ts, (k == GB_18030_IndexingKind::UTF16) ? "GB_18030_ExtractionMasks_u16" : "GB_18030_ExtractionMasks",
 {Binding{"GB_marks", GB_marks, FixedRate(1), LookAhead(3)}, Binding{"basis", basis}},
 {Binding{"GB_1", GB_1}, Binding{"GB_2", GB_2}, Binding{"GB_3", GB_3}, Binding{"GB_4", GB_4}, Binding{"GB_prefix4", GB_prefix4}, Binding{"error", error}}),
 mExtractionKind(k)  {}
@@ -242,7 +244,7 @@ void GB_18030_ExtractionMasks::generatePabloMethod() {
 
 class GB_18030_DoubleByteIndex : public pablo::PabloKernel {
 public:
-    GB_18030_DoubleByteIndex(KernelBuilder & kb,
+    GB_18030_DoubleByteIndex(LLVMTypeSystemInterface & ts,
                              StreamSet * GB_4byte, StreamSet * byte1_basis, StreamSet * byte2_basis,
                              StreamSet * GB_2byte, StreamSet * gb15_index);
 protected:
@@ -250,9 +252,9 @@ protected:
 };
 
 GB_18030_DoubleByteIndex::GB_18030_DoubleByteIndex
-(KernelBuilder & kb,
+(LLVMTypeSystemInterface & ts,
  StreamSet * GB_4byte, StreamSet * byte1_basis, StreamSet * byte2_basis, StreamSet * GB_2byte, StreamSet * gb15_index)
-: PabloKernel(kb, "GB_18030_DoubleByteIndex",
+: PabloKernel(ts, "GB_18030_DoubleByteIndex",
               // input
 {Binding{"GB_4byte", GB_4byte}, Binding{"byte1_basis", byte1_basis}, Binding{"byte2_basis", byte2_basis}},
               // output
@@ -289,7 +291,7 @@ void GB_18030_DoubleByteIndex::generatePabloMethod() {
 
 class GB_18030_InitializeASCII : public pablo::PabloKernel {
 public:
-    GB_18030_InitializeASCII(KernelBuilder & kb,
+    GB_18030_InitializeASCII(LLVMTypeSystemInterface & ts,
                              StreamSet * byte1_basis, StreamSet * u16_basis);
     constexpr static unsigned ASCII_Bits = 7;
 protected:
@@ -297,8 +299,8 @@ protected:
 };
 
 GB_18030_InitializeASCII::GB_18030_InitializeASCII
-(KernelBuilder & kb, StreamSet * byte1_basis, StreamSet * u16_basis)
-: PabloKernel(kb, "GB_18030_InitializeASCII",
+(LLVMTypeSystemInterface & ts, StreamSet * byte1_basis, StreamSet * u16_basis)
+: PabloKernel(ts, "GB_18030_InitializeASCII",
               // input
 {Binding{"byte1_basis", byte1_basis}},
               // output
@@ -323,7 +325,7 @@ void GB_18030_InitializeASCII::generatePabloMethod() {
 
 class GB_18030_DoubleByteRangeKernel : public pablo::PabloKernel {
 public:
-    GB_18030_DoubleByteRangeKernel(KernelBuilder & kb,
+    GB_18030_DoubleByteRangeKernel(LLVMTypeSystemInterface & ts,
                                    StreamSet * GB_2byte, StreamSet * gb15_index, StreamSet * u16_in,
                                    StreamSet * u16_out,
                                    unsigned rangeBase, unsigned rangeBits);
@@ -335,11 +337,11 @@ private:
 };
 
 GB_18030_DoubleByteRangeKernel::GB_18030_DoubleByteRangeKernel
-(KernelBuilder & kb,
+(LLVMTypeSystemInterface & ts,
  StreamSet * GB_2byte, StreamSet * gb15_index, StreamSet * u16_in,
  StreamSet * u16_out,
  unsigned rangeBase, unsigned rangeBits)
-: PabloKernel(kb, "GB_18030_DoubleByteRangeKernel" + std::to_string(rangeBase) + "-" + std::to_string(rangeBase + (1 << rangeBits) - 1),
+: PabloKernel(ts, "GB_18030_DoubleByteRangeKernel" + std::to_string(rangeBase) + "-" + std::to_string(rangeBase + (1 << rangeBits) - 1),
               // input
 {Binding{"GB_2byte", GB_2byte}, Binding{"gb15_index", gb15_index}, Binding{"u16_in", u16_in}},
               // output
@@ -391,7 +393,7 @@ void GB_18030_DoubleByteRangeKernel::generatePabloMethod() {
 
 class GB_18030_FourByteLogic : public pablo::PabloKernel {
 public:
-    GB_18030_FourByteLogic(KernelBuilder & kb,
+    GB_18030_FourByteLogic(LLVMTypeSystemInterface & ts,
                            StreamSet * GB_4byte, StreamSet * byte1, StreamSet * nybble1, StreamSet * byte2, StreamSet * nybble2, StreamSet * u16_basis,
                            StreamSet * UTF_out,
                            GB_18030_IndexingKind k = GB_18030_IndexingKind::Codepoint);
@@ -402,10 +404,10 @@ private:
 };
 
 GB_18030_FourByteLogic::GB_18030_FourByteLogic
-(KernelBuilder & kb,
+(LLVMTypeSystemInterface & ts,
  StreamSet * GB_4byte, StreamSet * byte1, StreamSet * nybble1, StreamSet * byte2, StreamSet * nybble2, StreamSet * u16_basis,
  StreamSet * UTF_out, GB_18030_IndexingKind k)
-: PabloKernel(kb, (k == GB_18030_IndexingKind::UTF16) ? "GB_18030_FourByteLogic_u16" : "GB_18030_FourByteLogic",
+: PabloKernel(ts, (k == GB_18030_IndexingKind::UTF16) ? "GB_18030_FourByteLogic_u16" : "GB_18030_FourByteLogic",
               // input
 {Binding{"GB_4byte", GB_4byte},
     Binding{"byte1", byte1},
@@ -553,39 +555,43 @@ void GB_18030_FourByteLogic::generatePabloMethod() {
 
 typedef void (*gb18030FunctionType)(uint32_t fd, const char *);
 
-gb18030FunctionType generatePipeline(CPUDriver & pxDriver, unsigned encodingBits, cc::ByteNumbering byteNumbering) {
-    auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}, Binding{b.getInt8PtrTy(), "outputFileName"}}, {});
-    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
-    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+
+
+
+gb18030FunctionType generatePipeline(CPUDriver & driver, unsigned encodingBits, cc::ByteNumbering byteNumbering) {
+
+    auto P = CreatePipeline(driver, Input<uint32_t>("inputFileDecriptor"), Input<const char *>("outputFileName"));
+
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     // Transposed bits from s2p
-    StreamSet * BasisBits = P->CreateStreamSet(8);
+    StreamSet * BasisBits = P.CreateStreamSet(8);
     Selected_S2P(P, ByteStream, BasisBits);
 
     GB_18030_IndexingKind indexing = (encodingBits == 16) ? GB_18030_IndexingKind::UTF16 : GB_18030_IndexingKind::Codepoint;
 
-    StreamSet * GB_marks = P->CreateStreamSet(4);
-    P->CreateKernelCall<GB_18030_Parser>(BasisBits, GB_marks);
+    StreamSet * GB_marks = P.CreateStreamSet(4);
+    P.CreateKernelCall<GB_18030_Parser>(BasisBits, GB_marks);
 
     // Masks for extraction of 1 bit per GB code unit sequence.
-    StreamSet * GB_mask1 = P->CreateStreamSet(1);
-    StreamSet * GB_mask2 = P->CreateStreamSet(1);
-    StreamSet * GB_mask3 = P->CreateStreamSet(1);
-    StreamSet * GB_mask4 = P->CreateStreamSet(1);
-    StreamSet * GB_prefix4 = P->CreateStreamSet(1);
-    StreamSet * const error = P->CreateStreamSet();
-    P->CreateKernelCall<GB_18030_ExtractionMasks>(GB_marks, BasisBits, GB_mask1, GB_mask2, GB_mask3, GB_mask4, GB_prefix4, error, indexing);
+    StreamSet * GB_mask1 = P.CreateStreamSet(1);
+    StreamSet * GB_mask2 = P.CreateStreamSet(1);
+    StreamSet * GB_mask3 = P.CreateStreamSet(1);
+    StreamSet * GB_mask4 = P.CreateStreamSet(1);
+    StreamSet * GB_prefix4 = P.CreateStreamSet(1);
+    StreamSet * const error = P.CreateStreamSet();
+    P.CreateKernelCall<GB_18030_ExtractionMasks>(GB_marks, BasisBits, GB_mask1, GB_mask2, GB_mask3, GB_mask4, GB_prefix4, error, indexing);
 
     if (GBerrorOption == GBerrorMode::Abort) {
-        StreamSet * BasisBitsOut = P->CreateStreamSet(8);
-        StreamSet * GB_mask1Out = P->CreateStreamSet(1);
-        StreamSet * GB_mask2Out = P->CreateStreamSet(1);
-        StreamSet * GB_mask3Out = P->CreateStreamSet(1);
-        StreamSet * GB_mask4Out = P->CreateStreamSet(1);
-        StreamSet * GB_prefix4Out = P->CreateStreamSet(1);
-        P->CreateKernelCall<ErrorMonitorKernel>(
+        StreamSet * BasisBitsOut = P.CreateStreamSet(8);
+        StreamSet * GB_mask1Out = P.CreateStreamSet(1);
+        StreamSet * GB_mask2Out = P.CreateStreamSet(1);
+        StreamSet * GB_mask3Out = P.CreateStreamSet(1);
+        StreamSet * GB_mask4Out = P.CreateStreamSet(1);
+        StreamSet * GB_prefix4Out = P.CreateStreamSet(1);
+        P.CreateKernelCall<ErrorMonitorKernel>(
             // error stream set
             error,
             // monitored stream bindings
@@ -606,11 +612,11 @@ gb18030FunctionType generatePipeline(CPUDriver & pxDriver, unsigned encodingBits
         GB_prefix4 = GB_prefix4Out;
     }
 
-    StreamSet * GB_4byte = P->CreateStreamSet(1); // markers for 4-byte sequences
-    StreamSet * const byte1 = P->CreateStreamSet(8);
-    StreamSet * const nybble1 = P->CreateStreamSet(4);
-    StreamSet * const byte2 = P->CreateStreamSet(8);
-    StreamSet * const nybble2 = P->CreateStreamSet(4);
+    StreamSet * GB_4byte = P.CreateStreamSet(1); // markers for 4-byte sequences
+    StreamSet * const byte1 = P.CreateStreamSet(8);
+    StreamSet * const nybble1 = P.CreateStreamSet(4);
+    StreamSet * const byte2 = P.CreateStreamSet(8);
+    StreamSet * const nybble2 = P.CreateStreamSet(4);
 
     FilterByMask(P, GB_mask1, GB_prefix4, GB_4byte);
     FilterByMask(P, GB_mask1, BasisBits, byte1);
@@ -618,13 +624,13 @@ gb18030FunctionType generatePipeline(CPUDriver & pxDriver, unsigned encodingBits
     FilterByMask(P, GB_mask3, BasisBits, byte2);
     FilterByMask(P, GB_mask4, BasisBits, nybble2);
 
-    StreamSet * const GB_2byte = P->CreateStreamSet(1); // markers for 2-byte sequences
-    StreamSet * const gb15index = P->CreateStreamSet(15);
-    P->CreateKernelCall<GB_18030_DoubleByteIndex>(GB_4byte, byte1, byte2, GB_2byte, gb15index);
+    StreamSet * const GB_2byte = P.CreateStreamSet(1); // markers for 2-byte sequences
+    StreamSet * const gb15index = P.CreateStreamSet(15);
+    P.CreateKernelCall<GB_18030_DoubleByteIndex>(GB_4byte, byte1, byte2, GB_2byte, gb15index);
 
-    StreamSet * u16basis = P->CreateStreamSet(16);
+    StreamSet * u16basis = P.CreateStreamSet(16);
 
-    P->CreateKernelCall<GB_18030_InitializeASCII>(byte1, u16basis);
+    P.CreateKernelCall<GB_18030_InitializeASCII>(byte1, u16basis);
 
     const unsigned KernelSubrangeBits = 11;
     const unsigned KernelSubrangeSize = 1 << KernelSubrangeBits;
@@ -632,64 +638,64 @@ gb18030FunctionType generatePipeline(CPUDriver & pxDriver, unsigned encodingBits
 
     for (unsigned rangeBase = 0; rangeBase < GB2_tblSize; rangeBase += KernelSubrangeSize) {
         //llvm::errs() << "rangeBase = " << rangeBase << "\n";
-        StreamSet * u16out = P->CreateStreamSet(16);
-        P->CreateKernelCall<GB_18030_DoubleByteRangeKernel>(GB_2byte, gb15index, u16basis, u16out, rangeBase, KernelSubrangeBits);
+        StreamSet * u16out = P.CreateStreamSet(16);
+        P.CreateKernelCall<GB_18030_DoubleByteRangeKernel>(GB_2byte, gb15index, u16basis, u16out, rangeBase, KernelSubrangeBits);
         u16basis = u16out;
     }
 
-    StreamSet * const utfBasis = P->CreateStreamSet((encodingBits == 16) ? 16 : 21);
-    P->CreateKernelCall<GB_18030_FourByteLogic>(GB_4byte, byte1, nybble1, byte2, nybble2, u16basis, utfBasis, indexing);
+    StreamSet * const utfBasis = P.CreateStreamSet((encodingBits == 16) ? 16 : 21);
+    P.CreateKernelCall<GB_18030_FourByteLogic>(GB_4byte, byte1, nybble1, byte2, nybble2, u16basis, utfBasis, indexing);
 
     if (encodingBits == 32) {
-        StreamSet * const u32data = P->CreateStreamSet(1, 32);
-        P->CreateKernelCall<P2S21Kernel>(utfBasis, u32data, byteNumbering);
-        P->CreateKernelCall<StdOutKernel>(u32data);
+        StreamSet * const u32data = P.CreateStreamSet(1, 32);
+        P.CreateKernelCall<P2S21Kernel>(utfBasis, u32data, byteNumbering);
+        P.CreateKernelCall<StdOutKernel>(u32data);
     } else if (encodingBits == 16) {
-            StreamSet * const u16data = P->CreateStreamSet(1, 16);
-            P->CreateKernelCall<P2S16Kernel>(utfBasis, u16data, byteNumbering);
-            P->CreateKernelCall<StdOutKernel>(u16data);
+            StreamSet * const u16data = P.CreateStreamSet(1, 16);
+            P.CreateKernelCall<P2S16Kernel>(utfBasis, u16data, byteNumbering);
+            P.CreateKernelCall<StdOutKernel>(u16data);
     } else if (encodingBits == 8) {
         // Buffers for calculated deposit masks.
-        StreamSet * const u8fieldMask = P->CreateStreamSet();
-        StreamSet * const u8final = P->CreateStreamSet();
-        StreamSet * const u8initial = P->CreateStreamSet();
-        StreamSet * const u8mask12_17 = P->CreateStreamSet();
-        StreamSet * const u8mask6_11 = P->CreateStreamSet();
+        StreamSet * const u8fieldMask = P.CreateStreamSet();
+        StreamSet * const u8final = P.CreateStreamSet();
+        StreamSet * const u8initial = P.CreateStreamSet();
+        StreamSet * const u8mask12_17 = P.CreateStreamSet();
+        StreamSet * const u8mask6_11 = P.CreateStreamSet();
 
         // Intermediate buffers for deposited bits
-        StreamSet * const deposit18_20 = P->CreateStreamSet(3);
-        StreamSet * const deposit12_17 = P->CreateStreamSet(6);
-        StreamSet * const deposit6_11 = P->CreateStreamSet(6);
-        StreamSet * const deposit0_5 = P->CreateStreamSet(6);
+        StreamSet * const deposit18_20 = P.CreateStreamSet(3);
+        StreamSet * const deposit12_17 = P.CreateStreamSet(6);
+        StreamSet * const deposit6_11 = P.CreateStreamSet(6);
+        StreamSet * const deposit0_5 = P.CreateStreamSet(6);
 
         // Final buffers for computed UTF-8 basis bits and byte stream.
-        StreamSet * const u8basis = P->CreateStreamSet(8);
-        StreamSet * const u8bytes = P->CreateStreamSet(1, 8);
+        StreamSet * const u8basis = P.CreateStreamSet(8);
+        StreamSet * const u8bytes = P.CreateStreamSet(1, 8);
 
         // Calculate the u8final deposit mask.
-        StreamSet * const extractionMask = P->CreateStreamSet();
-        P->CreateKernelCall<UTF8fieldDepositMask>(utfBasis, u8fieldMask, extractionMask);
-        P->CreateKernelCall<StreamCompressKernel>(extractionMask, u8fieldMask, u8final);
+        StreamSet * const extractionMask = P.CreateStreamSet();
+        P.CreateKernelCall<UTF8fieldDepositMask>(utfBasis, u8fieldMask, extractionMask);
+        P.CreateKernelCall<StreamCompressKernel>(extractionMask, u8fieldMask, u8final);
 
-        P->CreateKernelCall<UTF8_DepositMasks>(u8final, u8initial, u8mask12_17, u8mask6_11);
+        P.CreateKernelCall<UTF8_DepositMasks>(u8final, u8initial, u8mask12_17, u8mask6_11);
 
         SpreadByMask(P, u8initial, utfBasis, deposit18_20, /* inputOffset = */ 18);
         SpreadByMask(P, u8mask12_17, utfBasis, deposit12_17, /* inputOffset = */ 12);
         SpreadByMask(P, u8mask6_11, utfBasis, deposit6_11, /* inputOffset = */ 6);
         SpreadByMask(P, u8final, utfBasis, deposit0_5, /* inputOffset = */ 0);
 
-        P->CreateKernelCall<UTF8assembly>(deposit18_20, deposit12_17, deposit6_11, deposit0_5,
+        P.CreateKernelCall<UTF8assembly>(deposit18_20, deposit12_17, deposit6_11, deposit0_5,
                                         u8initial, u8final, u8mask6_11, u8mask12_17,
                                         u8basis);
 
-        P->CreateKernelCall<P2SKernel>(u8basis, u8bytes);
+        P.CreateKernelCall<P2SKernel>(u8basis, u8bytes);
 
-        P->CreateKernelCall<StdOutKernel>(u8bytes);
+        P.CreateKernelCall<StdOutKernel>(u8bytes);
     } else {
         llvm::report_fatal_error(llvm::StringRef("Unsupported output encoding: ") + OutputEncoding);
     }
 
-    return reinterpret_cast<gb18030FunctionType>(P->compile());
+    return P.compile();
 }
 
 
@@ -728,8 +734,8 @@ int main(int argc, char *argv[]) {
         llvm::report_fatal_error("Unrecognized encoding.");
     }
 
-    CPUDriver pxDriver("gb18030");
-    gb18030FunctionType gb18030Function = generatePipeline(pxDriver, encodingBits, byteNumbering);
+    CPUDriver driver("gb18030");
+    gb18030FunctionType gb18030Function = generatePipeline(driver, encodingBits, byteNumbering);
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         llvm::errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";

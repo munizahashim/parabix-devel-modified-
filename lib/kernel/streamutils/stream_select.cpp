@@ -126,8 +126,8 @@ SelectOperation Intersect(std::vector<StreamSet *> sets) {
     return __selops::__selop_init(__selops::__op::__intersect, std::move(sets));
 }
 
-StreamSelect::StreamSelect(KernelBuilder & b, StreamSet * output, SelectOperation operation)
-: BlockOrientedKernel(b, "StreamSelect" + streamutils::genSignature(operation), {}, {{"output", output}}, {}, {}, {})
+StreamSelect::StreamSelect(LLVMTypeSystemInterface & ts, StreamSet * output, SelectOperation operation)
+: BlockOrientedKernel(ts, "StreamSelect" + streamutils::genSignature(operation), {}, {{"output", output}}, {}, {}, {})
 {
 //    assert (resultStreamCount(operation) == output->getNumElements());
     for (auto const & kv : operation.bindings) {
@@ -142,8 +142,8 @@ StreamSelect::StreamSelect(KernelBuilder & b, StreamSet * output, SelectOperatio
     }
 }
 
-StreamSelect::StreamSelect(KernelBuilder & b, StreamSet * output, SelectOperationList operations)
-: BlockOrientedKernel(b, "StreamSelect" + streamutils::genSignature(operations), {}, {{"output", output}}, {}, {}, {})
+StreamSelect::StreamSelect(LLVMTypeSystemInterface & ts, StreamSet * output, SelectOperationList operations)
+: BlockOrientedKernel(ts, "StreamSelect" + streamutils::genSignature(operations), {}, {{"output", output}}, {}, {}, {})
 {
 //    assert (resultStreamCount(operations) == output->getNumElements());
     std::unordered_map<StreamSet *, std::string> inputBindings;
@@ -160,9 +160,8 @@ void StreamSelect::generateDoBlockMethod(KernelBuilder & b) {
     }
 }
 
-
-IStreamSelect::IStreamSelect(KernelBuilder & b, StreamSet * output, SelectOperation operation)
-: MultiBlockKernel(b, "IStreamSelect" + streamutils::genSignature(operation),
+IStreamSelect::IStreamSelect(LLVMTypeSystemInterface & ts, StreamSet * output, SelectOperation operation)
+: MultiBlockKernel(ts, "IStreamSelect" + streamutils::genSignature(operation),
     {},
     {{"output", output}},
     {}, {}, {})
@@ -211,7 +210,6 @@ void IStreamSelect::generateMultiBlockLogic(KernelBuilder & b, Value * const num
 
     b.SetInsertPoint(block_Exit);
 }
-
 
 namespace streamutils {
 
@@ -363,8 +361,6 @@ std::vector<Value *> loadInputSelectionsBlock(KernelBuilder & b, SelectedInputLi
     return selectedSet;
 }
 
-using ProgramBuilderRef = const std::unique_ptr<ProgramBuilder> &;
-
 std::vector<uint32_t> Range(uint32_t lb, uint32_t ub) {
     assert (lb < ub);
     std::vector<uint32_t> range{};
@@ -375,55 +371,55 @@ std::vector<uint32_t> Range(uint32_t lb, uint32_t ub) {
     return range;
 }
 
-static StreamSet * runOperation(ProgramBuilderRef P, SelectOperation op) {
+static StreamSet * runOperation(PipelineBuilder & P, SelectOperation op) {
     uint32_t n = resultStreamCount(op);
     uint32_t fw = resultStreamFieldWidth(op);
-    StreamSet * const output = P->CreateStreamSet(n, fw);
+    StreamSet * const output = P.CreateStreamSet(n, fw);
     if (fw == 1) {
-        P->CreateKernelCall<StreamSelect>(output, op);
+        P.CreateKernelCall<StreamSelect>(output, op);
     } else if (op.operation == __selops::__op::__select) {
-        P->CreateKernelCall<IStreamSelect>(output, op);
+        P.CreateKernelCall<IStreamSelect>(output, op);
     } else {
         llvm::report_fatal_error("only Select operations are supported for streams with field width > 1");
     }
     return output;
 }
 
-StreamSet * Select(ProgramBuilderRef P, StreamSet * from, uint32_t index) {
+StreamSet * Select(PipelineBuilder &P, StreamSet * from, uint32_t index) {
     return Select(P, from, std::vector<uint32_t>{index});
 }
 
-StreamSet * Select(ProgramBuilderRef P, StreamSet * from, std::vector<uint32_t> indices) {
+StreamSet * Select(PipelineBuilder & P, StreamSet * from, std::vector<uint32_t> indices) {
     SelectOperation op = Select(from, std::move(indices));
     return runOperation(P, std::move(op));
 }
 
-StreamSet * Select(const std::unique_ptr<ProgramBuilder> & P, std::vector<std::pair<StreamSet *, std::vector<uint32_t>>> selections) {
+StreamSet * Select(PipelineBuilder & P, std::vector<std::pair<StreamSet *, std::vector<uint32_t>>> selections) {
     SelectOperation op = Select(selections);
     return runOperation(P, std::move(op));
 }
 
-StreamSet * Select(const std::unique_ptr<ProgramBuilder> & P, std::vector<StreamSet *> sets) {
+StreamSet * Select(PipelineBuilder &P, std::vector<StreamSet *> sets) {
     SelectOperation op = Select(sets);
     return runOperation(P, std::move(op));
 }
 
-StreamSet * Merge(ProgramBuilderRef P, StreamSet * from, std::vector<uint32_t> indices) {
+StreamSet * Merge(PipelineBuilder & P, StreamSet * from, std::vector<uint32_t> indices) {
     SelectOperation op = Merge(from, std::move(indices));
     return runOperation(P, std::move(op));
 }
 
-StreamSet * Merge(const std::unique_ptr<ProgramBuilder> & P, std::vector<std::pair<StreamSet *, std::vector<uint32_t>>> selections) {
+StreamSet * Merge(PipelineBuilder &P, std::vector<std::pair<StreamSet *, std::vector<uint32_t>>> selections) {
     SelectOperation op = Merge(selections);
     return runOperation(P, std::move(op));
 }
 
-StreamSet * Intersect(ProgramBuilderRef P, StreamSet * from, std::vector<uint32_t> indices) {
+StreamSet * Intersect(PipelineBuilder & P, StreamSet * from, std::vector<uint32_t> indices) {
     SelectOperation op = Intersect(from, std::move(indices));
     return runOperation(P, std::move(op));
 }
 
-StreamSet * Intersect(const std::unique_ptr<ProgramBuilder> & P, std::vector<std::pair<StreamSet *, std::vector<uint32_t>>> selections) {
+StreamSet * Intersect(PipelineBuilder &P, std::vector<std::pair<StreamSet *, std::vector<uint32_t>>> selections) {
     SelectOperation op = Intersect(selections);
     return runOperation(P, std::move(op));
 }

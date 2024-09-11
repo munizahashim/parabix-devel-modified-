@@ -16,7 +16,7 @@
 #include <pablo/pe_zeroes.h>        // for Zeroes
 #include <grep/grep_kernel.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/run_index.h>
@@ -62,13 +62,13 @@ static cl::opt<bool> U21("U21", cl::desc("perform character translation via 21-b
 static cl::opt<bool> Buffering("buf", cl::desc("buffer pipeline output"),  cl::cat(Xch_Options));
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(Xch_Options));
 
-#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
-#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
-#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
 class AdjustU8bixnum : public pablo::PabloKernel {
 public:
-    AdjustU8bixnum(KernelBuilder & b,
+    AdjustU8bixnum(LLVMTypeSystemInterface & ts,
                    StreamSet * Basis, StreamSet * InsertBixNum,
                    StreamSet * AdjustedBixNum);
 protected:
@@ -77,10 +77,10 @@ private:
     unsigned mBixBits;
 };
 
-AdjustU8bixnum::AdjustU8bixnum (KernelBuilder & b,
+AdjustU8bixnum::AdjustU8bixnum (LLVMTypeSystemInterface & ts,
                                 StreamSet * Basis, StreamSet * InsertBixNum,
                                 StreamSet * AdjustedBixNum)
-: PabloKernel(b, "adjust_bixnum" + std::to_string(InsertBixNum->getNumElements()) + "x1",
+: PabloKernel(ts, "adjust_bixnum" + std::to_string(InsertBixNum->getNumElements()) + "x1",
 // inputs
 {Binding{"basis", Basis}, Binding{"insert_bixnum", InsertBixNum, FixedRate(1), LookAhead(2)}},
 // output
@@ -126,7 +126,7 @@ void AdjustU8bixnum::generatePabloMethod() {
 
 class CreateU8delMask : public pablo::PabloKernel {
 public:
-    CreateU8delMask(KernelBuilder & b,
+    CreateU8delMask(LLVMTypeSystemInterface & ts,
                     StreamSet * Basis, StreamSet * DeletionBixNum,
                     StreamSet * DelMask);
 protected:
@@ -135,10 +135,10 @@ private:
     unsigned mBixBits;
 };
 
-CreateU8delMask::CreateU8delMask (KernelBuilder & b,
+CreateU8delMask::CreateU8delMask (LLVMTypeSystemInterface & ts,
                                 StreamSet * Basis, StreamSet * DeletionBixNum,
                                 StreamSet * DelMask)
-: PabloKernel(b, "u8_delmask" + std::to_string(DeletionBixNum->getNumElements()) + "x1",
+: PabloKernel(ts, "u8_delmask" + std::to_string(DeletionBixNum->getNumElements()) + "x1",
 // inputs
 {Binding{"basis", Basis}, Binding{"deletion_bixnum", DeletionBixNum, FixedRate(1), LookAhead(3)}},
 // output
@@ -184,13 +184,13 @@ void CreateU8delMask::generatePabloMethod() {
 
 class UTF8_BytePosition : public pablo::PabloKernel {
 public:
-    UTF8_BytePosition(KernelBuilder & b, StreamSet * Basis, StreamSet * Positions);
+    UTF8_BytePosition(LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * Positions);
 protected:
     void generatePabloMethod() override;
 };
 
-UTF8_BytePosition::UTF8_BytePosition(KernelBuilder & b, StreamSet * Basis, StreamSet * Positions)
-: PabloKernel(b, "UTF8_BytePosition",
+UTF8_BytePosition::UTF8_BytePosition(LLVMTypeSystemInterface & ts, StreamSet * Basis, StreamSet * Positions)
+: PabloKernel(ts, "UTF8_BytePosition",
 {Binding{"basis", Basis, FixedRate(1), LookAhead(2)}},
 // output
 {Binding{"positions", Positions}}) {
@@ -224,7 +224,7 @@ void UTF8_BytePosition::generatePabloMethod() {
 class UTF8_Target_Class : public pablo::PabloKernel {
 public:
     UTF8_Target_Class
-        (KernelBuilder & b,
+        (LLVMTypeSystemInterface & ts,
          StreamSet * Positions, StreamSet * SpreadMask, StreamSet * FilterMask,
          StreamSet * TargetClass);
 protected:
@@ -235,10 +235,10 @@ private:
 };
 
 UTF8_Target_Class::UTF8_Target_Class
-    (KernelBuilder & b,
+    (LLVMTypeSystemInterface & ts,
      StreamSet * Positions, StreamSet * SpreadMask, StreamSet * FilterMask,
      StreamSet * TargetClass)
-: PabloKernel(b, "UTF8_Target_Class" +
+: PabloKernel(ts, "UTF8_Target_Class" +
               std::to_string(Positions->getNumElements()) + "x1" +
               (SpreadMask == nullptr ? "" : "+ins") +
               (FilterMask == nullptr ? "" : "+del"),
@@ -305,7 +305,7 @@ void UTF8_Target_Class::generatePabloMethod() {
 class UTF8_CharacterTranslator : public pablo::PabloKernel {
 public:
     UTF8_CharacterTranslator
-        (KernelBuilder & b,
+        (LLVMTypeSystemInterface & ts,
          StreamSet * Basis, StreamSet * XfrmBasis, StreamSet * TargetPositions, StreamSet * SpreadMask, StreamSet * FilterMask,
          StreamSet * Output);
 protected:
@@ -317,10 +317,10 @@ private:
 };
 
 UTF8_CharacterTranslator::UTF8_CharacterTranslator
-    (KernelBuilder & b,
+    (LLVMTypeSystemInterface & ts,
      StreamSet * Basis, StreamSet * XfrmBasis, StreamSet * TargetPositions, StreamSet * SpreadMask, StreamSet * FilterMask,
      StreamSet * Output)
-: PabloKernel(b, "u8_transform_bits_" +
+: PabloKernel(ts, "u8_transform_bits_" +
                  std::to_string(XfrmBasis->getNumElements()) + "x1" +
                  (SpreadMask == nullptr ? "" : "+ins") +
                  (FilterMask == nullptr ? "" : "+del"),
@@ -451,15 +451,15 @@ void UTF8_CharacterTranslator::generatePabloMethod() {
 
 class ApplyTransform : public pablo::PabloKernel {
 public:
-    ApplyTransform(KernelBuilder & b,
+    ApplyTransform(LLVMTypeSystemInterface & ts,
                    StreamSet * Basis, StreamSet * Xfrms, StreamSet * Output);
 protected:
     void generatePabloMethod() override;
 };
 
-ApplyTransform::ApplyTransform (KernelBuilder & b,
+ApplyTransform::ApplyTransform (LLVMTypeSystemInterface & ts,
                                 StreamSet * Basis, StreamSet * Xfrms, StreamSet * Output)
-: PabloKernel(b, "xfrm_" + std::to_string(Basis->getNumElements()) + "x1_" + std::to_string(Xfrms->getNumElements()),
+: PabloKernel(ts, "xfrm_" + std::to_string(Basis->getNumElements()) + "x1_" + std::to_string(Xfrms->getNumElements()),
 // inputs
 {Binding{"basis", Basis},
  Binding{"xfrms", Xfrms}
@@ -487,34 +487,33 @@ void ApplyTransform::generatePabloMethod() {
 typedef void (*XfrmFunctionType)(StreamSetPtr & ss_buf, uint32_t fd);
 
 
-XfrmFunctionType generateU21_pipeline(CPUDriver & pxDriver,
+XfrmFunctionType generateU21_pipeline(CPUDriver & driver,
                                       unicode::BitTranslationSets tr) {
-    StreamSet * OutputBytes = pxDriver.CreateStreamSet(1, 8);
-    auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipelineWithIO({}, {Bind("OutputBytes", OutputBytes, ReturnedBuffer(1))},
-                                             {Binding{b.getInt32Ty(), "inputFileDecriptor"}});
+
+    auto P = CreatePipeline(driver, Output<streamset_t>("OutputBytes",  1, 8, ReturnedBuffer(1)), Input<uint32_t>("inputFileDecriptor"));
+
     //  The program will use a file descriptor as an input.
-    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
     // File data from mmap
-    StreamSet * ByteStream = P->CreateStreamSet(1, 8);
+    StreamSet * ByteStream = P.CreateStreamSet(1, 8);
     //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
     //  from a file descriptor.
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
     SHOW_BYTES(ByteStream);
 
     //  The Parabix basis bits representation is created by the Parabix S2P kernel.
-    StreamSet * BasisBits = P->CreateStreamSet(8, 1);
-    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    StreamSet * BasisBits = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
 
-    StreamSet * u8index = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    StreamSet * u8index = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
     SHOW_STREAM(u8index);
 
-    StreamSet * U21_u8indexed = P->CreateStreamSet(21, 1);
-    P->CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
+    StreamSet * U21_u8indexed = P.CreateStreamSet(21, 1);
+    P.CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
 
-    StreamSet * U21 = P->CreateStreamSet(21, 1);
+    StreamSet * U21 = P.CreateStreamSet(21, 1);
     FilterByMask(P, u8index, U21_u8indexed, U21);
     SHOW_BIXNUM(U21);
 
@@ -522,44 +521,43 @@ XfrmFunctionType generateU21_pipeline(CPUDriver & pxDriver,
     for (auto & b : tr) {
         xfrm_ccs.push_back(re::makeCC(b, &cc::Unicode));
     }
-    StreamSet * XfrmBasis = P->CreateStreamSet(xfrm_ccs.size());
-    P->CreateKernelCall<CharClassesKernel>(xfrm_ccs, U21, XfrmBasis);
+    StreamSet * XfrmBasis = P.CreateStreamSet(xfrm_ccs.size());
+    P.CreateKernelCall<CharClassesKernel>(xfrm_ccs, U21, XfrmBasis);
     SHOW_BIXNUM(XfrmBasis);
 
-    StreamSet * u32basis = P->CreateStreamSet(21, 1);
-    P->CreateKernelCall<ApplyTransform>(U21, XfrmBasis, u32basis);
+    StreamSet * u32basis = P.CreateStreamSet(21, 1);
+    P.CreateKernelCall<ApplyTransform>(U21, XfrmBasis, u32basis);
     SHOW_BIXNUM(u32basis);
 
-    StreamSet * const OutputBasis = P->CreateStreamSet(8);
+    StreamSet * const OutputBasis = P.CreateStreamSet(8);
     U21_to_UTF8(P, u32basis, OutputBasis);
 
     SHOW_BIXNUM(OutputBasis);
-
-    P->CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
-    P->CreateKernelCall<StdOutKernel>(OutputBytes);
-    return reinterpret_cast<XfrmFunctionType>(P->compile());
+    StreamSet * OutputBytes =  P.getOutputStreamSet("OutputBytes");
+    P.CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
+    P.CreateKernelCall<StdOutKernel>(OutputBytes);
+    return P.compile();
 }
 
-XfrmFunctionType generateUTF8_pipeline(CPUDriver & pxDriver,
+XfrmFunctionType generateUTF8_pipeline(CPUDriver & driver,
                                        unicode::BitTranslationSets tr,
                                        unicode::BitTranslationSets ins_bixnum,
                                        unicode::BitTranslationSets del_bixnum) {
-    StreamSet * OutputBytes = pxDriver.CreateStreamSet(1, 8);
-    auto & b = pxDriver.getBuilder();
-    auto P = pxDriver.makePipelineWithIO({}, {Bind("OutputBytes", OutputBytes, ReturnedBuffer(1))},
-                                             {Binding{b.getInt32Ty(), "inputFileDecriptor"}});
+
+    auto P = CreatePipeline(driver, Output<streamset_t>("OutputBytes", 1, 8, ReturnedBuffer(1)), Input<uint32_t>("inputFileDecriptor"));
+
     //  The program will use a file descriptor as an input.
-    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
     // File data from mmap
-    StreamSet * ByteStream = P->CreateStreamSet(1, 8);
+    StreamSet * ByteStream = P.CreateStreamSet(1, 8);
     //  ReadSourceKernel is a Parabix Kernel that produces a stream of bytes
     //  from a file descriptor.
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
     SHOW_BYTES(ByteStream);
 
     //  The Parabix basis bits representation is created by the Parabix S2P kernel.
-    StreamSet * BasisBits = P->CreateStreamSet(8, 1);
-    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    StreamSet * BasisBits = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
 
     unsigned bix_bits = ins_bixnum.size();
@@ -570,25 +568,25 @@ XfrmFunctionType generateUTF8_pipeline(CPUDriver & pxDriver,
         for (auto & b : ins_bixnum) {
             insertion_ccs.push_back(re::makeCC(b, &cc::Unicode));
         }
-        StreamSet * InsertBixNum = P->CreateStreamSet(bix_bits);
-        P->CreateKernelCall<CharClassesKernel>(insertion_ccs, BasisBits, InsertBixNum);
+        StreamSet * InsertBixNum = P.CreateStreamSet(bix_bits);
+        P.CreateKernelCall<CharClassesKernel>(insertion_ccs, BasisBits, InsertBixNum);
         SHOW_BIXNUM(InsertBixNum);
 
-        StreamSet * AdjustedBixNum = P->CreateStreamSet(bix_bits);
-        P->CreateKernelCall<AdjustU8bixnum>(BasisBits, InsertBixNum, AdjustedBixNum);
+        StreamSet * AdjustedBixNum = P.CreateStreamSet(bix_bits);
+        P.CreateKernelCall<AdjustU8bixnum>(BasisBits, InsertBixNum, AdjustedBixNum);
         SHOW_BIXNUM(AdjustedBixNum);
 
         SpreadMask = InsertionSpreadMask(P, AdjustedBixNum, InsertPosition::Before);
         SHOW_STREAM(SpreadMask);
 
-        StreamSet * ExpandedBasis = P->CreateStreamSet(8, 1);
+        StreamSet * ExpandedBasis = P.CreateStreamSet(8, 1);
         SpreadByMask(P, SpreadMask, BasisBits, ExpandedBasis);
         SHOW_BIXNUM(ExpandedBasis);
         BasisBits = ExpandedBasis;
     }
 
-    StreamSet * U8_Positions = P->CreateStreamSet(3, 1);
-    P->CreateKernelCall<UTF8_BytePosition>(BasisBits, U8_Positions);
+    StreamSet * U8_Positions = P.CreateStreamSet(3, 1);
+    P.CreateKernelCall<UTF8_BytePosition>(BasisBits, U8_Positions);
     SHOW_BIXNUM(U8_Positions);
 
     StreamSet * SelectionMask = nullptr;
@@ -599,40 +597,40 @@ XfrmFunctionType generateUTF8_pipeline(CPUDriver & pxDriver,
             deletion_ccs.push_back(re::makeCC(b, &cc::Unicode));
         }
 
-        StreamSet * DeletionBixNum = P->CreateStreamSet(del_bix_bits);
-        P->CreateKernelCall<CharClassesKernel>(deletion_ccs, BasisBits, DeletionBixNum);
+        StreamSet * DeletionBixNum = P.CreateStreamSet(del_bix_bits);
+        P.CreateKernelCall<CharClassesKernel>(deletion_ccs, BasisBits, DeletionBixNum);
         SHOW_BIXNUM(DeletionBixNum);
 
-        SelectionMask = P->CreateStreamSet(1);
-        P->CreateKernelCall<CreateU8delMask>(BasisBits, DeletionBixNum, SelectionMask);
+        SelectionMask = P.CreateStreamSet(1);
+        P.CreateKernelCall<CreateU8delMask>(BasisBits, DeletionBixNum, SelectionMask);
         SHOW_STREAM(SelectionMask);
     }
-    StreamSet * TargetClass = P->CreateStreamSet(3, 1);
-    P->CreateKernelCall<UTF8_Target_Class>(U8_Positions, SpreadMask, SelectionMask, TargetClass);
+    StreamSet * TargetClass = P.CreateStreamSet(3, 1);
+    P.CreateKernelCall<UTF8_Target_Class>(U8_Positions, SpreadMask, SelectionMask, TargetClass);
     SHOW_BIXNUM(TargetClass);
 
     std::vector<re::CC *> xfrm_ccs;
     for (auto & b : tr) {
         xfrm_ccs.push_back(re::makeCC(b, &cc::Unicode));
     }
-    StreamSet * XfrmBasis = P->CreateStreamSet(xfrm_ccs.size());
-    P->CreateKernelCall<CharClassesKernel>(xfrm_ccs, BasisBits, XfrmBasis);
+    StreamSet * XfrmBasis = P.CreateStreamSet(xfrm_ccs.size());
+    P.CreateKernelCall<CharClassesKernel>(xfrm_ccs, BasisBits, XfrmBasis);
     SHOW_BIXNUM(XfrmBasis);
 
-    StreamSet * Translated = P->CreateStreamSet(8, 1);
-    P->CreateKernelCall<UTF8_CharacterTranslator>(BasisBits, XfrmBasis, TargetClass, SpreadMask, SelectionMask, Translated);
+    StreamSet * Translated = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<UTF8_CharacterTranslator>(BasisBits, XfrmBasis, TargetClass, SpreadMask, SelectionMask, Translated);
     SHOW_BIXNUM(Translated);
 
     if (del_bix_bits > 0) {
-        StreamSet * CompressedBasis = P->CreateStreamSet(8);
+        StreamSet * CompressedBasis = P.CreateStreamSet(8);
         FilterByMask(P, SelectionMask, Translated, CompressedBasis);
         SHOW_BIXNUM(CompressedBasis);
         Translated = CompressedBasis;
     }
-
-    P->CreateKernelCall<P2SKernel>(Translated, OutputBytes);
-    P->CreateKernelCall<StdOutKernel>(OutputBytes);
-    return reinterpret_cast<XfrmFunctionType>(P->compile());
+    StreamSet * OutputBytes =  P.getOutputStreamSet("OutputBytes");
+    P.CreateKernelCall<P2SKernel>(Translated, OutputBytes);
+    P.CreateKernelCall<StdOutKernel>(OutputBytes);
+    return P.compile();
 }
 
 int main(int argc, char *argv[]) {

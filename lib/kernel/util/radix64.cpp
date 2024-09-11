@@ -272,23 +272,23 @@ void base64Kernel::generateFinalBlockMethod(KernelBuilder & b, Value * remaining
     b.SetInsertPoint(fbExit);
 }
 
-expand3_4Kernel::expand3_4Kernel(KernelBuilder & b, StreamSet *input, StreamSet *expandedOutput)
-: MultiBlockKernel(b, "expand3_4",
+expand3_4Kernel::expand3_4Kernel(LLVMTypeSystemInterface & ts, StreamSet *input, StreamSet *expandedOutput)
+: MultiBlockKernel(ts, "expand3_4",
 {Binding{"sourceStream", input, FixedRate(3)}},
 {Binding{"expand34Stream", expandedOutput, FixedRate(4)}},
 {}, {}, {}) {
 
 }
 
-radix64Kernel::radix64Kernel(KernelBuilder & b, StreamSet * input, StreamSet * output)
-: BlockOrientedKernel(b, "radix64",
+radix64Kernel::radix64Kernel(LLVMTypeSystemInterface & ts, StreamSet * input, StreamSet * output)
+: BlockOrientedKernel(ts, "radix64",
             {Binding{"expandedStream", input}},
             {Binding{"radix64stream", output}},
             {}, {}, {}) {
 }
 
-base64Kernel::base64Kernel(KernelBuilder & b, StreamSet * input, StreamSet * output)
-: BlockOrientedKernel(b, "base64",
+base64Kernel::base64Kernel(LLVMTypeSystemInterface & ts, StreamSet * input, StreamSet * output)
+: BlockOrientedKernel(ts, "base64",
 {Binding{"radix64stream", input}},
 {Binding{"base64stream", output, FixedRate(1), RoundUpTo(4)}},
 {}, {}, {}) {

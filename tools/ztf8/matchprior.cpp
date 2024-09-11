@@ -5,7 +5,7 @@
 
 #include <boost/filesystem.hpp>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/core/streamset.h>
@@ -45,13 +45,13 @@ using namespace kernel;
 
 class MatchPriorKernel final: public pablo::PabloKernel {
 public:
-    MatchPriorKernel(KernelBuilder & b, StreamSet * const countable, Scalar * countResult);
+    MatchPriorKernel(LLVMTypeSystemInterface & ts, StreamSet * const countable, Scalar * countResult);
 protected:
     void generatePabloMethod() override;
 };
 
-MatchPriorKernel::MatchPriorKernel (KernelBuilder & b, StreamSet * const countable, Scalar * countResult)
-    : pablo::PabloKernel(b, "matchprior_" + std::to_string(priorDistance),
+MatchPriorKernel::MatchPriorKernel (LLVMTypeSystemInterface & ts, StreamSet * const countable, Scalar * countResult)
+    : pablo::PabloKernel(ts, "matchprior_" + std::to_string(priorDistance),
     {Binding{"countable", countable}},
     {},
     {},
@@ -75,18 +75,15 @@ void MatchPriorKernel::generatePabloMethod() {
 
 typedef uint64_t (*MatchPriorFunctionType)(uint32_t fd);
 
-MatchPriorFunctionType mpPipelineGen(CPUDriver & pxDriver) {
-    auto & b = pxDriver.getBuilder();
-    Type * const int32Ty = b.getInt32Ty();
-    auto P = pxDriver.makePipeline({Binding{int32Ty, "fd"}},
-                                   {Binding{b.getInt64Ty(), "countResult"}});
-    Scalar * const fileDescriptor = P->getInputScalar("fd");
-    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
-    StreamSet * BasisBits = P->CreateStreamSet(8, 1);
-    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
-    P->CreateKernelCall<MatchPriorKernel>(BasisBits, P->getOutputScalar("countResult"));
-    return reinterpret_cast<MatchPriorFunctionType>(P->compile());
+MatchPriorFunctionType mpPipelineGen(CPUDriver & driver) {
+    auto P = CreatePipeline(driver, Input<uint32_t>{"fd"}, Output<uint64_t>{"countResult"});
+    Scalar * const fileDescriptor = P.getInputScalar("fd");
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    StreamSet * BasisBits = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    P.CreateKernelCall<MatchPriorKernel>(BasisBits, P.getOutputScalar("countResult"));
+    return P.compile();
 }
 
 size_t file_size(const int fd) {
@@ -131,11 +128,11 @@ int main(int argc, char *argv[]) {
     if (argv::RecursiveFlag || argv::DereferenceRecursiveFlag) {
         argv::DirectoriesFlag = argv::Recurse;
     }
-    CPUDriver pxDriver("mp");
-    allFiles = argv::getFullFileList(pxDriver, inputFiles);
+    CPUDriver driver("mp");
+    allFiles = argv::getFullFileList(driver, inputFiles);
     const auto fileCount = allFiles.size();
 
-    auto matchPriorFunctionPtr = mpPipelineGen(pxDriver);
+    auto matchPriorFunctionPtr = mpPipelineGen(driver);
     for (unsigned i = 0; i < fileCount; ++i) {
         mp(matchPriorFunctionPtr, i);
     }

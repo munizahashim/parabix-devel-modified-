@@ -16,14 +16,14 @@
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <llvm/ADT/StringRef.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <fcntl.h>
 #include <boost/intrusive/detail/math.hpp>
 
 using boost::intrusive::detail::floor_log2;
-#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
-#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
-#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
 using namespace kernel;
 using namespace llvm;
@@ -35,7 +35,7 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 enum class PackOption {packh, packl};
 class PackKernel final : public MultiBlockKernel {
 public:
-    PackKernel(KernelBuilder & b,
+    PackKernel(LLVMTypeSystemInterface & ts,
               StreamSet * const i16Stream,
               StreamSet * const i8Stream,
               PackOption opt);
@@ -50,8 +50,8 @@ std::string packOptionString(PackOption opt) {
     return "packl";
 }
 
-PackKernel::PackKernel(KernelBuilder & b, StreamSet * const i16Stream, StreamSet * const i8Stream, PackOption opt)
-: MultiBlockKernel(b, packOptionString(opt) ,
+PackKernel::PackKernel(LLVMTypeSystemInterface & ts, StreamSet * const i16Stream, StreamSet * const i8Stream, PackOption opt)
+: MultiBlockKernel(ts, packOptionString(opt) ,
 {Binding{"i16Stream", i16Stream}},
     {Binding{"i8Stream", i8Stream}}, {}, {}, {}), mOption(opt)  {}
 
@@ -99,47 +99,46 @@ typedef void (*PackDemoFunctionType)(uint32_t fd);
 
 PackDemoFunctionType packdemo_gen (CPUDriver & driver) {
 
-    auto & b = driver.getBuilder();
-    auto P = driver.makePipeline({Binding{b.getInt32Ty(), "inputFileDecriptor"}}, {});
+    auto P = CreatePipeline(driver, Input<uint32_t>{"inputFileDecriptor"});
 
-    Scalar * fileDescriptor = P->getInputScalar("inputFileDecriptor");
+    Scalar * fileDescriptor = P.getInputScalar("inputFileDecriptor");
 
     // Source data
-    StreamSet * const i16Stream = P->CreateStreamSet(1, 16);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, i16Stream);
+    StreamSet * const i16Stream = P.CreateStreamSet(1, 16);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, i16Stream);
 
-    StreamSet * const packedStreamL = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<PackKernel>(i16Stream, packedStreamL, PackOption::packl);
+    StreamSet * const packedStreamL = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<PackKernel>(i16Stream, packedStreamL, PackOption::packl);
     SHOW_BYTES(packedStreamL);
 
-    StreamSet * const BasisBitsL = P->CreateStreamSet(8, 1);
-    P->CreateKernelCall<S2PKernel>(packedStreamL, BasisBitsL);
+    StreamSet * const BasisBitsL = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<S2PKernel>(packedStreamL, BasisBitsL);
     SHOW_BIXNUM(BasisBitsL);
 
-    StreamSet * const packedStreamH = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<PackKernel>(i16Stream, packedStreamH, PackOption::packh);
+    StreamSet * const packedStreamH = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<PackKernel>(i16Stream, packedStreamH, PackOption::packh);
     SHOW_BYTES(packedStreamH);
 
-    StreamSet * const BasisBitsH = P->CreateStreamSet(8, 1);
-    P->CreateKernelCall<S2PKernel>(packedStreamH, BasisBitsH);
+    StreamSet * const BasisBitsH = P.CreateStreamSet(8, 1);
+    P.CreateKernelCall<S2PKernel>(packedStreamH, BasisBitsH);
     SHOW_BIXNUM(BasisBitsH);
 
-    P->CreateKernelCall<StdOutKernel>(packedStreamH);
+    P.CreateKernelCall<StdOutKernel>(packedStreamH);
 
-    return reinterpret_cast<PackDemoFunctionType>(P->compile());
+    return P.compile();
 }
 
 
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&PackDemoOptions, codegen::codegen_flags()});
-    CPUDriver pxDriver("packdemo");
+    CPUDriver driver("packdemo");
     const int fd = open(inputFile.c_str(), O_RDONLY);
     if (LLVM_UNLIKELY(fd == -1)) {
         errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
         PackDemoFunctionType func = nullptr;
-        func = packdemo_gen(pxDriver);
+        func = packdemo_gen(driver);
         func(fd);
         close(fd);
     }

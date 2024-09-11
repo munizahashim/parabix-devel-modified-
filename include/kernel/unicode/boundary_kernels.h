@@ -19,7 +19,7 @@ namespace kernel {
     those at the prior index stream position.  */
 class BoundaryKernel : public pablo::PabloKernel {
 public:
-    BoundaryKernel(KernelBuilder & kb, StreamSet * PropertyBasis, StreamSet * IndexStream, StreamSet * BoundaryStream, bool invert = false);
+    BoundaryKernel(LLVMTypeSystemInterface & ts, StreamSet * PropertyBasis, StreamSet * IndexStream, StreamSet * BoundaryStream, bool invert = false);
 protected:
     void generatePabloMethod() override;
     bool mHasIndex;

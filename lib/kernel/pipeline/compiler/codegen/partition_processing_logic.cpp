@@ -75,7 +75,7 @@ void PipelineCompiler::makePartitionEntryPoints(KernelBuilder & b) {
             for (unsigned i = FirstComputePartitionId; i <= LastComputePartitionId; ++i) {
                 mPartitionStartTimePhi[i] = nullptr;
             }
-            for (unsigned i = LastComputePartitionId + 1; i < PartitionCount; ++i) {
+            for (unsigned i = LastComputePartitionId + 1; i < (PartitionCount - 1); ++i) {
                 mPartitionStartTimePhi[i] =
                     PHINode::Create(sizeTy, PartitionCount, std::to_string(i) + ".startTimeCycleCounter", mPartitionEntryPoint[i]);
             }

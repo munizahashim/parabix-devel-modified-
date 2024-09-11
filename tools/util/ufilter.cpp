@@ -14,7 +14,7 @@
 #include <re/unicode/resolve_properties.h>
 #include <re/cc/cc_kernel.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/basis/s2p_kernel.h>
 #include <kernel/io/source_kernel.h>
 #include <kernel/io/stdout_kernel.h>
@@ -55,55 +55,52 @@ static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), 
 
 static cl::opt<bool> UseDefaultFilter("default-filter", cl::desc("Use the default byte filter by mask via S2P-FilterByMaks-P2S"), cl::cat(ufFlags));
 
-#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P->captureBitstream(#name, name)
-#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P->captureBixNum(#name, name)
-#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P->captureByteData(#name, name)
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
 
 
-typedef uint64_t (*UFiltertFunctionType)(uint32_t fd);
+typedef void (*UFiltertFunctionType)(uint32_t fd);
 
-UFiltertFunctionType pipelineGen(CPUDriver & pxDriver, re::Name * CC_name) {
+UFiltertFunctionType pipelineGen(CPUDriver & driver, re::Name * CC_name) {
 
-    auto & b = pxDriver.getBuilder();
+    auto P = CreatePipeline(driver, Input<uint32_t>{"fileDescriptor"});
 
-    auto P = pxDriver.makePipeline(
-                {Binding{b.getInt32Ty(), "fileDescriptor"}});
-
-    Scalar * const fileDescriptor = P->getInputScalar("fileDescriptor");
+    Scalar * const fileDescriptor = P.getInputScalar("fileDescriptor");
 
     //  Create a stream set consisting of a single stream of 8-bit units (bytes).
-    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
     SHOW_BYTES(ByteStream);
 
     //  Read the file into the ByteStream.
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
     //  Create a set of 8 parallel streams of 1-bit units (bits).
-    StreamSet * BasisBits = P->CreateStreamSet(8, 1);
+    StreamSet * BasisBits = P.CreateStreamSet(8, 1);
     SHOW_BIXNUM(BasisBits);
 
     //  Transpose the ByteSteam into parallel bit stream form.
-    P->CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
 
     //  Create a character class bit stream.
-    StreamSet * CCmask = P->CreateStreamSet(1, 1);
+    StreamSet * CCmask = P.CreateStreamSet(1, 1);
 
     std::map<std::string, StreamSet *> propertyStreamMap;
     auto nameString = CC_name->getFullName();
     propertyStreamMap.emplace(nameString, CCmask);
-    P->CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(CC_name, BasisBits, CCmask);
+    P.CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(CC_name, BasisBits, CCmask);
     SHOW_STREAM(CCmask);
 
-    StreamSet * u8index = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<UTF8_index>(BasisBits, u8index);
+    StreamSet * u8index = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
     SHOW_STREAM(u8index);
 
-    StreamSet * CCspans = P->CreateStreamSet(1, 1);
-    P->CreateKernelCall<U8Spans>(CCmask, u8index, CCspans);
+    StreamSet * CCspans = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<U8Spans>(CCmask, u8index, CCspans);
     SHOW_STREAM(CCspans);
 
-    StreamSet * const FilteredBytes = P->CreateStreamSet(1, 8);
+    StreamSet * const FilteredBytes = P.CreateStreamSet(1, 8);
 
     if (UseDefaultFilter) {
         FilterByMask(P, CCspans, ByteStream, FilteredBytes, 0, 64, true);
@@ -113,23 +110,23 @@ UFiltertFunctionType pipelineGen(CPUDriver & pxDriver, re::Name * CC_name) {
     }
     SHOW_BYTES(FilteredBytes);
 
-    P->CreateKernelCall<StdOutKernel>(FilteredBytes);
+    P.CreateKernelCall<StdOutKernel>(FilteredBytes);
 
-    return reinterpret_cast<UFiltertFunctionType>(P->compile());
+    return P.compile();
 }
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&ufFlags, codegen::codegen_flags()});
-    CPUDriver pxDriver("ufilter");
+    CPUDriver driver("ufilter");
 
     UFiltertFunctionType fnPtr = nullptr;
     re::RE * CC_re = re::simplifyRE(re::RE_Parser::parse(CC_expr));
     CC_re = UCD::linkAndResolve(CC_re);
     CC_re = UCD::externalizeProperties(CC_re);
     if (re::Name * UCD_property_name = dyn_cast<re::Name>(CC_re)) {
-        fnPtr = pipelineGen(pxDriver, UCD_property_name);
+        fnPtr = pipelineGen(driver, UCD_property_name);
     } else if (re::CC * CC_ast = dyn_cast<re::CC>(CC_re)) {
-        fnPtr = pipelineGen(pxDriver, makeName(CC_ast));
+        fnPtr = pipelineGen(driver, makeName(CC_ast));
     } else {
         std::cerr << "Input expression must be a Unicode property or CC but found: " << CC_expr << " instead.\n";
         exit(1);

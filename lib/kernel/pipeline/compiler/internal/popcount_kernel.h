@@ -13,9 +13,9 @@ public:
 
     enum PopCountType { POSITIVE, NEGATIVE, BOTH };
 
-    explicit PopCountKernel(KernelBuilder & b, const PopCountType type, const unsigned stepFactor, StreamSet * input, StreamSet * const output);
+    explicit PopCountKernel(LLVMTypeSystemInterface & ts, const PopCountType type, const unsigned stepFactor, StreamSet * input, StreamSet * const output);
 
-    explicit PopCountKernel(KernelBuilder & b, const PopCountType type, const unsigned stepFactor, StreamSet * input, StreamSet * const positive, StreamSet * negative);
+    explicit PopCountKernel(LLVMTypeSystemInterface & ts, const PopCountType type, const unsigned stepFactor, StreamSet * input, StreamSet * const positive, StreamSet * negative);
 
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final;
 

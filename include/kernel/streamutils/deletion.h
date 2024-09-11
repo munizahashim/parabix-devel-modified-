@@ -29,7 +29,7 @@ namespace kernel {
 
 */
     
-void FilterByMask(const std::unique_ptr<ProgramBuilder> & P,
+void FilterByMask(PipelineBuilder & P,
                   StreamSet * mask, StreamSet * inputs, StreamSet * outputs,
                   unsigned streamOffset = 0,
                   unsigned extractionFieldWidth = 64,
@@ -47,7 +47,7 @@ void FilterByMask(const std::unique_ptr<ProgramBuilder> & P,
 //
 class DeletionKernel final : public BlockOrientedKernel {
 public:
-    DeletionKernel(KernelBuilder & b, StreamSet * input, StreamSet * delMask, StreamSet * output, StreamSet * unitCounts);
+    DeletionKernel(LLVMTypeSystemInterface & ts, StreamSet * input, StreamSet * delMask, StreamSet * output, StreamSet * unitCounts);
 protected:
     void generateDoBlockMethod(KernelBuilder & b) override;
     void generateFinalBlockMethod(KernelBuilder & b, llvm::Value * remainingBytes) override;
@@ -59,7 +59,7 @@ private:
 // Compress within fields of size fieldWidth.
 class FieldCompressKernel final : public MultiBlockKernel {
 public:
-    FieldCompressKernel(KernelBuilder & b,
+    FieldCompressKernel(LLVMTypeSystemInterface & ts,
                         SelectOperation const & maskOp, SelectOperationList const & inputOps, StreamSet * outputStreamSet,
                         unsigned fieldWidth = 64);
 protected:
@@ -73,7 +73,7 @@ private:
 
 class PEXTFieldCompressKernel final : public MultiBlockKernel {
 public:
-    PEXTFieldCompressKernel(KernelBuilder & b, unsigned fw, unsigned streamCount);
+    PEXTFieldCompressKernel(LLVMTypeSystemInterface & ts, unsigned fw, unsigned streamCount);
 protected:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 private:
@@ -86,7 +86,7 @@ private:
 //  compressed streams.
 class StreamCompressKernel final : public MultiBlockKernel {
 public:
-    StreamCompressKernel(KernelBuilder & b
+    StreamCompressKernel(LLVMTypeSystemInterface & ts
                          , StreamSet * extractionMask
                          , StreamSet * source
                          , StreamSet * compressedOutput
@@ -105,7 +105,7 @@ Output: swizzles containing the input bitstreams with the specified bits deleted
 class SwizzledDeleteByPEXTkernel final : public MultiBlockKernel {
 public:
     using SwizzleSets = std::vector<std::vector<llvm::Value *>>;
-    SwizzledDeleteByPEXTkernel(KernelBuilder & b
+    SwizzledDeleteByPEXTkernel(LLVMTypeSystemInterface & ts
                                , StreamSet * selectors, StreamSet * inputStreamSet
                                , const std::vector<StreamSet *> & outputs
                                , unsigned PEXTWidth = sizeof(size_t) * 8);
@@ -122,7 +122,7 @@ private:
 
 class DeleteByPEXTkernel final : public BlockOrientedKernel {
 public:
-    DeleteByPEXTkernel(KernelBuilder & b, unsigned fw, unsigned streamCount, unsigned PEXT_width = sizeof(size_t) * 8);
+    DeleteByPEXTkernel(LLVMTypeSystemInterface & ts, unsigned fw, unsigned streamCount, unsigned PEXT_width = sizeof(size_t) * 8);
 protected:
     void generateDoBlockMethod(KernelBuilder & b) override;
     void generateFinalBlockMethod(KernelBuilder & b, llvm::Value * remainingBytes) override;
@@ -136,7 +136,7 @@ private:
 
 class SwizzledBitstreamCompressByCount final : public BlockOrientedKernel {
 public:
-    SwizzledBitstreamCompressByCount(KernelBuilder & b, unsigned bitStreamCount, unsigned fieldWidth = sizeof(size_t) * 8);
+    SwizzledBitstreamCompressByCount(LLVMTypeSystemInterface & ts, unsigned bitStreamCount, unsigned fieldWidth = sizeof(size_t) * 8);
 protected:
     void generateDoBlockMethod(KernelBuilder & b) override;
     void generateFinalBlockMethod(KernelBuilder & b, llvm::Value * remainingBytes) override;
@@ -150,7 +150,7 @@ private:
 // Compress within fields of size fieldWidth.
 class FilterByMaskKernel final : public MultiBlockKernel {
 public:
-    FilterByMaskKernel(KernelBuilder & b,
+    FilterByMaskKernel(LLVMTypeSystemInterface & ts,
                         SelectOperation const & maskOp, SelectOperationList const & inputOps, StreamSet * outputStreamSet,
                         unsigned fieldWidth = 64,
                         ProcessingRateProbabilityDistribution insertionProbabilityDistribution = MaximumDistribution());

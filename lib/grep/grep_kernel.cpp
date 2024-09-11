@@ -130,7 +130,7 @@ bool ExternalStreamTable::hasReferenceTo(StreamIndexCode c, std::string ssname) 
     return false;
 }
 
-StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, StreamIndexCode c, std::string ssname) {
+StreamSet * ExternalStreamTable::getStreamSet(PipelineBuilder & b, StreamIndexCode c, std::string ssname) {
     const auto & ext = lookup(c, ssname);
     if (!ext->isResolved()) {
         auto paramNames = ext->getParameters();
@@ -168,16 +168,16 @@ StreamSet * ExternalStreamTable::getStreamSet(ProgBuilderRef b, StreamIndexCode 
             mExternalMap[base].emplace(ssname, ext);
             StreamSet * baseSet = getStreamSet(b, base, ssname);
             StreamSet * mask = getStreamSet(b, base, mStreamIndices[c].indexStreamName);
-            StreamSet * filtered = b->CreateStreamSet(baseSet->getNumElements());
+            StreamSet * filtered = b.CreateStreamSet(baseSet->getNumElements());
             FilterByMask(b, mask, baseSet, filtered);
             ext->installStreamSet(filtered);
         }
         StreamSet * s = ext->getStreamSet();
         if (codegen::EnableIllustrator) {
             if (s->getNumElements() == 1) {
-                b->captureBitstream(mStreamIndices[c].name + "_" + ssname, s);
+                b.captureBitstream(mStreamIndices[c].name + "_" + ssname, s);
             } else {
-                b->captureBixNum(mStreamIndices[c].name + "_" + ssname, s);
+                b.captureBixNum(mStreamIndices[c].name + "_" + ssname, s);
             }
         }
     }
@@ -192,7 +192,7 @@ void ExternalStreamTable::resetExternals() {
     }
 }
 
-void ExternalStreamTable::resolveExternals(ProgBuilderRef b) {
+void ExternalStreamTable::resolveExternals(PipelineBuilder & b) {
     for (unsigned i = 0; i < mExternalMap.size(); i++) {
         for (auto & entry : mExternalMap[i]) {
             if (!entry.second->isResolved()) {
@@ -219,27 +219,27 @@ const std::vector<std::string> LineStartsExternal::getParameters() {
     return mParms;
 }
 
-void LineStartsExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+void LineStartsExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
     StreamSet * linebreaks = inputs[0];
-    StreamSet * linestarts  = b->CreateStreamSet(1);
+    StreamSet * linestarts  = b.CreateStreamSet(1);
     if (mParms.size() == 1) {
-        b->CreateKernelCall<LineStartsKernel>(linebreaks, linestarts);
+        b.CreateKernelCall<LineStartsKernel>(linebreaks, linestarts);
     } else {
         StreamSet * index = inputs[1];
-        b->CreateKernelCall<LineStartsKernel>(linebreaks, linestarts, index);
+        b.CreateKernelCall<LineStartsKernel>(linebreaks, linestarts, index);
     }
     installStreamSet(linestarts);
 }
 
-void U21_External::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSet *> inputs) {
-    StreamSet * U21 = P->CreateStreamSet(21, 1);
-    P->CreateKernelCall<UTF8_Decoder>(inputs[0], U21);
+void U21_External::resolveStreamSet(PipelineBuilder & P, std::vector<StreamSet *> inputs) {
+    StreamSet * U21 = P.CreateStreamSet(21, 1);
+    P.CreateKernelCall<UTF8_Decoder>(inputs[0], U21);
     installStreamSet(U21);
 }
 
-void PropertyExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    StreamSet * pStrm  = b->CreateStreamSet(1);
-    b->CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(mName, inputs[0], pStrm);
+void PropertyExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
+    StreamSet * pStrm  = b.CreateStreamSet(1);
+    b.CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(mName, inputs[0], pStrm);
     installStreamSet(pStrm);
 }
 
@@ -248,23 +248,23 @@ const std::vector<std::string> PropertyBoundaryExternal::getParameters() {
     return std::vector<std::string>{basis_name, "u8index"};
 }
 
-void PropertyBoundaryExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+void PropertyBoundaryExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
     StreamSet * basis = inputs[0];
     StreamSet * index = inputs[1];
-    StreamSet * bStrm  = b->CreateStreamSet(1);
-    b->CreateKernelCall<BoundaryKernel>(basis, index, bStrm);
+    StreamSet * bStrm  = b.CreateStreamSet(1);
+    b.CreateKernelCall<BoundaryKernel>(basis, index, bStrm);
     installStreamSet(bStrm);
 }
 
-void CC_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    StreamSet * ccStrm = b->CreateStreamSet(1);
+void CC_External::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
+    StreamSet * ccStrm = b.CreateStreamSet(1);
     std::vector<re::CC *> ccs = {mCharClass};
-    b->CreateKernelFamilyCall<CharClassesKernel>(ccs, inputs[0], ccStrm);
+    b.CreateKernelFamilyCall<CharClassesKernel>(ccs, inputs[0], ccStrm);
     installStreamSet(ccStrm);
 }
 
-void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    StreamSet * reStrm  = b->CreateStreamSet(1);
+void RE_External::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
+    StreamSet * reStrm  = b.CreateStreamSet(1);
     #ifndef NDEBUG
     const auto offset =
     #endif
@@ -273,14 +273,14 @@ void RE_External::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> in
     installStreamSet(reStrm);
 }
 
-void PropertyDistanceExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+void PropertyDistanceExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
     StreamSet * propertyBasis = inputs[0];
-    StreamSet * distStrm = b->CreateStreamSet(1);
+    StreamSet * distStrm = b.CreateStreamSet(1);
     UCD::PropertyObject * propObj = UCD::getPropertyObject(mProperty);
     if (isa<UCD::CodePointPropertyObject>(propObj)) {
-        b->CreateKernelCall<CodePointMatchKernel>(mProperty, mDistance, propertyBasis, distStrm);
+        b.CreateKernelCall<CodePointMatchKernel>(mProperty, mDistance, propertyBasis, distStrm);
     } else {
-        b->CreateKernelCall<FixedDistanceMatchesKernel>(mDistance, propertyBasis, distStrm);
+        b.CreateKernelCall<FixedDistanceMatchesKernel>(mDistance, propertyBasis, distStrm);
     }
     installStreamSet(distStrm);
 }
@@ -293,26 +293,26 @@ const std::vector<std::string> PropertyDistanceExternal::getParameters() {
     return {"basis"};
 }
 
-void PropertyBasisExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+void PropertyBasisExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
     UCD::PropertyObject * propObj = UCD::getPropertyObject(mProperty);
     if (auto * obj = dyn_cast<UCD::EnumeratedPropertyObject>(propObj)) {
         std::vector<UCD::UnicodeSet> & bases = obj->GetEnumerationBasisSets();
         UTF::CC_List ccs;
         for (auto & b : bases) ccs.push_back(makeCC(b, &cc::Unicode));
-        StreamSet * basis = b->CreateStreamSet(ccs.size());
-        b->CreateKernelFamilyCall<CharClassesKernel>(ccs, inputs[0], basis);
+        StreamSet * basis = b.CreateStreamSet(ccs.size());
+        b.CreateKernelFamilyCall<CharClassesKernel>(ccs, inputs[0], basis);
         installStreamSet(basis);
     } else {
-        StreamSet * u21 = b->CreateStreamSet(21);
-        b->CreateKernelCall<UTF8_Decoder>(inputs[0], u21);
+        StreamSet * u21 = b.CreateStreamSet(21);
+        b.CreateKernelCall<UTF8_Decoder>(inputs[0], u21);
         installStreamSet(u21);
     }
 }
 
-void MultiplexedExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+void MultiplexedExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
     auto mpx_basis = mAlphabet->getMultiplexedCCs();
-    StreamSet * const u8CharClasses = b->CreateStreamSet(mpx_basis.size());
-    b->CreateKernelFamilyCall<CharClassesKernel>(mpx_basis, inputs[0], u8CharClasses);
+    StreamSet * const u8CharClasses = b.CreateStreamSet(mpx_basis.size());
+    b.CreateKernelFamilyCall<CharClassesKernel>(mpx_basis, inputs[0], u8CharClasses);
     installStreamSet(u8CharClasses);
 }
 
@@ -320,8 +320,8 @@ const std::vector<std::string> GraphemeClusterBreak::getParameters() {
     return std::vector<std::string>{"UCD:" + getPropertyFullName(UCD::GCB) + "_basis", "Extended_Pictographic"};
 }
 
-void GraphemeClusterBreak::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    StreamSet * GCBstream = b->CreateStreamSet(1);
+void GraphemeClusterBreak::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
+    StreamSet * GCBstream = b.CreateStreamSet(1);
     re::RE * GCB_RE = re::generateGraphemeClusterBoundaryRule();
     GCB_RE = UCD::enumeratedPropertiesToCCs(std::set<UCD::property_t>{UCD::GCB}, GCB_RE);
     GCB_RE = UCD::externalizeProperties(GCB_RE);
@@ -335,16 +335,16 @@ const std::vector<std::string> WordBoundaryExternal::getParameters() {
     return std::vector<std::string>{"basis", "u8index"};
 }
 
-void WordBoundaryExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
-    StreamSet * wb = b->CreateStreamSet(1);
+void WordBoundaryExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
+    StreamSet * wb = b.CreateStreamSet(1);
     WordBoundaryLogic(b, inputs[0], inputs[1], wb);
     installStreamSet(wb);
 }
 
-void FilterByMaskExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+void FilterByMaskExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
     StreamSet * mask = inputs[0];
     StreamSet * toFilter = inputs[1];
-    StreamSet * filtered = b->CreateStreamSet(toFilter->getNumElements());
+    StreamSet * filtered = b.CreateStreamSet(toFilter->getNumElements());
     FilterByMask(b, mask, toFilter, filtered);
     installStreamSet(filtered);
 }
@@ -353,10 +353,10 @@ const std::vector<std::string> FixedSpanExternal::getParameters() {
     return std::vector<std::string>{mMatchMarks};
 }
 
-void FixedSpanExternal::resolveStreamSet(ProgBuilderRef b, std::vector<StreamSet *> inputs) {
+void FixedSpanExternal::resolveStreamSet(PipelineBuilder & b, std::vector<StreamSet *> inputs) {
     StreamSet * matchMarks = inputs[0];
-    StreamSet * spans = b->CreateStreamSet(1, 1);
-    b->CreateKernelFamilyCall<FixedMatchSpansKernel>(mLengthRange.first, mOffset, matchMarks, spans);
+    StreamSet * spans = b.CreateStreamSet(1, 1);
+    b.CreateKernelFamilyCall<FixedMatchSpansKernel>(mLengthRange.first, mOffset, matchMarks, spans);
     installStreamSet(spans);
 }
 
@@ -364,19 +364,19 @@ const std::vector<std::string> MarkedSpanExternal::getParameters() {
     return std::vector<std::string>{mPrefixMarks, mMatchMarks};
 }
 
-void MarkedSpanExternal::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSet *> inputs) {
+void MarkedSpanExternal::resolveStreamSet(PipelineBuilder & P, std::vector<StreamSet *> inputs) {
     //StreamSet * prefixMarks = inputs[0];
     StreamSet * suffixMarks = inputs[1];
-    StreamSet * mask = P->CreateStreamSet(1);
-    P->CreateKernelCall<StreamsMerge>(inputs, mask);
-    StreamSet * filteredSuffix = P->CreateStreamSet(1);
+    StreamSet * mask = P.CreateStreamSet(1);
+    P.CreateKernelCall<StreamsMerge>(inputs, mask);
+    StreamSet * filteredSuffix = P.CreateStreamSet(1);
     FilterByMask(P, mask, suffixMarks, filteredSuffix);
-    StreamSet * filteredSpanMarks = P->CreateStreamSet(2);
-    P->CreateKernelCall<LongestMatchMarks>(filteredSuffix, filteredSpanMarks);
-    StreamSet * spanMarks = P->CreateStreamSet(2);
+    StreamSet * filteredSpanMarks = P.CreateStreamSet(2);
+    P.CreateKernelCall<LongestMatchMarks>(filteredSuffix, filteredSpanMarks);
+    StreamSet * spanMarks = P.CreateStreamSet(2);
     SpreadByMask(P, mask, filteredSpanMarks, spanMarks);
-    StreamSet * spans = P->CreateStreamSet(1);
-    P->CreateKernelCall<InclusiveSpans>(mPrefixLength - 1, mOffset, spanMarks, spans);
+    StreamSet * spans = P.CreateStreamSet(1);
+    P.CreateKernelCall<InclusiveSpans>(mPrefixLength - 1, mOffset, spanMarks, spans);
     installStreamSet(spans);
 }
 
@@ -385,14 +385,14 @@ const std::vector<std::string> CCmask::getParameters() {
     return std::vector<std::string>{"basis"};
 }
 
-void CCmask::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSet *> inputs) {
+void CCmask::resolveStreamSet(PipelineBuilder & P, std::vector<StreamSet *> inputs) {
     StreamSet * basis = inputs[0];
-    StreamSet * mask = P->CreateStreamSet(1);
+    StreamSet * mask = P.CreateStreamSet(1);
     StreamSet * index = nullptr;
     if (mIndexAlphabet != &cc::Unicode) {
         //index = inputs[1];
     }
-    P->CreateKernelCall<MaskCC>(mCC_to_mask, basis, mask, index);
+    P.CreateKernelCall<MaskCC>(mCC_to_mask, basis, mask, index);
     installStreamSet(mask);
 }
 
@@ -400,11 +400,11 @@ const std::vector<std::string> CCselfTransitionMask::getParameters() {
     return std::vector<std::string>{"basis", "index"};
 }
 
-void CCselfTransitionMask::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSet *> inputs) {
+void CCselfTransitionMask::resolveStreamSet(PipelineBuilder & P, std::vector<StreamSet *> inputs) {
     StreamSet * basis = inputs[0];
     StreamSet * index = inputs[1];
-    StreamSet * mask = P->CreateStreamSet(1);
-    P->CreateKernelCall<MaskSelfTransitions>(mTransitionCCs, basis, mask, index);
+    StreamSet * mask = P.CreateStreamSet(1);
+    P.CreateKernelCall<MaskSelfTransitions>(mTransitionCCs, basis, mask, index);
     installStreamSet(mask);
 }
 
@@ -412,17 +412,17 @@ const std::vector<std::string> MaskedFixedSpanExternal::getParameters() {
     return std::vector<std::string>{mMask, mMatches};
 }
 
-void MaskedFixedSpanExternal::resolveStreamSet(ProgBuilderRef P, std::vector<StreamSet *> inputs) {
+void MaskedFixedSpanExternal::resolveStreamSet(PipelineBuilder & P, std::vector<StreamSet *> inputs) {
     StreamSet * positions_mask = inputs[0];
     StreamSet * matches = inputs[1];
-    StreamSet * filteredMatches = P->CreateStreamSet(1);
+    StreamSet * filteredMatches = P.CreateStreamSet(1);
     FilterByMask(P, positions_mask, matches, filteredMatches);
-    StreamSet * filteredMatchStarts = P->CreateStreamSet(1);
-    P->CreateKernelCall<ShiftBack>(filteredMatches, filteredMatchStarts, mLengthRange.first);
-    StreamSet * matchStarts = P->CreateStreamSet(1);
+    StreamSet * filteredMatchStarts = P.CreateStreamSet(1);
+    P.CreateKernelCall<ShiftBack>(filteredMatches, filteredMatchStarts, mLengthRange.first);
+    StreamSet * matchStarts = P.CreateStreamSet(1);
     SpreadByMask(P, positions_mask, filteredMatchStarts, matchStarts);
-    StreamSet * spans = P->CreateStreamSet(1);
-    P->CreateKernelCall<InclusiveSpans>(0, mOffset, streamutils::Select(P, std::vector<StreamSet *>{matchStarts, matches}), spans);
+    StreamSet * spans = P.CreateStreamSet(1);
+    P.CreateKernelCall<InclusiveSpans>(0, mOffset, streamutils::Select(P, std::vector<StreamSet *>{matchStarts, matches}), spans);
     installStreamSet(spans);
 }
 
@@ -518,8 +518,8 @@ void UTF8_index::generatePabloMethod() {
     pb.createAssign(pb.createExtract(u8index, pb.getInteger(0)), u8final);
 }
 
-UTF8_index::UTF8_index(KernelBuilder & kb, StreamSet * Source, StreamSet * u8index, StreamSet * u8_LB)
-: PabloKernel(kb, [&]() -> std::string {
+UTF8_index::UTF8_index(LLVMTypeSystemInterface & ts, StreamSet * Source, StreamSet * u8index, StreamSet * u8_LB)
+: PabloKernel(ts, [&]() -> std::string {
     std::stringstream s;
     s << "UTF8_index_";
     s << Source->getNumElements() << "x" << Source->getFieldWidth();
@@ -638,8 +638,8 @@ std::string GrepKernelOptions::makeSignature() {
     return mSignature;
 }
 
-ICGrepKernel::ICGrepKernel(KernelBuilder & b, std::unique_ptr<GrepKernelOptions> && options)
-: PabloKernel(b, AnnotateWithREflags("ic") + getStringHash(options->makeSignature()),
+ICGrepKernel::ICGrepKernel(LLVMTypeSystemInterface & ts, std::unique_ptr<GrepKernelOptions> && options)
+: PabloKernel(ts, AnnotateWithREflags("ic") + getStringHash(options->makeSignature()),
 options->streamSetInputBindings(),
 options->streamSetOutputBindings(),
 options->scalarInputBindings(),
@@ -714,8 +714,8 @@ void MatchedLinesKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(matchedLines, pb.getInteger(0)), pb.createAnd(match_follow, lineBreaks, "matchedLines"));
 }
 
-MatchedLinesKernel::MatchedLinesKernel (KernelBuilder & b, StreamSet * Matches, StreamSet * LineBreakStream, StreamSet * MatchedLines)
-: PabloKernel(b, "MatchedLines" + std::to_string(Matches->getNumElements()),
+MatchedLinesKernel::MatchedLinesKernel (LLVMTypeSystemInterface & ts, StreamSet * Matches, StreamSet * LineBreakStream, StreamSet * MatchedLines)
+: PabloKernel(ts, "MatchedLines" + std::to_string(Matches->getNumElements()),
 // inputs
 {Binding{"matchResults", Matches}
 ,Binding{"lineBreaks", LineBreakStream, FixedRate()}},
@@ -731,8 +731,8 @@ void InvertMatchesKernel::generateDoBlockMethod(KernelBuilder & b) {
     b.storeOutputStreamBlock("nonMatches", b.getInt32(0), inverted);
 }
 
-InvertMatchesKernel::InvertMatchesKernel(KernelBuilder & b, StreamSet * Matches, StreamSet * LineBreakStream, StreamSet * InvertedMatches)
-: BlockOrientedKernel(b, "Invert" + std::to_string(Matches->getNumElements()),
+InvertMatchesKernel::InvertMatchesKernel(LLVMTypeSystemInterface & ts, StreamSet * Matches, StreamSet * LineBreakStream, StreamSet * InvertedMatches)
+: BlockOrientedKernel(ts, "Invert" + std::to_string(Matches->getNumElements()),
 // Inputs
 {Binding{"matchedLines", Matches},
  Binding{"lineBreaks", LineBreakStream}},
@@ -743,8 +743,8 @@ InvertMatchesKernel::InvertMatchesKernel(KernelBuilder & b, StreamSet * Matches,
 
 }
 
-FixedMatchSpansKernel::FixedMatchSpansKernel(KernelBuilder & b, unsigned length, unsigned offset, StreamSet * MatchMarks, StreamSet * MatchSpans)
-: PabloKernel(b, "FixedMatchSpansKernel" + std::to_string(MatchMarks->getNumElements()) + "x1_by" + std::to_string(length) + '@' + std::to_string(offset),
+FixedMatchSpansKernel::FixedMatchSpansKernel(LLVMTypeSystemInterface & ts, unsigned length, unsigned offset, StreamSet * MatchMarks, StreamSet * MatchSpans)
+: PabloKernel(ts, "FixedMatchSpansKernel" + std::to_string(MatchMarks->getNumElements()) + "x1_by" + std::to_string(length) + '@' + std::to_string(offset),
 {Binding{"MatchMarks", MatchMarks, FixedRate(1), LookAhead(round_up_to_blocksize(length))}}, {Binding{"MatchSpans", MatchSpans}}),
 mMatchLength(length), mOffset(offset) {
 }
@@ -772,8 +772,8 @@ void FixedMatchSpansKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(matchSpansVar, 0), consecutive);
 }
 
-SpansToMarksKernel::SpansToMarksKernel(KernelBuilder & b, StreamSet * Spans, StreamSet * Marks)
-: PabloKernel(b, "SpansToMarksKernel",
+SpansToMarksKernel::SpansToMarksKernel(LLVMTypeSystemInterface & ts, StreamSet * Spans, StreamSet * Marks)
+: PabloKernel(ts, "SpansToMarksKernel",
 {Binding{"Spans", Spans}}, {Binding{"Marks", Marks}}) {}
 
 void SpansToMarksKernel::generatePabloMethod() {
@@ -786,8 +786,8 @@ void SpansToMarksKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(matchEndsVar, 1), follows);
 }
 
-U8Spans::U8Spans(KernelBuilder & b, StreamSet * marks, StreamSet * u8index, StreamSet * spans, pablo::BitMovementMode m)
-: PabloKernel(b, "U8Spans_" + pablo::BitMovementMode_string(m), {}, {Binding{"spans", spans}}),
+U8Spans::U8Spans(LLVMTypeSystemInterface & ts, StreamSet * marks, StreamSet * u8index, StreamSet * spans, pablo::BitMovementMode m)
+: PabloKernel(ts, "U8Spans_" + pablo::BitMovementMode_string(m), {}, {Binding{"spans", spans}}),
     mBitMovement(m) {
         if (m == pablo::BitMovementMode::LookAhead) {
             mInputStreamSets.push_back(Binding{"marks", marks, FixedRate(1), LookAhead(3)});
@@ -826,8 +826,8 @@ void PopcountKernel::generatePabloMethod() {
     pb->createAssign(countResult, newCount);
 }
 
-PopcountKernel::PopcountKernel (KernelBuilder & b, StreamSet * const toCount, Scalar * countResult)
-: PabloKernel(b, "Popcount",
+PopcountKernel::PopcountKernel (LLVMTypeSystemInterface & ts, StreamSet * const toCount, Scalar * countResult)
+: PabloKernel(ts, "Popcount",
 {Binding{"toCount", toCount}},
 {},
 {},
@@ -861,8 +861,8 @@ void FixedDistanceMatchesKernel::generatePabloMethod() {
     pb.createAssign(pb.createExtract(MatchVar, pb.getInteger(0)), pb.createNot(mismatch, "matches"));
 }
 
-FixedDistanceMatchesKernel::FixedDistanceMatchesKernel (KernelBuilder & b, unsigned distance, StreamSet * Basis, StreamSet * Matches, StreamSet * ToCheck)
-: PabloKernel(b, "Distance_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1" + (ToCheck == nullptr ? "" : "_withCheck"),
+FixedDistanceMatchesKernel::FixedDistanceMatchesKernel (LLVMTypeSystemInterface & ts, unsigned distance, StreamSet * Basis, StreamSet * Matches, StreamSet * ToCheck)
+: PabloKernel(ts, "Distance_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1" + (ToCheck == nullptr ? "" : "_withCheck"),
 // inputs
 {Binding{"Basis", Basis}},
 // output
@@ -920,8 +920,8 @@ void CodePointMatchKernel::generatePabloMethod() {
     }
 }
 
-CodePointMatchKernel::CodePointMatchKernel (KernelBuilder & b, UCD::property_t prop, unsigned distance, StreamSet * Basis, StreamSet * Matches)
-: PabloKernel(b, getPropertyEnumName(prop) + "_dist_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1" + UTF::kernelAnnotation(),
+CodePointMatchKernel::CodePointMatchKernel (LLVMTypeSystemInterface & ts, UCD::property_t prop, unsigned distance, StreamSet * Basis, StreamSet * Matches)
+: PabloKernel(ts, getPropertyEnumName(prop) + "_dist_" + std::to_string(distance) + "_Matches_" + std::to_string(Basis->getNumElements()) + "x1" + UTF::kernelAnnotation(),
 // inputs
 {Binding{"Basis", Basis}},
 // output
@@ -1031,8 +1031,8 @@ void AbortOnNull::generateMultiBlockLogic(KernelBuilder & b, Value * const numOf
     b.setProducedItemCount("untilNull", producedCount);
 }
 
-AbortOnNull::AbortOnNull(KernelBuilder & b, StreamSet * const InputStream, StreamSet * const OutputStream, Scalar * callbackObject)
-: MultiBlockKernel(b, "AbortOnNull",
+AbortOnNull::AbortOnNull(LLVMTypeSystemInterface & ts, StreamSet * const InputStream, StreamSet * const OutputStream, Scalar * callbackObject)
+: MultiBlockKernel(ts, "AbortOnNull",
 // inputs
 {Binding{"byteData", InputStream, FixedRate(), Principal()}},
 // outputs
@@ -1044,8 +1044,8 @@ AbortOnNull::AbortOnNull(KernelBuilder & b, StreamSet * const InputStream, Strea
     addAttribute(MayFatallyTerminate());
 }
 
-ContextSpan::ContextSpan(KernelBuilder & b, StreamSet * const markerStream, StreamSet * const contextStream, unsigned before, unsigned after)
-: PabloKernel(b, "ContextSpan-" + std::to_string(before) + "+" + std::to_string(after),
+ContextSpan::ContextSpan(LLVMTypeSystemInterface & ts, StreamSet * const markerStream, StreamSet * const contextStream, unsigned before, unsigned after)
+: PabloKernel(ts, "ContextSpan-" + std::to_string(before) + "+" + std::to_string(after),
               // input
 {Binding{"markerStream", markerStream, FixedRate(1), LookAhead(before)}},
               // output
@@ -1074,39 +1074,35 @@ void ContextSpan::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("contextStream"), pb.getInteger(0)), pb.createInFile(consecutive));
 }
 
-void kernel::GraphemeClusterLogic(ProgBuilderRef P,
-                                  StreamSet * Source, StreamSet * U8index, StreamSet * GCBstream) {
-
+void kernel::GraphemeClusterLogic(PipelineBuilder & P, StreamSet * Source, StreamSet * U8index, StreamSet * GCBstream) {
     re::RE * GCB = re::generateGraphemeClusterBoundaryRule();
     const auto GCB_Sets = re::collectCCs(GCB, cc::Unicode, re::NameProcessingMode::ProcessDefinition);
     auto GCB_mpx = cc::makeMultiplexedAlphabet("GCB_mpx", GCB_Sets);
     GCB = transformCCs(GCB_mpx, GCB, re::NameTransformationMode::TransformDefinition);
     auto GCB_basis = GCB_mpx->getMultiplexedCCs();
-    StreamSet * const GCB_Classes = P->CreateStreamSet(GCB_basis.size());
-    P->CreateKernelFamilyCall<CharClassesKernel>(GCB_basis, Source, GCB_Classes);
+    StreamSet * const GCB_Classes = P.CreateStreamSet(GCB_basis.size());
+    P.CreateKernelFamilyCall<CharClassesKernel>(GCB_basis, Source, GCB_Classes);
     std::unique_ptr<GrepKernelOptions> options = std::make_unique<GrepKernelOptions>();
     options->setIndexing(U8index);
     options->setRE(GCB);
     options->addAlphabet(GCB_mpx, GCB_Classes);
     options->setResults(GCBstream);
     options->addExternal("UTF8_index", U8index);
-    P->CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
+    P.CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
 }
 
-void kernel::WordBoundaryLogic(ProgBuilderRef P,
-                                  StreamSet * Source, StreamSet * U8index, StreamSet * wordBoundary_stream) {
-
+void kernel::WordBoundaryLogic(PipelineBuilder & P, StreamSet * Source, StreamSet * U8index, StreamSet * wordBoundary_stream) {
     re::RE * wordProp = re::makePropertyExpression(PropertyExpression::Kind::Codepoint, "word");
     wordProp = UCD::linkAndResolve(wordProp);
     re::Name * word = re::makeName("word");
     word->setDefinition(wordProp);
-    StreamSet * WordStream = P->CreateStreamSet(1);
-    P->CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(word, Source, WordStream);
-    P->CreateKernelCall<BoundaryKernel>(WordStream, U8index, wordBoundary_stream);
+    StreamSet * WordStream = P.CreateStreamSet(1);
+    P.CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(word, Source, WordStream);
+    P.CreateKernelCall<BoundaryKernel>(WordStream, U8index, wordBoundary_stream);
 }
 
-LongestMatchMarks::LongestMatchMarks(KernelBuilder & b, StreamSet * start_ends, StreamSet * marks)
-: PabloKernel(b, "LongestMatchMarks"  + std::to_string(marks->getNumElements()) + "x1",
+LongestMatchMarks::LongestMatchMarks(LLVMTypeSystemInterface & ts, StreamSet * start_ends, StreamSet * marks)
+: PabloKernel(ts, "LongestMatchMarks"  + std::to_string(marks->getNumElements()) + "x1",
               {Binding{"start_ends", start_ends, FixedRate(1), LookAhead(1)}},
               {Binding{"marks", marks}}) {}
 
@@ -1134,10 +1130,10 @@ unsigned spanLookAhead(unsigned offset1, unsigned offset2) {
     return round_up_to_blocksize(std::max(offset1, offset2));
 }
 
-InclusiveSpans::InclusiveSpans(KernelBuilder & b,
+InclusiveSpans::InclusiveSpans(LLVMTypeSystemInterface & ts,
                                unsigned prefixOffset, unsigned suffixOffset,
                                StreamSet * marks, StreamSet * spans)
-: PabloKernel(b, "InclusiveSpans@" + std::to_string(prefixOffset) + ":" + std::to_string(suffixOffset),
+: PabloKernel(ts, "InclusiveSpans@" + std::to_string(prefixOffset) + ":" + std::to_string(suffixOffset),
               {Binding{"marks", marks, FixedRate(1),
                                        LookAhead(spanLookAhead(prefixOffset, suffixOffset))}},
               {Binding{"spans", spans}}),
@@ -1168,8 +1164,8 @@ std::string CC_string(std::vector<CC *> transitionCCs, StreamSet * index) {
     return s.str();
 }
 
-MaskCC::MaskCC(KernelBuilder & b, CC * CC_to_mask, StreamSet * basis, StreamSet * mask, StreamSet * index)
-: PabloKernel(b, "MaskCC" + basis->shapeString()
+MaskCC::MaskCC(LLVMTypeSystemInterface & ts, CC * CC_to_mask, StreamSet * basis, StreamSet * mask, StreamSet * index)
+: PabloKernel(ts, "MaskCC" + basis->shapeString()
                  + CC_string(std::vector<CC *>{CC_to_mask}, index)
                  + UTF::kernelAnnotation(),
               {Binding{"basis", basis}},
@@ -1193,8 +1189,8 @@ void MaskCC::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("mask"), pb.getInteger(0)), mask);
 }
 
-MaskSelfTransitions::MaskSelfTransitions(KernelBuilder & b, const std::vector<CC *> transitionCCs, StreamSet * basis, StreamSet * mask, StreamSet * index)
-: PabloKernel(b, "MaskSelfTransitions" + basis->shapeString() + CC_string(transitionCCs, index),
+MaskSelfTransitions::MaskSelfTransitions(LLVMTypeSystemInterface & ts, const std::vector<CC *> transitionCCs, StreamSet * basis, StreamSet * mask, StreamSet * index)
+: PabloKernel(ts, "MaskSelfTransitions" + basis->shapeString() + CC_string(transitionCCs, index),
               {Binding{"basis", basis}},
               {Binding{"mask", mask}}), mTransitionCCs(transitionCCs), mIndexStrm(nullptr) {
                   if (index != nullptr) {

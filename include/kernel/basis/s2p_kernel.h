@@ -17,7 +17,7 @@ namespace kernel {
     
 class S2PKernel final : public MultiBlockKernel {
 public:
-    S2PKernel(KernelBuilder & b,
+    S2PKernel(LLVMTypeSystemInterface & ts,
               StreamSet * const codeUnitStream,
               StreamSet * const BasisBits,
               StreamSet * zeroMask = nullptr);
@@ -32,40 +32,39 @@ private:
 
 // Equivalent to S2P, but split into stages for better balancing
 // with multiple cores.
-void Staged_S2P(const std::unique_ptr<ProgramBuilder> & P,
+void Staged_S2P(PipelineBuilder & P,
                 StreamSet * codeUnitStream, StreamSet * BasisBits,
                 bool completionFromQuads = false);
 
 //
 // Selected S2P algorithm based on command-line parameters:
 // SplitTransposition, PabloTransposition
-void Selected_S2P(const std::unique_ptr<ProgramBuilder> & P,
-                StreamSet * codeUnitStream, StreamSet * BasisBits);
+void Selected_S2P(PipelineBuilder & P, StreamSet * codeUnitStream, StreamSet * BasisBits);
 
 class S2P_i21_3xi8 final : public MultiBlockKernel {
 public:
-    S2P_i21_3xi8(KernelBuilder & b, StreamSet * const i32Stream, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2);
+    S2P_i21_3xi8(LLVMTypeSystemInterface & ts, StreamSet * const i32Stream, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2);
 protected:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };
 
 class S2P_3xi8_21xi1 final : public MultiBlockKernel {
 public:
-    S2P_3xi8_21xi1(KernelBuilder & b, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2, StreamSet * const BasisBits);
+    S2P_3xi8_21xi1(LLVMTypeSystemInterface & ts, StreamSet * const i8stream0, StreamSet * const i8stream1, StreamSet * const i8stream2, StreamSet * const BasisBits);
 protected:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };
 
 class S2P_21Kernel final : public MultiBlockKernel {
 public:
-    S2P_21Kernel(KernelBuilder & b, StreamSet * const codeUnitStream, StreamSet * const BasisBits);
+    S2P_21Kernel(LLVMTypeSystemInterface & ts, StreamSet * const codeUnitStream, StreamSet * const BasisBits);
 protected:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };
 
 class S2P_PabloKernel final : public pablo::PabloKernel {
 public:
-    S2P_PabloKernel(KernelBuilder & b, StreamSet * const codeUnitStream, StreamSet * const BasisBits);
+    S2P_PabloKernel(LLVMTypeSystemInterface & ts, StreamSet * const codeUnitStream, StreamSet * const BasisBits);
 protected:
     void generatePabloMethod() override;
 private:

@@ -31,7 +31,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <iomanip>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 
 using namespace pablo;
 using namespace pablo::parse;
@@ -48,21 +48,19 @@ typedef void (*ztf1FunctionType)(uint32_t fd);
 
 ztf1FunctionType ztf1_compression_gen (CPUDriver & driver, std::shared_ptr<PabloParser> parser, std::shared_ptr<SourceFile> ztf1PabloSrc) {
 
-    auto & b = driver.getBuilder();
-    Type * const int32Ty = b.getInt32Ty();
-    auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
+    auto P = CreatePipeline(driver, Input<uint32_t>{"fd"});
 
-    Scalar * const fileDescriptor = P->getInputScalar("fd");
+    Scalar * const fileDescriptor = P.getInputScalar("fd");
 
     // Source data
-    StreamSet * const codeUnitStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
+    StreamSet * const codeUnitStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, codeUnitStream);
 
-    StreamSet * const u8basis = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(codeUnitStream, u8basis);
+    StreamSet * const u8basis = P.CreateStreamSet(8);
+    P.CreateKernelCall<S2PKernel>(codeUnitStream, u8basis);
     
-    StreamSet * const compression_mask = P->CreateStreamSet(1);
-    P->CreateKernelCall<PabloSourceKernel>(
+    StreamSet * const compression_mask = P.CreateStreamSet(1);
+    P.CreateKernelCall<PabloSourceKernel>(
            parser,
            ztf1PabloSrc,
            "ZTF1_Compression_Mask",
@@ -74,28 +72,27 @@ ztf1FunctionType ztf1_compression_gen (CPUDriver & driver, std::shared_ptr<Pablo
            }
         );
 
-    StreamSet * const ztf_basis = P->CreateStreamSet(8);
+    StreamSet * const ztf_basis = P.CreateStreamSet(8);
     FilterByMask(P, compression_mask, u8basis, ztf_basis);
-    StreamSet * const ZTF_bytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(ztf_basis, ZTF_bytes);
-    P->CreateKernelCall<StdOutKernel>(ZTF_bytes);
-    return reinterpret_cast<ztf1FunctionType>(P->compile());
+    StreamSet * const ZTF_bytes = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(ztf_basis, ZTF_bytes);
+    P.CreateKernelCall<StdOutKernel>(ZTF_bytes);
+    return P.compile();
 }
 
 ztf1FunctionType ztf1_decompression_gen (CPUDriver & driver, std::shared_ptr<PabloParser> parser, std::shared_ptr<SourceFile> ztf1PabloSrc) {
-    auto & b = driver.getBuilder();
-    Type * const int32Ty = b.getInt32Ty();
-    auto P = driver.makePipeline({Binding{int32Ty, "fd"}});
-    Scalar * const fileDescriptor = P->getInputScalar("fd");
+
+    auto P = CreatePipeline(driver, Input<uint32_t>{"fd"});
+    Scalar * const fileDescriptor = P.getInputScalar("fd");
 
     // Source data
-    StreamSet * const ztf1stream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ztf1stream);
-    StreamSet * const ztf1basis = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(ztf1stream, ztf1basis);
+    StreamSet * const ztf1stream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ztf1stream);
+    StreamSet * const ztf1basis = P.CreateStreamSet(8);
+    P.CreateKernelCall<S2PKernel>(ztf1stream, ztf1basis);
 
-    StreamSet * const insertion_mask = P->CreateStreamSet(1);
-    P->CreateKernelCall<PabloSourceKernel>(
+    StreamSet * const insertion_mask = P.CreateStreamSet(1);
+    P.CreateKernelCall<PabloSourceKernel>(
            parser,
            ztf1PabloSrc,
            "ZTF1_InsertionMask",
@@ -107,10 +104,10 @@ ztf1FunctionType ztf1_decompression_gen (CPUDriver & driver, std::shared_ptr<Pab
            }
         );
     StreamSet * const ztf1_to_utf8_spread_mask = UnitInsertionSpreadMask(P, insertion_mask);
-    StreamSet * const ztf1_basis_utf8_indexed = P->CreateStreamSet(8);
+    StreamSet * const ztf1_basis_utf8_indexed = P.CreateStreamSet(8);
     SpreadByMask(P, ztf1_to_utf8_spread_mask, ztf1basis, ztf1_basis_utf8_indexed);
-    StreamSet * const u8basis = P->CreateStreamSet(8);
-    P->CreateKernelCall<PabloSourceKernel>(
+    StreamSet * const u8basis = P.CreateStreamSet(8);
+    P.CreateKernelCall<PabloSourceKernel>(
            parser,
            ztf1PabloSrc,
            "ZTF1_Decompression",
@@ -122,16 +119,16 @@ ztf1FunctionType ztf1_decompression_gen (CPUDriver & driver, std::shared_ptr<Pab
                Binding {"u8_basis", u8basis}
            }
         );
-    StreamSet * const u8bytes = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(u8basis, u8bytes);
-    P->CreateKernelCall<StdOutKernel>(u8bytes);
-    return reinterpret_cast<ztf1FunctionType>(P->compile());
+    StreamSet * const u8bytes = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(u8basis, u8bytes);
+    P.CreateKernelCall<StdOutKernel>(u8bytes);
+    return P.compile();
 }
 
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&ztf1Options, pablo::pablo_toolchain_flags(), codegen::codegen_flags()});
     
-    CPUDriver pxDriver("ztf1");
+    CPUDriver driver("ztf1");
     auto em = ErrorManager::Create();
     auto parser = RecursiveParser::Create(SimpleLexer::Create(em), em);
     auto ztf1Source = SourceFile::Relative("ztf1.pablo");
@@ -143,10 +140,10 @@ int main(int argc, char *argv[]) {
         errs() << "Error: cannot open " << inputFile << " for processing. Skipped.\n";
     } else {
         if (Decompression) {
-            auto ztf1DecompressionFunction = ztf1_decompression_gen(pxDriver, parser, ztf1Source);
+            auto ztf1DecompressionFunction = ztf1_decompression_gen(driver, parser, ztf1Source);
             ztf1DecompressionFunction(fd);
         } else {
-            auto ztf1CompressionFunction = ztf1_compression_gen(pxDriver, parser, ztf1Source);
+            auto ztf1CompressionFunction = ztf1_compression_gen(driver, parser, ztf1Source);
             ztf1CompressionFunction(fd);
         }
         close(fd);

@@ -14,7 +14,7 @@ class ErrorMonitorKernel final : public MultiBlockKernel {
 public:
     using IOStreamBindings = std::initializer_list<std::pair<StreamSet *, StreamSet *>>;
 
-    ErrorMonitorKernel(KernelBuilder & b, StreamSet * error, IOStreamBindings bindings);
+    ErrorMonitorKernel(LLVMTypeSystemInterface & ts, StreamSet * error, IOStreamBindings bindings);
 private:
     std::string mName;
     std::vector<std::pair<std::string, std::string>> mStreamNames;

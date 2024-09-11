@@ -237,9 +237,9 @@ void ScanMatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
     Value * const startPtr = b.getRawInputPointer("InputStream", matchStart);
     Value * const endPtr = b.getRawInputPointer("InputStream", matchEndPos);
 
-    auto argi = dispatcher->arg_begin();
-    const auto matchRecNumArg = &*(argi++);
-    Value * const matchRecNum = b.CreateZExtOrTrunc(matchRecordNum, matchRecNumArg->getType());
+    Type * expectedMatchRecNumTy = dispatcher->getFunctionType()->getParamType(1);
+    assert (expectedMatchRecNumTy->isIntegerTy());
+    Value * const matchRecNum = b.CreateZExtOrTrunc(matchRecordNum, expectedMatchRecNumTy);
     b.CreateCall(dispatcher->getFunctionType(), dispatcher, {accumulator, matchRecNum, startPtr, endPtr});
 
     //  We've dealt with the match, now prepare for the next one, if any.
@@ -291,8 +291,8 @@ void ScanMatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
     b.SetInsertPoint(scanReturn);
 }
 
-ScanMatchKernel::ScanMatchKernel(KernelBuilder & b, StreamSet * const Matches, StreamSet * const LineBreakStream, StreamSet * const ByteStream, Scalar * const callbackObject, unsigned strideBlocks)
-    : MultiBlockKernel(b, "scanMatch" + std::to_string(strideBlocks),
+ScanMatchKernel::ScanMatchKernel(LLVMTypeSystemInterface & ts, StreamSet * const Matches, StreamSet * const LineBreakStream, StreamSet * const ByteStream, Scalar * const callbackObject, unsigned strideBlocks)
+    : MultiBlockKernel(ts, "scanMatch" + std::to_string(strideBlocks),
 // inputs
 {Binding{"matchResult", Matches}
 ,Binding{"lineBreak", LineBreakStream}
@@ -304,9 +304,9 @@ ScanMatchKernel::ScanMatchKernel(KernelBuilder & b, StreamSet * const Matches, S
 // output scalars
 {},
 // kernel state
-{InternalScalar{b.getSizeTy(), "LineNum"}}) {
+{InternalScalar{ts.getSizeTy(), "LineNum"}}) {
     addAttribute(SideEffecting());
-    setStride(std::min(b.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
+    setStride(std::min(ts.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
 }
 
 void ScanBatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
@@ -559,9 +559,9 @@ void ScanBatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
 //        b.CreateAssert(b.CreateICmpEQ(A, B), "InputStream is not contiguous");
 //    }
 
-    auto argi = dispatcher->arg_begin();
-    const auto matchRecNumArg = &*(argi++);
-    Value * const matchRecNum = b.CreateZExtOrTrunc(matchRecordNum, matchRecNumArg->getType());
+    Type * expectedMatchRecNumTy = dispatcher->getFunctionType()->getParamType(1);
+    assert (expectedMatchRecNumTy->isIntegerTy());
+    Value * const matchRecNum = b.CreateZExtOrTrunc(matchRecordNum, expectedMatchRecNumTy);
     b.CreateCall(dispatcher->getFunctionType(), dispatcher, {accumulator, matchRecNum, startPtr, endPtr});
 
     //  We've dealt with the match, now prepare for the next one, if any.
@@ -653,8 +653,8 @@ void ScanBatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
     b.SetInsertPoint(scanReturn);
 }
 
-ScanBatchKernel::ScanBatchKernel(KernelBuilder & b, StreamSet * const Matches, StreamSet * const LineBreakStream, StreamSet * const ByteStream, Scalar * const callbackObject, unsigned strideBlocks)
-    : MultiBlockKernel(b, "scanBatch" + std::to_string(strideBlocks),
+ScanBatchKernel::ScanBatchKernel(LLVMTypeSystemInterface & ts, StreamSet * const Matches, StreamSet * const LineBreakStream, StreamSet * const ByteStream, Scalar * const callbackObject, unsigned strideBlocks)
+    : MultiBlockKernel(ts, "scanBatch" + std::to_string(strideBlocks),
 // inputs
 {Binding{"matchResult", Matches}
 ,Binding{"lineBreak", LineBreakStream, FixedRate(), ZeroExtended()}
@@ -666,19 +666,19 @@ ScanBatchKernel::ScanBatchKernel(KernelBuilder & b, StreamSet * const Matches, S
 // output scalars
 {},
 // kernel state
-{InternalScalar{b.getSizeTy(), "LineNum"}, InternalScalar{b.getInt32Ty(), "batchFileNum"}, InternalScalar{b.getSizeTy(), "pendingFileLimit"}}) {
+{InternalScalar{ts.getSizeTy(), "LineNum"}, InternalScalar{ts.getInt32Ty(), "batchFileNum"}, InternalScalar{ts.getSizeTy(), "pendingFileLimit"}}) {
     addAttribute(SideEffecting());
-    setStride(std::min(b.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
+    setStride(std::min(ts.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
 }
 
 
 
 enum MatchCoordinatesEnum {LINE_STARTS = 0, LINE_ENDS = 1, LINE_NUMBERS = 2};
 
-MatchCoordinatesKernel::MatchCoordinatesKernel(KernelBuilder & b,
+MatchCoordinatesKernel::MatchCoordinatesKernel(LLVMTypeSystemInterface & ts,
                                                StreamSet * const Matches, StreamSet * const LineBreakStream,
                                                StreamSet * const Coordinates, unsigned strideBlocks)
-: MultiBlockKernel(b, "matchCoordinates" + std::to_string(strideBlocks),
+: MultiBlockKernel(ts, "matchCoordinates" + std::to_string(strideBlocks),
 // inputs
 {Binding{"matchResult", Matches}, Binding{"lineBreak", LineBreakStream, FixedRate(1), ZeroExtended()}},
 // outputs
@@ -688,10 +688,10 @@ MatchCoordinatesKernel::MatchCoordinatesKernel(KernelBuilder & b,
 // output scalars
 {},
 // kernel state
-{InternalScalar{b.getSizeTy(), "LineNum"},
- InternalScalar{b.getSizeTy(), "LineStart"}}) {
+{InternalScalar{ts.getSizeTy(), "LineNum"},
+ InternalScalar{ts.getSizeTy(), "LineStart"}}) {
      // The stride size must be limited so that the scanword mask is a single size_t value.
-     setStride(std::min(b.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
+     setStride(std::min(ts.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
      assert (Matches->getNumElements() == 1);
      assert (LineBreakStream->getNumElements() == 1);
      assert (Coordinates->getNumElements() == 3);
@@ -1221,10 +1221,10 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     }
 }
 
-BatchCoordinatesKernel::BatchCoordinatesKernel(KernelBuilder & b,
+BatchCoordinatesKernel::BatchCoordinatesKernel(LLVMTypeSystemInterface & ts,
                                                StreamSet * const Matches, StreamSet * const LineBreakStream,
                                                StreamSet * const Coordinates, Scalar * const callbackObject, unsigned strideBlocks)
-: MultiBlockKernel(b, "batchCoordinates" + std::to_string(strideBlocks),
+: MultiBlockKernel(ts, "batchCoordinates" + std::to_string(strideBlocks),
 // inputs
 {Binding{"matchResult", Matches}, Binding{"lineBreak", LineBreakStream, FixedRate(1), ZeroExtended()}},
 // outputs
@@ -1234,12 +1234,12 @@ BatchCoordinatesKernel::BatchCoordinatesKernel(KernelBuilder & b,
 // output scalars
 {},
 // kernel state
-{InternalScalar{b.getInt32Ty(), "batchFileNum"},
-    InternalScalar{b.getSizeTy(), "pendingFileLimit"},
+{InternalScalar{ts.getInt32Ty(), "batchFileNum"},
+    InternalScalar{ts.getSizeTy(), "pendingFileLimit"},
     //InternalScalar{b.getSizeTy(), "pendingFileStartLine"},
-    InternalScalar{b.getSizeTy(), "pendingLineNum"}}) {
+    InternalScalar{ts.getSizeTy(), "pendingLineNum"}}) {
      // The stride size must be limited so that the scanword mask is a single size_t value.
-     setStride(std::min(b.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
+     setStride(std::min(ts.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
      assert (Matches->getNumElements() == 1);
      assert (LineBreakStream->getNumElements() == 1);
 #ifdef WRITE_FILE_NUMBERS
@@ -1249,8 +1249,8 @@ BatchCoordinatesKernel::BatchCoordinatesKernel(KernelBuilder & b,
 #endif
 }
 
-MatchReporter::MatchReporter(KernelBuilder & b, StreamSet * ByteStream, StreamSet * const Coordinates, Scalar * const callbackObject)
-: SegmentOrientedKernel(b, "matchReporter" + std::to_string(Coordinates->getNumElements()),
+MatchReporter::MatchReporter(LLVMTypeSystemInterface & ts, StreamSet * ByteStream, StreamSet * const Coordinates, Scalar * const callbackObject)
+: SegmentOrientedKernel(ts, "matchReporter" + std::to_string(Coordinates->getNumElements()),
 // inputs
 {Binding{"InputStream", ByteStream, GreedyRate(), Deferred()},
  Binding{"Coordinates", Coordinates, GreedyRate(1)}},
@@ -1309,9 +1309,9 @@ void MatchReporter::generateDoSegmentMethod(KernelBuilder & b) {
     Function * const dispatcher = m->getFunction("accumulate_match_wrapper"); assert (dispatcher);
     Value * const startPtr = b.getRawInputPointer("InputStream", matchRecordStart);
     Value * const endPtr = b.getRawInputPointer("InputStream", matchRecordEnd);
-    auto argi = dispatcher->arg_begin();
-    const auto matchRecNumArg = &*(argi++);
-    Value * const matchRecNum = b.CreateZExtOrTrunc(matchRecordNum, matchRecNumArg->getType());
+    Type * expectedMatchRecNumTy = dispatcher->getFunctionType()->getParamType(1);
+    assert (expectedMatchRecNumTy->isIntegerTy());
+    Value * const matchRecNum = b.CreateZExtOrTrunc(matchRecordNum, expectedMatchRecNumTy);
     b.CreateCall(dispatcher->getFunctionType(), dispatcher, {accumulator, matchRecNum, startPtr, endPtr});
     Value * haveMoreMatches = b.CreateICmpNE(nextMatchNum, matchesAvail);
     phiMatchNum->addIncoming(nextMatchNum, b.GetInsertBlock());
@@ -1332,17 +1332,17 @@ void MatchReporter::generateDoSegmentMethod(KernelBuilder & b) {
 
 }
 
-MatchFilterKernel::MatchFilterKernel(KernelBuilder & b,
+MatchFilterKernel::MatchFilterKernel(LLVMTypeSystemInterface & ts,
                                      StreamSet * const MatchStarts, StreamSet * const LineBreakStream,
                                      StreamSet * const InputStream, StreamSet * Output, unsigned strideBlocks)
-: MultiBlockKernel(b, "matchFilter" + std::to_string(strideBlocks),
+: MultiBlockKernel(ts, "matchFilter" + std::to_string(strideBlocks),
 {Binding{"matchStarts", MatchStarts}, Binding{"lineBreak", LineBreakStream}, Binding{"InputStream", InputStream}},
 {Binding{"Output", Output, BoundedRate(0,1)}},
 {},
 {},
-{InternalScalar{b.getInt1Ty(), "pendingMatch"}}) {
+{InternalScalar{ts.getInt1Ty(), "pendingMatch"}}) {
     // The stride size must be limited so that the scanword mask is a single size_t value.
-    setStride(std::min(b.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
+    setStride(std::min(ts.getBitBlockWidth() * strideBlocks, SIZE_T_BITS * SIZE_T_BITS));
     assert (MatchStarts->getNumElements() == 1);
     assert (LineBreakStream->getNumElements() == 1);
 }
@@ -1554,8 +1554,8 @@ void MatchFilterKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const
     b.setProducedItemCount("Output", finalProducedPhi);
 }
 
-ColorizedReporter::ColorizedReporter(KernelBuilder & b, StreamSet * ByteStream, StreamSet * const SourceCoords, StreamSet * const ColorizedCoords, Scalar * const callbackObject)
-: SegmentOrientedKernel(b, "colorizedReporter" + std::to_string(SourceCoords->getNumElements()) + std::to_string(ColorizedCoords->getNumElements()),
+ColorizedReporter::ColorizedReporter(LLVMTypeSystemInterface & ts, StreamSet * ByteStream, StreamSet * const SourceCoords, StreamSet * const ColorizedCoords, Scalar * const callbackObject)
+: SegmentOrientedKernel(ts, "colorizedReporter" + std::to_string(SourceCoords->getNumElements()) + std::to_string(ColorizedCoords->getNumElements()),
 // inputs
 {Binding{"InputStream", ByteStream, GreedyRate(), Deferred()},
     Binding{"SourceCoords", SourceCoords, FixedRate(1)}, Binding{"ColorizedCoords", ColorizedCoords, FixedRate(1)}},
@@ -1616,11 +1616,14 @@ void ColorizedReporter::generateDoSegmentMethod(KernelBuilder & b) {
 
     b.SetInsertPoint(dispatch);
     Function * const dispatcher = m->getFunction("accumulate_match_wrapper"); assert (dispatcher);
+
+
+
     Value * const startPtr = b.getRawInputPointer("InputStream", matchRecordStart);
     Value * const endPtr = b.getRawInputPointer("InputStream", matchRecordEnd);
-    auto argi = dispatcher->arg_begin();
-    const auto matchRecNumArg = &*(argi++);
-    Value * const matchRecNum = b.CreateZExtOrTrunc(matchRecordNum, matchRecNumArg->getType());
+    Type * expectedMatchRecNumTy = dispatcher->getFunctionType()->getParamType(1);
+    assert (expectedMatchRecNumTy->isIntegerTy());
+    Value * const matchRecNum = b.CreateZExtOrTrunc(matchRecordNum, expectedMatchRecNumTy);
     b.CreateCall(dispatcher->getFunctionType(), dispatcher, {accumulator, matchRecNum, startPtr, endPtr});
     Value * haveMoreMatches = b.CreateICmpNE(nextMatchNum, matchesAvail);
     BasicBlock * const dispatchEnd = b.GetInsertBlock();

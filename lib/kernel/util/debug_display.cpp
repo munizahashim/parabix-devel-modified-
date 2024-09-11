@@ -5,6 +5,7 @@
 
 #include <toolchain/toolchain.h>
 #include <kernel/streamutils/stream_select.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/util/debug_display.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/basis/s2p_kernel.h>
@@ -169,25 +170,25 @@ void ParabixIllustrator::registerIllustrator(Scalar * illustrator) {
 
 void ParabixIllustrator::captureByteData(ProgramBuilderRef P, std::string streamLabel, StreamSet * byteData, char nonASCIIsubstitute) {
     unsigned illustratedStreamNo = addStream(streamLabel);
-    StreamSet * basis = P->CreateStreamSet(8);
-    P->CreateKernelCall<S2PKernel>(byteData, basis);
-    StreamSet * printableBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<PrintableASCII>(basis, printableBasis, nonASCIIsubstitute);
-    StreamSet * printableData = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(printableBasis, printableData);
-    Scalar * streamNo = P->CreateConstant(P->getDriver().getBuilder()->getSize(illustratedStreamNo));
-    Kernel * scK = P->CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
+    StreamSet * basis = P.CreateStreamSet(8);
+    P.CreateKernelCall<S2PKernel>(byteData, basis);
+    StreamSet * printableBasis = P.CreateStreamSet(8);
+    P.CreateKernelCall<PrintableASCII>(basis, printableBasis, nonASCIIsubstitute);
+    StreamSet * printableData = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(printableBasis, printableData);
+    Scalar * streamNo = P.CreateConstant(P.getDriver().getSize(illustratedStreamNo));
+    Kernel * scK = P.CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
     scK->link("appendStreamText_wrapper", appendStreamText_wrapper);
 }
 
 void ParabixIllustrator::captureBitstream(ProgramBuilderRef P, std::string streamLabel, StreamSet * bitstream, char zeroCh, char oneCh) {
     unsigned illustratedStreamNo = addStream(streamLabel);
-    StreamSet * printableBasis = P->CreateStreamSet(8);
-    P->CreateKernelCall<BitstreamIllustrator>(bitstream, printableBasis, zeroCh, oneCh);
-    StreamSet * printableData = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<P2SKernel>(printableBasis, printableData);
-    Scalar * streamNo = P->CreateConstant(P->getDriver().getBuilder()->getSize(illustratedStreamNo));
-    Kernel * scK = P->CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
+    StreamSet * printableBasis = P.CreateStreamSet(8);
+    P.CreateKernelCall<BitstreamIllustrator>(bitstream, printableBasis, zeroCh, oneCh);
+    StreamSet * printableData = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<P2SKernel>(printableBasis, printableData);
+    Scalar * streamNo = P.CreateConstant(P.getDriver().getSize(illustratedStreamNo));
+    Kernel * scK = P.CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
     scK->link("appendStreamText_wrapper", appendStreamText_wrapper);
 }
 
@@ -195,12 +196,12 @@ void ParabixIllustrator::captureBixNum(ProgramBuilderRef P, std::string streamLa
     auto bixBits = bixnum->getNumElements();
     if (bixBits <= 4) {
         unsigned illustratedStreamNo = addStream(streamLabel);
-        StreamSet * printableBasis = P->CreateStreamSet(8);
-        P->CreateKernelCall<PrintableBixNum>(bixnum, printableBasis, hexBase);
-        StreamSet * printableData = P->CreateStreamSet(1, 8);
-        P->CreateKernelCall<P2SKernel>(printableBasis, printableData);
-        Scalar * streamNo = P->CreateConstant(P->getDriver().getBuilder()->getSize(illustratedStreamNo));
-        Kernel * scK = P->CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
+        StreamSet * printableBasis = P.CreateStreamSet(8);
+        P.CreateKernelCall<PrintableBixNum>(bixnum, printableBasis, hexBase);
+        StreamSet * printableData = P.CreateStreamSet(1, 8);
+        P.CreateKernelCall<P2SKernel>(printableBasis, printableData);
+        Scalar * streamNo = P.CreateConstant(P.getDriver().getSize(illustratedStreamNo));
+        Kernel * scK = P.CreateKernelCall<CaptureBlock>(mIllustrator, streamNo, printableData);
         scK->link("appendStreamText_wrapper", appendStreamText_wrapper);
     } else {
         auto hexDigits = (bixBits + 3)/4;

@@ -25,12 +25,14 @@ class PipelineAnalysis;
 class PipelineBuilder;
 class PipelineCompiler;
 
-class PipelineKernel : public Kernel {
+class PipelineKernel final : public Kernel {
     friend class Kernel;
     friend class PipelineCompiler;
     friend class PipelineAnalysis;
     friend class PipelineBuilder;
     friend class ProgramBuilder;
+    template<typename ... Args>
+    friend class TypedProgramBuilder;
     friend class ::BaseDriver;
 public:
 
@@ -128,7 +130,7 @@ public:
 
 protected:
 
-    PipelineKernel(KernelBuilder & b,
+    PipelineKernel(LLVMTypeSystemInterface & ts,
                    std::string && signature,
                    const unsigned numOfKernelFamilyCalls,
                    Kernels && kernels, CallBindings && callBindings,
@@ -137,11 +139,11 @@ protected:
                    Relationships && internallyGenerated,
                    LengthAssertions && lengthAssertions);
 
-    PipelineKernel(KernelBuilder & b,
+    PipelineKernel(LLVMTypeSystemInterface & ts,
+                   std::string && signature,
+                   AttributeSet && attributes,
                    Bindings && stream_inputs, Bindings && stream_outputs,
                    Bindings && scalar_inputs, Bindings && scalar_outputs);
-
-    virtual void instantiateInternalKernels(const std::unique_ptr<PipelineBuilder> &) {}
 
     static std::string annotateSignatureWithPipelineFlags(std::string && name);
 
@@ -153,7 +155,7 @@ private:
 
     struct Internal {};
 
-    PipelineKernel(Internal, KernelBuilder & b,
+    PipelineKernel(Internal, LLVMTypeSystemInterface & ts,
                    std::string && signature,
                    const unsigned numOfKernelFamilyCalls,
                    Kernels && kernels, CallBindings && callBindings,

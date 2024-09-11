@@ -47,6 +47,7 @@ void SpreadByMask(PipelineBuilder & P,
                   unsigned expansionFieldWidth = 64,
                   ProcessingRateProbabilityDistribution itemsPerOutputUnit = GammaDistribution(5.0f, 0.1f));
 
+#if 0
 inline void SpreadByMask(PipelineBuilder & P,
                          StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
                          unsigned streamOffset = 0,
@@ -62,25 +63,9 @@ inline void SpreadByMask(const std::unique_ptr<PipelineBuilder> & P,
                          ProcessingRateProbabilityDistribution itemsPerOutputUnit = GammaDistribution(5.0f, 0.1f)) {
     return SpreadByMask(*P.get(), mask, toSpread, outputs, streamOffset, zeroExtend, StreamExpandOptimization::None, 64, itemsPerOutputUnit);
 }
+#endif
 
-inline void SpreadByMask(const std::unique_ptr<ProgramBuilder> & P,
-                         StreamSet * mask, StreamSet * toSpread, StreamSet * outputs,
-                         unsigned streamOffset = 0,
-                         bool zeroExtend = false,
-                         ProcessingRateProbabilityDistribution itemsPerOutputUnit = GammaDistribution(5.0f, 0.1f)) {
-    return SpreadByMask(*P.get(), mask, toSpread, outputs, streamOffset, zeroExtend, StreamExpandOptimization::None, 64, itemsPerOutputUnit);
-}
-
-void MergeByMask(PipelineBuilder & P,
-                  StreamSet * mask, StreamSet * a, StreamSet *b, StreamSet * merged);
-inline void MergeByMask(const std::unique_ptr<PipelineBuilder> & P,
-                         StreamSet * mask, StreamSet * a, StreamSet *b, StreamSet * merged){
-    return MergeByMask(*P.get(), mask, a, b, merged);
-}
-inline void MergeByMask(const std::unique_ptr<ProgramBuilder> & P,
-                         StreamSet * mask, StreamSet * a, StreamSet *b, StreamSet * merged){
-    return MergeByMask(*P.get(), mask, a, b, merged);
-}
+void MergeByMask(PipelineBuilder & P, StreamSet * mask, StreamSet * a, StreamSet *b, StreamSet * merged);
 
 /*  Create a spread mask for inserting a single item into a stream for each position
     in the given insertion mask that is nonzero.   The insertion mask may be
@@ -94,21 +79,14 @@ StreamSet * UnitInsertionSpreadMask(PipelineBuilder & P,
                                     InsertPosition p = InsertPosition::Before,
                                     ProcessingRateProbabilityDistribution insertionProbabilityDistribution = UniformDistribution());
 
+#if 0
 inline StreamSet * UnitInsertionSpreadMask(const std::unique_ptr<PipelineBuilder> & P,
                                     StreamSet * insertion_mask,
                                     InsertPosition p = InsertPosition::Before,
                                     ProcessingRateProbabilityDistribution insertionProbabilityDistribution = UniformDistribution()) {
     return UnitInsertionSpreadMask(*P.get(), insertion_mask, p, insertionProbabilityDistribution);
 }
-
-inline StreamSet * UnitInsertionSpreadMask(const std::unique_ptr<ProgramBuilder> & P,
-                                    StreamSet * insertion_mask,
-                                    InsertPosition p = InsertPosition::Before,
-                                    ProcessingRateProbabilityDistribution insertionProbabilityDistribution = UniformDistribution()) {
-    return UnitInsertionSpreadMask(*P.get(), insertion_mask, p, insertionProbabilityDistribution);
-}
-
-
+#endif
 
 /*   Prepare a spread mask for inserting data into bit streams.
      At each stream position, a bixnum encodes the number of items
@@ -128,6 +106,7 @@ StreamSet * InsertionSpreadMask(PipelineBuilder & P,
                                 ProcessingRateProbabilityDistribution itemsPerOutputUnit = UniformDistribution(),
                                 ProcessingRateProbabilityDistribution expansionRate = UniformDistribution());
 
+#if 0
 inline StreamSet * InsertionSpreadMask(const std::unique_ptr<PipelineBuilder> &P,
                                 StreamSet * bixNumInsertCount,
                                 InsertPosition p = InsertPosition::Before,
@@ -135,20 +114,13 @@ inline StreamSet * InsertionSpreadMask(const std::unique_ptr<PipelineBuilder> &P
                                 ProcessingRateProbabilityDistribution expansionRate = UniformDistribution()) {
     return InsertionSpreadMask(*P.get(), bixNumInsertCount, p, itemsPerOutputUnit, expansionRate);
 }
-
-inline StreamSet * InsertionSpreadMask(const std::unique_ptr<ProgramBuilder> &P,
-                                StreamSet * bixNumInsertCount,
-                                InsertPosition p = InsertPosition::Before,
-                                ProcessingRateProbabilityDistribution itemsPerOutputUnit = UniformDistribution(),
-                                ProcessingRateProbabilityDistribution expansionRate = UniformDistribution()) {
-    return InsertionSpreadMask(*P.get(), bixNumInsertCount, p, itemsPerOutputUnit, expansionRate);
-}
+#endif
 
 /* The following kernels are used by SpreadByMask internally. */
 
 class StreamExpandKernel final : public MultiBlockKernel {
 public:
-    StreamExpandKernel(KernelBuilder & b,
+    StreamExpandKernel(LLVMTypeSystemInterface & ts,
                        StreamSet * mask,
                        StreamSet * source,
                        StreamSet * expanded,
@@ -168,7 +140,7 @@ private:
 /**********************************/
 class StreamMergeKernel final : public MultiBlockKernel {
 public:
-    StreamMergeKernel(KernelBuilder & b,
+    StreamMergeKernel(LLVMTypeSystemInterface & ts,
                        StreamSet * mask,
                        StreamSet * source1,
                        StreamSet * source2,
@@ -185,7 +157,7 @@ private:
 /*******************************************************/
 class FieldDepositKernel final : public MultiBlockKernel {
 public:
-    FieldDepositKernel(KernelBuilder &, StreamSet * mask, StreamSet * input, StreamSet * output, const unsigned fieldWidth = sizeof(size_t) * 8);
+    FieldDepositKernel(LLVMTypeSystemInterface & ts, StreamSet * mask, StreamSet * input, StreamSet * output, const unsigned fieldWidth = sizeof(size_t) * 8);
 protected:
     void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfStrides) override;
 private:
@@ -196,7 +168,7 @@ private:
 
 class PDEPFieldDepositKernel final : public MultiBlockKernel {
 public:
-    PDEPFieldDepositKernel(KernelBuilder &, StreamSet * mask, StreamSet * expandedA, StreamSet * outputs, const unsigned fieldWidth = sizeof(size_t) * 8);
+    PDEPFieldDepositKernel(LLVMTypeSystemInterface & ts, StreamSet * mask, StreamSet * expandedA, StreamSet * outputs, const unsigned fieldWidth = sizeof(size_t) * 8);
 protected:
     void generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfStrides) override;
 private:
@@ -233,7 +205,7 @@ private:
  */
 class PDEPkernel final : public MultiBlockKernel {
 public:
-    PDEPkernel(KernelBuilder & b, const unsigned swizzleFactor = 4, std::string name = "PDEP");
+    PDEPkernel(LLVMTypeSystemInterface & ts, const unsigned swizzleFactor = 4, std::string name = "PDEP");
 private:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) final;
 private:

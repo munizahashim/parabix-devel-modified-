@@ -35,7 +35,7 @@ void SpreadByMask(PipelineBuilder & P,
                   ProcessingRateProbabilityDistribution itemsPerOutputUnit) {
     unsigned streamCount = outputs->getNumElements();
     StreamSet * const expanded = P.CreateStreamSet(streamCount);
-    Scalar * base = P.CreateConstant(P.getDriver().getBuilder().getSize(streamOffset));
+    Scalar * base = P.CreateConstant(P.getSize(streamOffset));
     P.CreateKernelCall<StreamExpandKernel>(mask, toSpread, expanded, base, zeroExtend, opt, expansionFieldWidth, itemsPerOutputUnit);
     P.CreateKernelCall<FieldDepositKernel>(mask, expanded, outputs, expansionFieldWidth);
 }
@@ -48,7 +48,7 @@ void MergeByMask(PipelineBuilder & P,
         llvm::report_fatal_error("MergeByMask called with incompatible element counts");
     }
     unsigned streamOffset = 0;
-    Scalar * base = P.CreateConstant(P.getDriver().getBuilder().getSize(streamOffset));
+    Scalar * base = P.CreateConstant(P.getSize(streamOffset));
     int expansionFieldWidth=64;
     P.CreateKernelCall<StreamMergeKernel>(mask,a,b,merged,base,expansionFieldWidth);
 
@@ -57,7 +57,7 @@ void MergeByMask(PipelineBuilder & P,
 
 const unsigned StreamExpandStrideSize = 4;
 
-StreamExpandKernel::StreamExpandKernel(KernelBuilder & b,
+StreamExpandKernel::StreamExpandKernel(LLVMTypeSystemInterface & ts,
                                        StreamSet * mask,
                                        StreamSet * source,
                                        StreamSet * expanded,
@@ -65,7 +65,7 @@ StreamExpandKernel::StreamExpandKernel(KernelBuilder & b,
                                        bool zeroExtend,
                                        const StreamExpandOptimization opt,
                                        const unsigned FieldWidth, ProcessingRateProbabilityDistribution itemsPerOutputUnitProbability)
-: MultiBlockKernel(b, [&]() -> std::string {
+: MultiBlockKernel(ts, [&]() -> std::string {
                         std::string tmp;
                         raw_string_ostream nm(tmp);
                         nm << "streamExpand"  << StreamExpandStrideSize << ':' << FieldWidth;
@@ -85,11 +85,11 @@ StreamExpandKernel::StreamExpandKernel(KernelBuilder & b,
 , mFieldWidth(FieldWidth)
 , mSelectedStreamCount(expanded->getNumElements())
 , mOptimization(opt) {
-    setStride(StreamExpandStrideSize * b.getBitBlockWidth());
+    setStride(StreamExpandStrideSize * ts.getBitBlockWidth());
     if (zeroExtend) {
-        mInputStreamSets.push_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, ZeroExtended(), BlockSize(b.getBitBlockWidth())));
+        mInputStreamSets.emplace_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, ZeroExtended(), BlockSize(ts.getBitBlockWidth())));
     } else {
-        mInputStreamSets.push_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, BlockSize(b.getBitBlockWidth())));
+        mInputStreamSets.emplace_back(Bind("source", source, PopcountOf("marker"), itemsPerOutputUnitProbability, BlockSize(ts.getBitBlockWidth())));
     }
 }
 
@@ -234,14 +234,14 @@ void StreamExpandKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value 
 
 /*************************StreamMergeKernel*********************************/
 const unsigned StreamMergeStrideSize = 4;
-StreamMergeKernel::StreamMergeKernel(KernelBuilder & b,
+StreamMergeKernel::StreamMergeKernel(LLVMTypeSystemInterface & ts,
                                        StreamSet * mask,
                                        StreamSet * source1,
                                        StreamSet * source2,
                                        StreamSet * merged,
                                        Scalar * base,
                                        const unsigned FieldWidth)
-: MultiBlockKernel(b, [&]() -> std::string {
+: MultiBlockKernel(ts, [&]() -> std::string {
                         std::string tmp;
                         raw_string_ostream nm(tmp);
                         nm << "streamMerge"  << StreamMergeStrideSize << ':' << FieldWidth;
@@ -256,7 +256,7 @@ StreamMergeKernel::StreamMergeKernel(KernelBuilder & b,
 {}, {})
 , mFieldWidth(FieldWidth)
 , mSelectedStreamCount(merged->getNumElements()){
-    setStride(StreamMergeStrideSize * b.getBitBlockWidth());
+    setStride(StreamMergeStrideSize * ts.getBitBlockWidth());
 }
 
 void StreamMergeKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) {
@@ -407,10 +407,10 @@ void StreamMergeKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value *
 }
 /*******************************************************************************************/
 
-FieldDepositKernel::FieldDepositKernel(KernelBuilder & b
+FieldDepositKernel::FieldDepositKernel(LLVMTypeSystemInterface & ts
                                        , StreamSet * mask, StreamSet * input, StreamSet * output
                                        , const unsigned fieldWidth)
-: MultiBlockKernel(b, "FieldDeposit" + std::to_string(fieldWidth) + "_" + std::to_string(input->getNumElements()),
+: MultiBlockKernel(ts, "FieldDeposit" + std::to_string(fieldWidth) + "_" + std::to_string(input->getNumElements()),
 {Bind("depositMask", mask)
 , Bind("inputStreamSet", input)},
 {Bind("outputStreamSet", output)},
@@ -537,10 +537,10 @@ void PDEPFieldDepositLogic(KernelBuilder & b, llvm::Value * const numOfStrides, 
     b.SetInsertPoint(done);
 }
 
-PDEPFieldDepositKernel::PDEPFieldDepositKernel(KernelBuilder & b
+PDEPFieldDepositKernel::PDEPFieldDepositKernel(LLVMTypeSystemInterface & ts
                                                , StreamSet * mask, StreamSet * input, StreamSet * output
                                                , const unsigned fieldWidth)
-: MultiBlockKernel(b, "PDEPFieldDeposit" + std::to_string(fieldWidth) + "_" + std::to_string(input->getNumElements()) ,
+: MultiBlockKernel(ts, "PDEPFieldDeposit" + std::to_string(fieldWidth) + "_" + std::to_string(input->getNumElements()) ,
                    {Binding{"depositMask", mask},
                     Binding{"inputStreamSet", input}},
                    {Binding{"outputStreamSet", output}},
@@ -556,13 +556,13 @@ void PDEPFieldDepositKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Va
 }
 
 
-PDEPkernel::PDEPkernel(KernelBuilder & b, const unsigned swizzleFactor, std::string name)
-: MultiBlockKernel(b, std::move(name),
+PDEPkernel::PDEPkernel(LLVMTypeSystemInterface & ts, const unsigned swizzleFactor, std::string name)
+: MultiBlockKernel(ts, std::move(name),
                    // input stream sets
-{Binding{b.getStreamSetTy(), "marker", FixedRate(), Principal()},
-    Binding{b.getStreamSetTy(swizzleFactor), "source", PopcountOf("marker"), BlockSize(b.getBitBlockWidth() / swizzleFactor) }},
+{Binding{ts.getStreamSetTy(), "marker", FixedRate(), Principal()},
+    Binding{ts.getStreamSetTy(swizzleFactor), "source", PopcountOf("marker"), BlockSize(ts.getBitBlockWidth() / swizzleFactor) }},
                    // output stream set
-{Binding{b.getStreamSetTy(swizzleFactor), "output", FixedRate(), BlockSize(b.getBitBlockWidth() / swizzleFactor)}},
+{Binding{ts.getStreamSetTy(swizzleFactor), "output", FixedRate(), BlockSize(ts.getBitBlockWidth() / swizzleFactor)}},
 {}, {}, {})
 , mSwizzleFactor(swizzleFactor) {
 }
@@ -687,13 +687,13 @@ std::string InsertString(StreamSet * mask, InsertPosition p) {
 
 class UnitInsertionExtractionMasks final : public BlockOrientedKernel {
 public:
-    UnitInsertionExtractionMasks(KernelBuilder & b,
+    UnitInsertionExtractionMasks(LLVMTypeSystemInterface & ts,
                                  StreamSet * insertion_mask, StreamSet * stream01, StreamSet * valid01, InsertPosition p = InsertPosition::Before)
-    : BlockOrientedKernel(b, "unitInsertionExtractionMasks" + InsertString(insertion_mask, p),
+    : BlockOrientedKernel(ts, "unitInsertionExtractionMasks" + InsertString(insertion_mask, p),
         {Binding{"insertion_mask", insertion_mask}},
         {Binding{"stream01", stream01, FixedRate(2)}, Binding{"valid01", valid01, FixedRate(2)}},
         {}, {},
-        {InternalScalar{ScalarType::NonPersistent, b.getBitBlockType(), "EOFmask"}}),
+        {InternalScalar{ScalarType::NonPersistent, ts.getBitBlockType(), "EOFmask"}}),
     mInsertPos(p) {}
 protected:
     void generateDoBlockMethod(KernelBuilder & b) override;
@@ -753,8 +753,8 @@ StreamSet * UnitInsertionSpreadMask(PipelineBuilder & P, StreamSet * insertion_m
 
 class UGT_Kernel final : public pablo::PabloKernel {
 public:
-    UGT_Kernel(KernelBuilder & b, StreamSet * bixnum, unsigned immediate, StreamSet * result) :
-    pablo::PabloKernel(b, "ugt_" + std::to_string(immediate) + "_" + std::to_string(bixnum->getNumElements()),
+    UGT_Kernel(LLVMTypeSystemInterface & ts, StreamSet * bixnum, unsigned immediate, StreamSet * result) :
+    pablo::PabloKernel(ts, "ugt_" + std::to_string(immediate) + "_" + std::to_string(bixnum->getNumElements()),
                 {Binding{"bixnum", bixnum}}, {Binding{"result", result}}), mTestVal(immediate) {}
 protected:
     void generatePabloMethod() override;
@@ -772,9 +772,9 @@ void UGT_Kernel::generatePabloMethod() {
 
 class SpreadMaskStep final : public pablo::PabloKernel {
 public:
-    SpreadMaskStep(KernelBuilder & b,
+    SpreadMaskStep(LLVMTypeSystemInterface & ts,
                    StreamSet * bixnum, StreamSet * result, InsertPosition p = InsertPosition::Before) :
-    pablo::PabloKernel(b, "spreadMaskStep_" + InsertString(bixnum, p),
+    pablo::PabloKernel(ts, "spreadMaskStep_" + InsertString(bixnum, p),
                 {Bind("bixnum", bixnum, LookAhead(1))},
                 {Bind("result", result)}), mInsertPos(p) {}
 protected:
@@ -823,14 +823,14 @@ StreamSet * InsertionSpreadMask(PipelineBuilder & P,
     spread1_mask = UnitInsertionSpreadMask(P, bixNumInsertCount, pos, expansionRate);
     /* Spread out the counts so that there are two positions for each nonzero entry. */
     StreamSet * spread_counts = P.CreateStreamSet(steps);
-    SpreadByMask(P, spread1_mask, bixNumInsertCount, spread_counts, false, 0, itemsPerOutputUnit);
+    SpreadByMask(P, spread1_mask, bixNumInsertCount, spread_counts, false, 0); // , itemsPerOutputUnit);
     /* Divide the count at each original position equally into the
        two positions that were created by the unit spread process. */
     StreamSet * reduced_counts = P.CreateStreamSet(steps - 1);
     P.CreateKernelCall<SpreadMaskStep>(spread_counts, reduced_counts, pos);
     StreamSet * submask = InsertionSpreadMask(P, reduced_counts, pos, itemsPerOutputUnit, expansionRate);
     StreamSet * finalmask = P.CreateStreamSet(1);
-    SpreadByMask(P, submask, spread1_mask, finalmask, false, 0, itemsPerOutputUnit);
+    SpreadByMask(P, submask, spread1_mask, finalmask, false, 0); // , itemsPerOutputUnit);
     return finalmask;
 }
 }

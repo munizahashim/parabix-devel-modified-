@@ -1,12 +1,12 @@
 #pragma once
 
 #include <codegen/FunctionTypeBuilder.h>
-#include <codegen/virtual_driver.h>
+#include <codegen/LLVMTypeSystemInterface.h>
 #include <llvm/ExecutionEngine/GenericValue.h>
 #include <kernel/core/kernel.h>
 #include <kernel/core/relationship.h>
 #include <util/slab_allocator.h>
-#include <boost/integer.hpp>
+#include <llvm/IR/Constants.h>
 #include <kernel/illustrator/illustrator.h>
 #include <string>
 #include <vector>
@@ -14,30 +14,52 @@
 
 namespace llvm { class Function; }
 namespace kernel { class KernelBuilder; }
+namespace kernel { class PipelineAnalysis; }
+namespace kernel { class PipelineBuilder; }
 namespace kernel { class ProgramBuilder; }
+namespace kernel {template<typename ... Args> class TypedProgramBuilder; }
+
 class CBuilder;
 class ParabixObjectCache;
 
-class BaseDriver : public codegen::VirtualDriver {
+class BaseDriver : public LLVMTypeSystemInterface {
     friend class CBuilder;
+    friend class kernel::PipelineAnalysis;
+    friend class kernel::PipelineBuilder;
     friend class kernel::ProgramBuilder;
     friend class kernel::Kernel;
+    template<typename ... Args> friend class kernel::TypedProgramBuilder;
+
 public:
 
     using Kernel = kernel::Kernel;
     using Relationship = kernel::Relationship;
     using Bindings = kernel::Bindings;
     using KernelSet = std::vector<std::unique_ptr<Kernel>>;
-    using KernelMap = llvm::StringMap<std::unique_ptr<Kernel>>;
 
+    void addKernel(not_null<Kernel *> kernel);
 
-    std::unique_ptr<kernel::ProgramBuilder> makePipelineWithIO(Bindings stream_inputs = {}, Bindings stream_outputs = {}, Bindings scalar_inputs = {}, Bindings scalar_outputs = {});
+    virtual bool hasExternalFunction(const llvm::StringRef functionName) const = 0;
 
-    std::unique_ptr<kernel::ProgramBuilder> makePipeline(Bindings scalar_inputs = {}, Bindings scalar_outputs = {});
+    virtual void generateUncachedKernels() = 0;
 
-    kernel::KernelBuilder & getBuilder() {
-        return *mBuilder;
+    virtual void * finalizeObject(kernel::Kernel * pipeline) = 0;
+
+    virtual ~BaseDriver();
+
+    llvm::LLVMContext & getContext() const final {
+        return *mContext.get();
     }
+
+    bool getPreservesKernels() const {
+        return mPreservesKernels;
+    }
+
+    void setPreserveKernels(const bool value = true) {
+        mPreservesKernels = value;
+    }
+
+protected:
 
     kernel::StreamSet * CreateStreamSet(const unsigned NumElements = 1, const unsigned FieldWidth = 1) noexcept;
 
@@ -53,31 +75,13 @@ public:
 
     kernel::Scalar * CreateCommandLineScalar(kernel::CommandLineScalarType type) noexcept;
 
-    void addKernel(not_null<Kernel *> kernel);
+    unsigned getBitBlockWidth() const final;
 
-    virtual bool hasExternalFunction(const llvm::StringRef functionName) const = 0;
+    llvm::VectorType * getBitBlockType() const final;
 
-    virtual void generateUncachedKernels() = 0;
+    llvm::VectorType * getStreamTy(const unsigned FieldWidth = 1) final;
 
-    virtual void * finalizeObject(kernel::Kernel * pipeline) = 0;
-
-    virtual ~BaseDriver();
-
-    llvm::LLVMContext & getContext() const {
-        return *mContext.get();
-    }
-
-    llvm::Module * getMainModule() const {
-        return mMainModule;
-    }
-
-    bool getPreservesKernels() const {
-        return mPreservesKernels;
-    }
-
-    void setPreserveKernels(const bool value = true) {
-        mPreservesKernels = value;
-    }
+    llvm::ArrayType * getStreamSetTy(const unsigned NumElements = 1, const unsigned FieldWidth = 1) final;
 
 protected:
 
@@ -87,6 +91,10 @@ protected:
     void LinkFunction(not_null<Kernel *> kernel, llvm::StringRef name, ExternalFunctionType & functionPtr) const;
 
     virtual llvm::Function * addLinkFunction(llvm::Module * mod, llvm::StringRef name, llvm::FunctionType * type, void * functionPtr) const = 0;
+
+    kernel::KernelBuilder & getBuilder() {
+        return *mBuilder;
+    }
 
 protected:
 

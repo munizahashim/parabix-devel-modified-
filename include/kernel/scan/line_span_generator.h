@@ -29,7 +29,7 @@ namespace kernel {
  */
 class LineSpanGenerator : public SingleStreamScanKernelTemplate {
 public:
-    LineSpanGenerator(KernelBuilder & b, StreamSet * linebreaks, StreamSet * output);
+    LineSpanGenerator(LLVMTypeSystemInterface & ts, StreamSet * linebreaks, StreamSet * output);
 protected:
     void generateProcessingLogic(KernelBuilder & b, llvm::Value * absoluteIndex) override;
 private:
@@ -56,7 +56,7 @@ private:
  */
 class LineSpanFilterKernel : public MultiBlockKernel {
 public:
-    LineSpanFilterKernel(KernelBuilder & b, StreamSet * lineNumbers, StreamSet * spans, StreamSet * output);
+    LineSpanFilterKernel(LLVMTypeSystemInterface & ts, StreamSet * lineNumbers, StreamSet * spans, StreamSet * output);
 protected:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };
@@ -86,11 +86,11 @@ namespace scan {
  *  output[0]:      0, 3
  *  output[1]:      4, 7
  */
-inline StreamSet * LineSpans(const std::unique_ptr<ProgramBuilder> & P, StreamSet * linebreaks) {
+inline StreamSet * LineSpans(PipelineBuilder & P, StreamSet * linebreaks) {
     assert(linebreaks->getFieldWidth() == 1);
     assert(linebreaks->getNumElements() == 1);
-    StreamSet * const out = P->CreateStreamSet(2, 64);
-    P->CreateKernelCall<LineSpanGenerator>(linebreaks, out);
+    StreamSet * const out = P.CreateStreamSet(2, 64);
+    P.CreateKernelCall<LineSpanGenerator>(linebreaks, out);
     return out;
 }
 
@@ -130,7 +130,7 @@ inline StreamSet * LineSpans(const std::unique_ptr<ProgramBuilder> & P, StreamSe
  *      // -- snip --
  *      using namespace kernel;
  *      // -- snip -- 
- *      std::unique_ptr<ProgramBuilder> P = ...;
+ *      PipelineBuilder P = ...;
  *      CPUDriver driver = ...;
  *      StreamSet * Source = ...; // <i8>[1]
  *      StreamSet * Linebreaks = ...; // <i1>[1]
@@ -145,11 +145,11 @@ inline StreamSet * LineSpans(const std::unique_ptr<ProgramBuilder> & P, StreamSe
  *      // `Spans` are converted to pointers in `Source` and passed to `callback`
  *      scan::Reader(P, driver, SCAN_CALLBACK(callback), Source, Spans);
  */
-inline StreamSet * FilterLineSpans(const std::unique_ptr<ProgramBuilder> & P, StreamSet * lineNumbers, StreamSet * spans) {
+inline StreamSet * FilterLineSpans(PipelineBuilder & P, StreamSet * lineNumbers, StreamSet * spans) {
     assert(lineNumbers->getFieldWidth() == 64 && lineNumbers->getNumElements() == 1);
     assert(spans->getFieldWidth() == 64 && spans->getNumElements() == 2);
-    StreamSet * const out = P->CreateStreamSet(2, 64);
-    P->CreateKernelCall<LineSpanFilterKernel>(lineNumbers, spans, out);
+    StreamSet * const out = P.CreateStreamSet(2, 64);
+    P.CreateKernelCall<LineSpanFilterKernel>(lineNumbers, spans, out);
     return out;
 }
 

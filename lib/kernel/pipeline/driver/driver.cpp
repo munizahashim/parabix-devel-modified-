@@ -1,7 +1,7 @@
 #include <kernel/pipeline/driver/driver.h>
 
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <llvm/IR/Module.h>
 #include <toolchain/toolchain.h>
 #include <objcache/object_cache.h>
@@ -11,28 +11,6 @@ using namespace kernel;
 using namespace llvm;
 
 using RelationshipAllocator = Relationship::Allocator;
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief makePipelineWithIO
- ** ------------------------------------------------------------------------------------------------------------- */
-std::unique_ptr<ProgramBuilder> BaseDriver::makePipelineWithIO(Bindings stream_inputs, Bindings stream_outputs, Bindings scalar_inputs, Bindings scalar_outputs) {
-    PipelineKernel * const pipeline =
-        new PipelineKernel(getBuilder(),
-                           std::move(stream_inputs), std::move(stream_outputs),
-                           std::move(scalar_inputs), std::move(scalar_outputs));
-    return std::make_unique<ProgramBuilder>(*this, pipeline);
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief makePipeline
- ** ------------------------------------------------------------------------------------------------------------- */
-std::unique_ptr<ProgramBuilder> BaseDriver::makePipeline(Bindings scalar_inputs, Bindings scalar_outputs) {
-    PipelineKernel * const pipeline =
-        new PipelineKernel(getBuilder(),
-                           {}, {},
-                           std::move(scalar_inputs), std::move(scalar_outputs));
-    return std::make_unique<ProgramBuilder>(*this, pipeline);
-}
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief CreateStreamSet
@@ -122,8 +100,8 @@ void BaseDriver::addKernel(not_null<Kernel *> kernel) {
     // Verify the I/O relationships were properly set / defaulted in.
 
     for (Binding & input : kernel->getInputScalarBindings()) {
-        if (input.getRelationship() == nullptr) {
-            input.setRelationship(CreateScalar(input.getType()));
+        if (LLVM_UNLIKELY(input.getRelationship() == nullptr)) {
+            report_fatal_error(StringRef(kernel->getName()) + "." + input.getName() + " must be set upon construction");
         }
     }
 
@@ -170,6 +148,34 @@ void BaseDriver::addKernel(not_null<Kernel *> kernel) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getBitBlockWidth
+ ** ------------------------------------------------------------------------------------------------------------- */
+unsigned BaseDriver::getBitBlockWidth() const {
+    return mBuilder->getBitBlockWidth();
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getBitBlockType
+ ** ------------------------------------------------------------------------------------------------------------- */
+VectorType * BaseDriver::getBitBlockType() const {
+    return mBuilder->getBitBlockType();
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getStreamTy
+ ** ------------------------------------------------------------------------------------------------------------- */
+VectorType * BaseDriver::getStreamTy(const unsigned FieldWidth) {
+    return mBuilder->getStreamTy(FieldWidth);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief getStreamSetTy
+ ** ------------------------------------------------------------------------------------------------------------- */
+ArrayType * BaseDriver::getStreamSetTy(const unsigned NumElements, const unsigned FieldWidth) {
+    return mBuilder->getStreamSetTy(NumElements, FieldWidth);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructor
  ** ------------------------------------------------------------------------------------------------------------- */
 BaseDriver::BaseDriver(std::string && moduleName)
@@ -182,9 +188,7 @@ BaseDriver::BaseDriver(std::string && moduleName)
     }
 }
 
-/** ------------------------------------------------------------------------------------------------------------- *
- * @brief destructor
- ** ------------------------------------------------------------------------------------------------------------- */
 BaseDriver::~BaseDriver() {
 
 }
+

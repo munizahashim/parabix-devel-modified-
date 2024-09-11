@@ -9,7 +9,7 @@
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/util/radix64.h>
 #include <kernel/core/kernel_builder.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <llvm/Support/CommandLine.h>
 #include <iostream>
 #include <sys/stat.h>
@@ -32,21 +32,19 @@ using namespace kernel;
 
 typedef void (*base64FunctionType)(const uint32_t fd);
 
-base64FunctionType base64PipelineGen(CPUDriver & pxDriver) {
-    auto & b = pxDriver.getBuilder();
-    Type * const int32Ty = b.getInt32Ty();
-    auto P = pxDriver.makePipeline({Binding{int32Ty, "fd"}});
-    Scalar * const fileDescriptor = P->getInputScalar("fd");
-    StreamSet * const ByteStream = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
-    StreamSet * const Expanded3_4Out = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<expand3_4Kernel>(ByteStream, Expanded3_4Out);
-    StreamSet * const Radix64out = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<radix64Kernel>(Expanded3_4Out, Radix64out);
-    StreamSet * const base64 = P->CreateStreamSet(1, 8);
-    P->CreateKernelCall<base64Kernel>(Radix64out, base64);
-    P->CreateKernelCall<StdOutKernel>(base64);
-    return reinterpret_cast<base64FunctionType>(P->compile());
+auto base64PipelineGen(CPUDriver & driver) {
+    auto P = CreatePipeline(driver, Input<uint32_t>("fd"));
+    Scalar * const fileDescriptor = P.getInputScalar("fd");
+    StreamSet * const ByteStream = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
+    StreamSet * const Expanded3_4Out = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<expand3_4Kernel>(ByteStream, Expanded3_4Out);
+    StreamSet * const Radix64out = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<radix64Kernel>(Expanded3_4Out, Radix64out);
+    StreamSet * const base64 = P.CreateStreamSet(1, 8);
+    P.CreateKernelCall<base64Kernel>(Radix64out, base64);
+    P.CreateKernelCall<StdOutKernel>(base64);
+    return P.compile();
 }
 
 size_t file_size(const int fd) {
@@ -70,8 +68,8 @@ void base64(base64FunctionType fn_ptr, const std::string & fileName) {
 int main(int argc, char *argv[]) {
     codegen::ParseCommandLineOptions(argc, argv, {&base64Options, codegen::codegen_flags()});
 
-    CPUDriver pxDriver("base64");
-    auto fn_ptr = base64PipelineGen(pxDriver);
+    CPUDriver driver("base64");
+    auto fn_ptr = base64PipelineGen(driver);
     #ifdef REPORT_PAPI_TESTS
     papi::PapiCounter<4> jitExecution{{PAPI_L3_TCM, PAPI_L3_TCA, PAPI_TOT_INS, PAPI_TOT_CYC}};
     // papi::PapiCounter<3> jitExecution{{PAPI_FUL_ICY, PAPI_STL_CCY, PAPI_RES_STL}};

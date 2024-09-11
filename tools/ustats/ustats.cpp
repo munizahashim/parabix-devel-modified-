@@ -20,7 +20,7 @@
 #include <kernel/io/stdout_kernel.h>
 #include <kernel/pipeline/driver/cpudriver.h>
 #include <kernel/pipeline/driver/driver.h>
-#include <kernel/pipeline/pipeline_builder.h>
+#include <kernel/pipeline/program_builder.h>
 #include <kernel/unicode/UCD_property_kernel.h>
 #include <kernel/util/hex_convert.h>
 
@@ -29,6 +29,8 @@
 #include <re/cc/cc_compiler.h>
 #include <re/cc/cc_compiler_target.h>
 #include <re/unicode/resolve_properties.h>
+
+#include <kernel/pipeline/program_builder.h>
 
 namespace ustats
 {
@@ -79,46 +81,40 @@ namespace ustats
         
         typedef void (*UStatsPropertyType)( uint32_t fd );
 
-        UStatsPropertyType generatePipeline(CPUDriver & pxDriver, std::string property)
+        UStatsPropertyType generatePipeline(CPUDriver & driver, std::string property)
         {
-            auto & b = pxDriver.getBuilder();
-            std::unique_ptr<kernel::ProgramBuilder> program = pxDriver.makePipeline(
-                {
-                    kernel::Binding{ b.getInt32Ty(), "inputFileDescriptor" },
-                },
-                {}
-            );
+            auto P = CreatePipeline(driver, kernel::Input<uint32_t>{"inputFileDescriptor"});
 
-            kernel::Scalar* fileDescriptor = program->getInputScalar("inputFileDescriptor");
-            kernel::StreamSet* byteStream = program->CreateStreamSet(1, 8);
-            program->CreateKernelCall<kernel::ReadSourceKernel>(
+            kernel::Scalar* fileDescriptor = P.getInputScalar("inputFileDescriptor");
+            kernel::StreamSet* byteStream = P.CreateStreamSet(1, 8);
+            P.CreateKernelCall<kernel::ReadSourceKernel>(
                 fileDescriptor,
                 byteStream
             );
 
-            kernel::StreamSet * BasisBits = program->CreateStreamSet(8);
-            program->CreateKernelCall<kernel::S2PKernel>(byteStream, BasisBits);
+            kernel::StreamSet * BasisBits = P.CreateStreamSet(8);
+            P.CreateKernelCall<kernel::S2PKernel>(byteStream, BasisBits);
 
-            kernel::StreamSet* outputStream = program->CreateStreamSet(1);
+            kernel::StreamSet* outputStream = P.CreateStreamSet(1);
 
             re::RE * wordProp = re::makePropertyExpression(re::PropertyExpression::Kind::Codepoint, property);
             wordProp = UCD::linkAndResolve(wordProp);
             re::Name * word = re::makeName(property, re::Name::Type::UnicodeProperty);
             word->setDefinition(wordProp);
 
-            program->CreateKernelFamilyCall<kernel::UnicodePropertyKernelBuilder>(
+            P.CreateKernelFamilyCall<kernel::UnicodePropertyKernelBuilder>(
                 word,
                 BasisBits,
                 outputStream
             );
 
-            kernel::Kernel* occurenceKernel = program->CreateKernelCall<OutputOccurencesKernel>(outputStream);
+            kernel::Kernel* occurenceKernel = P.CreateKernelCall<OutputOccurencesKernel>(outputStream);
             kernel::Scalar* numberOfOccurences = occurenceKernel->getOutputScalarAt(0);
 
-            // program->CreateCall("countOccurences", countOccurences, {numberOfOccurences, outputFileDescriptor});
-            program->CreateCall("countOccurences", countOccurences, {numberOfOccurences});
+            // P.CreateCall("countOccurences", countOccurences, {numberOfOccurences, outputFileDescriptor});
+            P.CreateCall("countOccurences", countOccurences, {numberOfOccurences});
 
-            return reinterpret_cast<UStatsPropertyType>(program->compile());
+            return P.compile();
         }
 
         // todo: integrate with llvm
