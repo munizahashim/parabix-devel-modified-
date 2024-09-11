@@ -59,7 +59,7 @@ extern bool UnicodeLinesFlag; // -Unicode-lines
 //  Grep abbreviated output modes corresponding to -q, -l, -L, -c flags, or normal
 //  matched line output mode (no abbreviated mode flag specified).
 //
-enum GrepModeType {QuietMode, FilesWithMatch, FilesWithoutMatch, CountOnly, NormalMode};
+enum GrepModeType {QuietMode, FilesWithMatch, FilesWithoutMatch, CountOnly, CountAll, NormalMode};
 extern GrepModeType Mode;
 
 enum ColoringType {alwaysColor, autoColor, neverColor};

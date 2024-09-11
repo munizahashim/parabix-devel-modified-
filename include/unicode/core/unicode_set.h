@@ -105,11 +105,15 @@ public:
     bool contains(const codepoint_t codepoint) const noexcept;
 
     bool intersects(const codepoint_t lo, const codepoint_t hi) const noexcept;
-    
+
     bool intersects(const UnicodeSet & other) const noexcept;
 
     bool subset(const UnicodeSet & other) const noexcept;
-    
+
+    // Return the bitquad (bit vector) of 32 consecutive
+    // codepoints including the given codepoint.
+    bitquad_t bitquad_at(const codepoint_t at) const noexcept;
+
     void insert(const codepoint_t cp);
 
     void insert(const UnicodeSet & other) noexcept;
@@ -135,7 +139,7 @@ public:
     UnicodeSet operator+(const UnicodeSet & other) const noexcept;
     UnicodeSet operator-(const UnicodeSet & other) const noexcept;
     UnicodeSet operator^(const UnicodeSet & other) const noexcept;
-    
+
     // The subset of a UnicodeSet consisting of the isolated codepoints only, i.e.,
     // those codepoints cp such that neither cp-1 nor cp+1 is a member of the set.
     UnicodeSet isolates () const noexcept;

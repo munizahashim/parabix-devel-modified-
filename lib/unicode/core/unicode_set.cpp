@@ -943,6 +943,29 @@ bool UnicodeSet::contains(const codepoint_t cp) const noexcept {
     return false;
 }
 
+bitquad_t UnicodeSet::bitquad_at(const codepoint_t cp) const noexcept {
+    codepoint_t offset = cp / QUAD_BITS;
+    for (unsigned runIndex = 0, quadIndex = 0; runIndex < mRunLength; ++runIndex) {
+        length_t length = 0;
+        run_type_t type = Empty;
+        std::tie(type, length) = mRuns[runIndex];
+        if (offset < length) {
+            if (type == Mixed) {
+                return mQuads[quadIndex + offset];
+            } else if (type == Full) {
+                return ~0;
+            } else {
+                return 0;
+            }
+        }
+        if (type == Mixed) {
+            quadIndex += length;
+        }
+        offset -= length;
+    }
+    return 0;
+}
+
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief intersects
  * @param lo_codepoint
