@@ -803,19 +803,59 @@ Value * IDISA_Builder::esimd_mergel(unsigned fw, Value * a, Value * b) {
 
 Value * IDISA_Builder::esimd_bitspread(unsigned fw, Value * bitmask) {
     if (fw < 8) UnsupportedFieldWidthError(fw, "bitspread");
+
+    // reverse hsimd_signmask, add_with_carry may work better with low bit set
     const auto field_count = mBitBlockWidth / fw;
-    Type * field_type = getIntNTy(fw);
-    Value * spread_field = CreateBitCast(CreateZExtOrTrunc(bitmask, field_type), FixedVectorType::get(getIntNTy(fw), 1));
-    Value * undefVec = UndefValue::get(FixedVectorType::get(getIntNTy(fw), 1));
-    Value * broadcast = CreateShuffleVector(spread_field, undefVec, Constant::getNullValue(FixedVectorType::get(getInt32Ty(), field_count)));
-    SmallVector<Constant *, 16> bitSel(field_count);
-    SmallVector<Constant *, 16> bitShift(field_count);
-    for (unsigned i = 0; i < field_count; i++) {
-        bitSel[i] = ConstantInt::get(field_type, 1 << i);
-        bitShift[i] = ConstantInt::get(field_type, i);
+    IntegerType * field_type = getIntNTy(fw);
+    Value * broadcast = nullptr;
+    Constant * bitSelVec = nullptr;
+    Constant * bitShiftVec = nullptr;
+    if (field_count <= fw) {
+        Value * spread_field = CreateBitCast(CreateZExtOrTrunc(bitmask, field_type), FixedVectorType::get(getIntNTy(fw), 1));
+        Value * undefVec = UndefValue::get(FixedVectorType::get(getIntNTy(fw), 1));
+        broadcast = CreateShuffleVector(spread_field, undefVec, Constant::getNullValue(FixedVectorType::get(getInt32Ty(), field_count)));
+        SmallVector<Constant *, 16> bitSel(field_count);
+        SmallVector<Constant *, 16> bitShift(field_count);
+        for (unsigned i = 0; i < field_count; i++) {
+            bitSel[i] = ConstantInt::get(field_type, 1ULL << i);
+            bitShift[i] = ConstantInt::get(field_type, i);
+        }
+        bitSelVec = ConstantVector::get(bitSel);
+        bitShiftVec = ConstantVector::get(bitShift);
+    } else {
+        assert ((field_count % fw) == 0);
+
+        const auto m = field_count / fw;
+        IntegerType * const intFieldCountTy = getIntNTy(field_count);
+        VectorType * const intFieldCountVecTy = FixedVectorType::get(field_type, m);
+        Value * spread_field = CreateBitCast(CreateZExtOrTrunc(bitmask, intFieldCountTy), intFieldCountVecTy);
+        SmallVector<Constant *, 16> shuffle(field_count);
+        for (unsigned i = 0; i < m; ++i) {
+            ConstantInt * I = getInt32(i);
+            for (unsigned j = 0; j < fw; ++j) {
+                const auto k = i * fw + j;
+                assert (k < field_count);
+                shuffle[k] = I;
+            }
+        }
+        Constant * shuffleVec = ConstantVector::get(shuffle);
+        Constant * undefVec = UndefValue::get(intFieldCountVecTy);
+        broadcast = CreateShuffleVector(spread_field, undefVec, shuffleVec);
+        SmallVector<Constant *, 16> bitSel(field_count);
+        SmallVector<Constant *, 16> bitShift(field_count);
+        for (unsigned j = 0; j < fw; ++j) {
+            ConstantInt * sel = ConstantInt::get(field_type, 1ULL << j);
+            ConstantInt * shift = ConstantInt::get(field_type, j);
+            for (unsigned i = 0; i < m; ++i) {
+                const auto k = i * fw + j;
+                assert (k < field_count);
+                bitSel[k] = sel;
+                bitShift[k] = shift;
+            }
+        }
+        bitSelVec = ConstantVector::get(bitSel);
+        bitShiftVec = ConstantVector::get(bitShift);
     }
-    Value * bitSelVec = ConstantVector::get(bitSel);
-    Value * bitShiftVec = ConstantVector::get(bitShift);
     return CreateLShr(CreateAnd(bitSelVec, broadcast), bitShiftVec);
 }
 

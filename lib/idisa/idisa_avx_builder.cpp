@@ -547,12 +547,13 @@ Value * IDISA_AVX2_Builder::mvmd_shuffle(unsigned fw, Value * a, Value * index_v
             IntegerType * const int8Ty = getInt8Ty();
 
             Constant * SIXTEEN = getSplat(fieldCount, ConstantInt::get(int8Ty, 16));
+
             auto createShuffleVec = [&](int a, int b, int c, int d) {
                 FixedArray<Constant *, 4> idx;
-                idx[0] = getInt64(a);
-                idx[1] = getInt64(b);
-                idx[2] = getInt64(c);
-                idx[3] = getInt64(d);
+                idx[0] = getInt32(a);
+                idx[1] = getInt32(b);
+                idx[2] = getInt32(c);
+                idx[3] = getInt32(d);
                 return ConstantVector::get(idx);
             };
 
@@ -663,17 +664,10 @@ Value * IDISA_AVX2_Builder::mvmd_compress(unsigned fw, Value * a, Value * select
 
             Type * resultTy = fwVectorType(fw);
 
-
-            // TODO: esimd_bitspread doesn't seem to be correct for AVX2? verify this
-            auto bitspread = [&](Value * bitmask) {
-                Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
-                return CreateZExt(CreateBitCast(CreateZExtOrTrunc(bitmask, getIntNTy(fieldCount)), maskTy), resultTy);
-            };
-
             for (unsigned i = 0; i < m; ++i) {
                 args[0] = ConstantInt::get(intTy, indices[i]);
                 Value * const expanded = CreateCall(pextFunc->getFunctionType(), pextFunc, args);
-                Value * byteExpanded = bitspread(expanded);
+                Value * byteExpanded = esimd_bitspread(fw, expanded);
                 if (i == 0) {
                     permute_vec = byteExpanded;
                 } else {
@@ -734,16 +728,10 @@ Value * IDISA_AVX2_Builder::mvmd_expand(unsigned fw, Value * a, Value * select_m
 
              Type * resultTy = fwVectorType(fw);
 
-             // TODO: esimd_bitspread doesn't seem to be correct for AVX2? verify this
-             auto bitspread = [&](Value * bitmask) {
-                 Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
-                 return CreateZExt(CreateBitCast(CreateZExtOrTrunc(bitmask, getIntNTy(fieldCount)), maskTy), resultTy);
-             };
-
              for (unsigned i = 0; i < m; ++i) {
                  args[0] = ConstantInt::get(intTy, indices[i]);
                  Value * const expanded = CreateCall(pdepFunc->getFunctionType(), pdepFunc, args);
-                 Value * byteExpanded = bitspread(expanded);
+                 Value * byteExpanded = esimd_bitspread(fw, expanded);
                  if (i == 0) {
                      permute_vec = byteExpanded;
                  } else {
@@ -757,7 +745,7 @@ Value * IDISA_AVX2_Builder::mvmd_expand(unsigned fw, Value * a, Value * select_m
 
              // // Step 4: Use mvmd_shuffle to shuffle using permute_vec
              Value * const shuffled = mvmd_shuffle(fw, a, permute_vec);
-             Value * const mask = simd_any(fw, bitspread(select_mask));
+             Value * const mask = simd_any(fw, esimd_bitspread(fw, select_mask));
              assert (shuffled->getType() == mask->getType());
              return CreateAnd(shuffled, mask);
          }
