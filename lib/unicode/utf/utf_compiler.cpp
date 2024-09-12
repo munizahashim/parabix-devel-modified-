@@ -35,9 +35,13 @@ static cl::opt<unsigned> ShiftCostFactor("ShiftCostFactor", cl::init(10), cl::ca
 static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", cl::init(15), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> PartitioningCostThreshhold("PartitioningCostThreshhold", cl::init(12), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(4), cl::cat(codegen::CodeGenOptions));
-static cl::opt<bool> SuffixOptimization("SuffixOptimization", cl::init(false), cl::cat(codegen::CodeGenOptions));
-static cl::opt<bool> InitialNonASCIITest("InitialNonASCIITest", cl::init(false), cl::cat(codegen::CodeGenOptions));
-static cl::opt<bool> PrefixCCTest("PrefixCCTest", cl::init(false), cl::cat(codegen::CodeGenOptions));
+enum class InitialTestMode {PrefixCC, RangeCC, NonASCII};
+static cl::opt<InitialTestMode> InitialTest("InitialTest", cl::ValueOptional,
+cl::values(
+           clEnumValN(InitialTestMode::PrefixCC, "PrefixCC", "Initial test based on exact prefix CC."),
+           clEnumValN(InitialTestMode::RangeCC, "RangeCC", "Initial test based on range of possible prefixes."),
+           clEnumValN(InitialTestMode::NonASCII, "NonASCII", "Initial test based on non ASCII (any prefix/suffix).")),
+                                            cl::cat(codegen::CodeGenOptions), cl::init(InitialTestMode::PrefixCC));
 static cl::opt<bool> UTF_CompilationTracing("UTF_CompilationTracing", cl::init(false), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> BixNumCCs("BixNumCCs", cl::init(false), cl::cat(codegen::CodeGenOptions));
 
@@ -48,14 +52,10 @@ std::string kernelAnnotation() {
     a += "i" + std::to_string(IfEmbeddingCostThreshhold);
     a += "p" + std::to_string(PartitioningCostThreshhold);
     a += "f" + std::to_string(PartitioningFactor);
-    if (SuffixOptimization) {
-        a += "+sfx";
-    }
-    if (InitialNonASCIITest) {
+    if (InitialTest == InitialTestMode::NonASCII) {
         a += "+nA";
-    }
-    if (PrefixCCTest) {
-        a += "+pCC";
+    } else if (InitialTest == InitialTestMode::RangeCC) {
+        a += "+rCC";
     }
     if (BixNumCCs) {
         a += "+bx";
@@ -1028,7 +1028,7 @@ void U21_Compiler::createInitialHierarchy(CC_List & ccs) {
     if (UTF_CompilationTracing) {
         llvm::errs() << "U21_Compiler\n";
     }
-    if (InitialNonASCIITest) {
+    if (InitialTest == InitialTestMode::NonASCII) {
         Range ASCII_Range{0, 0x7F};
         CC_List ASCII_ccs(ccs.size());
         extract_CCs_by_range(ASCII_Range, ccs, ASCII_ccs);
@@ -1148,13 +1148,13 @@ void U8_Compiler::createInitialHierarchy(CC_List & ccs) {
     extract_CCs_by_range(nonASCII_Range, ccs, nonASCII_ccs);
     Range actual_subrange = CC_Set_Range(nonASCII_ccs);
     if (!actual_subrange.is_empty()) {
-        if (InitialNonASCIITest) {
+        if (InitialTest == InitialTestMode::NonASCII) {
             PabloAST * nonASCII_test = combineAnd(mMask, mScopeBasis[0][7], mPB);
             auto nested = mPB.createScope();
             mPB.createIf(nonASCII_test, nested);
             preparePrefixTests(nonASCII_test, nested);
             extendLengthHierarchy(nonASCII_test, nested);
-        } else if (!PrefixCCTest) {
+        } else if (InitialTest == InitialTestMode::RangeCC) {
             unsigned lo_prefix = mEncoder.nthCodeUnit(actual_subrange.lo, 1);
             unsigned hi_prefix = mEncoder.nthCodeUnit(actual_subrange.hi, 1);
             re::CC * prefix_range_CC = re::makeCC(lo_prefix, hi_prefix, &Byte);
@@ -1163,7 +1163,7 @@ void U8_Compiler::createInitialHierarchy(CC_List & ccs) {
             mPB.createIf(prefix_range_test, nested);
             preparePrefixTests(prefix_range_test, nested);
             extendLengthHierarchy(prefix_range_test, nested);
-        } else {
+        } else { // InitialTest == InitialTestMode::PrefixCC
             preparePrefixTests(mMask, mPB);
             auto nested = mPB.createScope();
             mPB.createIf(mSeqData[TwoByte].combinedTest, nested);
@@ -1172,22 +1172,24 @@ void U8_Compiler::createInitialHierarchy(CC_List & ccs) {
     }
 }
 
-void U8_Compiler::extendLengthHierarchy(PabloAST * enclosingTest, PabloBuilder & pb) {
-    if (!mSeqData[TwoByte].byte1CC->empty()) {
-        prepareScope(TwoByte, pb);
-        prepareFixedLengthHierarchy(TwoByte, enclosingTest, pb);
-    }
-    PabloAST * outer_test = mSeqData[ThreeByte].combinedTest;
-    if (outer_test == nullptr) return;
-    auto nested = pb.createScope();
-    pb.createIf(outer_test, nested);
-    if (!mSeqData[ThreeByte].byte1CC->empty()) {
+void U8_Compiler::extendLengthHierarchy(PabloAST * initialTest, PabloBuilder & pb) {
+    prepareScope(TwoByte, pb);
+    prepareFixedLengthHierarchy(TwoByte, initialTest, pb);
+    PabloAST * prefix34_test = mSeqData[ThreeByte].combinedTest;
+    if (prefix34_test == nullptr) return;  // No code generation required.
+    if (prefix34_test == initialTest) {
+        // No nesting required.
+        prepareScope(ThreeByte, pb);
+        prepareFixedLengthHierarchy(ThreeByte, prefix34_test, pb);
+        prepareScope(FourByte, pb);
+        prepareFixedLengthHierarchy(FourByte, prefix34_test, pb);
+    } else {
+        auto nested = pb.createScope();
+        pb.createIf(prefix34_test, nested);
         prepareScope(ThreeByte, nested);
-        prepareFixedLengthHierarchy(ThreeByte, outer_test, nested);
-    }
-    if (!mSeqData[FourByte].byte1CC->empty()) {
+        prepareFixedLengthHierarchy(ThreeByte, prefix34_test, nested);
         prepareScope(FourByte, nested);
-        prepareFixedLengthHierarchy(FourByte, outer_test, nested);
+        prepareFixedLengthHierarchy(FourByte, prefix34_test, nested);
     }
 }
 
@@ -1233,6 +1235,7 @@ U8_Compiler(v, pb, mask) {
 }
 
 void U8_Lookahead_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
+    if (mSeqData[scope].byte1CC->empty()) return;
     for (unsigned sfx = 1; sfx <= scope; sfx++) {
         bool basis_needed = mScopeBasis[sfx].size() == 0;
         if (basis_needed) {
