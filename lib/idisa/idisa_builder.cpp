@@ -351,9 +351,18 @@ Value * IDISA_Builder::simd_umin(unsigned fw, Value * a, Value * b) {
 
 Value * IDISA_Builder::mvmd_sll(unsigned fw, Value * value, Value * shift, const bool safe) {
     FixedVectorType * const vecTy = fwVectorType(fw);
-    IntegerType * const intTy = getIntNTy(vecTy->getPrimitiveSizeInBits());
-    Constant * const FIELD_WIDTH = ConstantInt::get(shift->getType(), fw);
-//    Constant * const BLOCK_WIDTH = ConstantInt::get(shift->getType(), vecTy->getBitWidth());
+    IntegerType * const intTy = getIntNTy(mBitBlockWidth);
+    Type * shiftTy = shift->getType();
+    if (LLVM_UNLIKELY(!shiftTy->isIntegerTy())) {
+        report_fatal_error("shift value type must be an integer");
+    }
+    // make sure the maximum bitwidth of the value can hold the multiplied value
+    if (shiftTy->getIntegerBitWidth() < vecTy->getNumElements()) {
+        shiftTy = vecTy->getElementType();
+        shift = CreateZExt(shift, shiftTy);
+    }
+
+    Constant * const FIELD_WIDTH = ConstantInt::get(shiftTy, fw);
     shift = CreateMul(shift, FIELD_WIDTH);
 //    if (LLVM_UNLIKELY(safe && codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
 //        Value * const inbounds = CreateICmpULT(shift, BLOCK_WIDTH);
@@ -391,9 +400,19 @@ Value * IDISA_Builder::mvmd_dsll(unsigned fw, Value * a, Value * b, Value * shif
 
 Value * IDISA_Builder::mvmd_srl(unsigned fw, Value * value, Value * shift, const bool safe) {
     FixedVectorType * const vecTy = fwVectorType(fw);
-    IntegerType * const intTy = getIntNTy(vecTy->getPrimitiveSizeInBits());
-    Constant * const FIELD_WIDTH = ConstantInt::get(shift->getType(), fw);
-//    Constant * const BLOCK_WIDTH = ConstantInt::get(shift->getType(), vecTy->getBitWidth());
+    IntegerType * const intTy = getIntNTy(mBitBlockWidth);
+    Type * shiftTy = shift->getType();
+    if (LLVM_UNLIKELY(!shiftTy->isIntegerTy())) {
+        report_fatal_error("shift value type must be an integer");
+    }
+    // make sure the maximum bitwidth of the value can hold the multiplied value
+    if (shiftTy->getIntegerBitWidth() < vecTy->getNumElements()) {
+        shiftTy = vecTy->getElementType();
+        shift = CreateZExt(shift, shiftTy);
+    }
+
+    Constant * const FIELD_WIDTH = ConstantInt::get(shiftTy, fw);
+
     shift = CreateMul(shift, FIELD_WIDTH);
 //    if (LLVM_UNLIKELY(safe && codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
 //        Value * const inbounds = CreateICmpULT(shift, BLOCK_WIDTH);
@@ -699,7 +718,7 @@ Value * IDISA_Builder::simd_if(unsigned fw, Value * cond, Value * a, Value * b) 
         if (fw < 8) UnsupportedFieldWidthError(fw, "simd_if");
         Value * aVec = fwCast(fw, a);
         Value * bVec = fwCast(fw, b);
-        return CreateSelect(CreateICmpSLT(cond, mZeroInitializer), aVec, bVec);
+        return CreateSelect(CreateICmpSLT(fwCast(fw, cond), ConstantVector::getNullValue(aVec->getType())), aVec, bVec);
     }
 }
 
@@ -802,9 +821,9 @@ Value * IDISA_Builder::esimd_mergel(unsigned fw, Value * a, Value * b) {
 }
 
 Value * IDISA_Builder::esimd_bitspread(unsigned fw, Value * bitmask) {
-    if (fw < 8) UnsupportedFieldWidthError(fw, "bitspread");
-
-    // reverse hsimd_signmask, add_with_carry may work better with low bit set
+    if (LLVM_UNLIKELY(fw < 8)) {
+        UnsupportedFieldWidthError(fw, "esimd_bitspread");
+    }
     const auto field_count = mBitBlockWidth / fw;
     IntegerType * field_type = getIntNTy(fw);
     Value * broadcast = nullptr;
@@ -824,7 +843,6 @@ Value * IDISA_Builder::esimd_bitspread(unsigned fw, Value * bitmask) {
         bitShiftVec = ConstantVector::get(bitShift);
     } else {
         assert ((field_count % fw) == 0);
-
         const auto m = field_count / fw;
         IntegerType * const intFieldCountTy = getIntNTy(field_count);
         VectorType * const intFieldCountVecTy = FixedVectorType::get(field_type, m);
@@ -1024,48 +1042,89 @@ Value * IDISA_Builder::mvmd_shuffle2(unsigned fw, Value * table0, Value * table1
     Constant * selectorSplat = getSplat(field_count, ConstantInt::get(getIntNTy(fw), field_count));
     Value * selectMask = simd_eq(fw, simd_and(index_vector, selectorSplat), selectorSplat);
     Value * idx = simd_and(index_vector, simd_not(selectorSplat));
-    Value * rslt= simd_or(simd_and(mvmd_shuffle(fw, table0, idx), simd_not(selectMask)), simd_and(mvmd_shuffle(fw, table1, idx), selectMask));
-    return rslt;
+    return simd_or(simd_and(mvmd_shuffle(fw, table0, idx), simd_not(selectMask)), simd_and(mvmd_shuffle(fw, table1, idx), selectMask));
 }
 
 
 Value * IDISA_Builder::mvmd_compress(unsigned fw, Value * v, Value * select_mask) {
-    if (fw <= 8) UnsupportedFieldWidthError(fw, "mvmd_compress");
-    v = fwCast(fw, v);
-    FixedVectorType * valueTy = cast<FixedVectorType>(v->getType());
-    Type * fieldTy = valueTy->getElementType();
-    unsigned field_count = valueTy->getNumElements();
-    Type * maskTy = select_mask->getType();
-    if (maskTy->isIntegerTy()) {
-        SmallVector<Constant *, 16> elements(field_count);
-        for (unsigned i = 0; i < field_count; i++) {
-            elements[i] = ConstantInt::get(fieldTy, 1<<i);
+    if (LLVM_UNLIKELY(fw < 8)) {
+        UnsupportedFieldWidthError(fw, "mvmd_compress");
+    } else {
+        IntegerType *  const fieldTy = getIntNTy(fw);
+        const auto fieldCount = mBitBlockWidth / fw;
+        Type * maskTy = select_mask->getType();
+        if (maskTy->isIntegerTy()) {
+            if (fieldCount <= fw) {
+                SmallVector<Constant *, 16> elements(fieldCount);
+                for (unsigned i = 0; i < fieldCount; i++) {
+                    elements[i] = ConstantInt::get(fieldTy, 1ULL << i);
+                }
+                Constant * seq = ConstantVector::get(elements);
+                select_mask = simd_eq(fw, simd_and(simd_fill(fw, select_mask), seq), seq);
+            } else {
+                Value * const spread_mask = esimd_bitspread(fw, select_mask);
+                select_mask = simd_any(fw, spread_mask);
+            }
         }
-        Constant * seq = ConstantVector::get(elements);
-        select_mask = simd_eq(fw, simd_and(simd_fill(fw, select_mask), seq), seq);
+        Value * selected = simd_and(v, select_mask);
+        Constant * oneSplat = getSplat(fieldCount, ConstantInt::get(fieldTy, 1));
+        Value * deletion_counts = simd_add(fw, oneSplat, select_mask);
+        Value * deletion_totals = hsimd_partial_sum(fw, deletion_counts);
+        unsigned shiftAmount = 1;
+        while (shiftAmount < fieldCount) {
+            Value * shift_splat = getSplat(fieldCount, ConstantInt::get(fieldTy, shiftAmount));
+            Value * shift_select = simd_and(deletion_totals, shift_splat);
+            Value * shift_mask = simd_eq(fw, shift_select, shift_splat);
+            Value * to_shift = simd_and(shift_mask, selected);
+            Value * shifted = mvmd_srli(fw, to_shift, shiftAmount);
+            deletion_totals = simd_sub(fw, deletion_totals, shift_select);
+            selected = simd_or(shifted, simd_xor(selected, to_shift));
+            shiftAmount *= 2;
+        }
+        return selected;
     }
-    Value * selected = simd_and(v, select_mask);
-    Constant * oneSplat = getSplat(field_count, ConstantInt::get(fieldTy, 1));
-    Value * deletion_counts = simd_add(fw, oneSplat, select_mask);
-    Value * deletion_totals = hsimd_partial_sum(fw, deletion_counts);
-    unsigned fields = getVectorBitWidth(v)/fw;
-    unsigned shift_amt = 1;
-    while (shift_amt < fields) {
-        Value * shift_splat = getSplat(field_count, ConstantInt::get(fieldTy, shift_amt));
-        Value * shift_select = simd_and(deletion_totals, shift_splat);
-        Value * shift_mask = simd_eq(fw, shift_select, shift_splat);
-        Value * to_shift = simd_and(shift_mask, selected);
-        Value * shifted = mvmd_srli(fw, to_shift, shift_amt);
-        deletion_totals = simd_sub(fw, deletion_totals, shift_select);
-        selected = simd_or(shifted, simd_xor(selected, to_shift));
-        shift_amt *= 2;
-    }
-    return selected;
 }
 
 Value * IDISA_Builder::mvmd_expand(unsigned fw, Value * v, Value * select_mask) {
-    // TODO: implement a default method here
-    UnsupportedFieldWidthError(fw, "mvmd_expand");
+    if (LLVM_UNLIKELY(fw < 8)) {
+        UnsupportedFieldWidthError(fw, "mvmd_compress");
+    } else {
+
+        IntegerType *  const fieldTy = getIntNTy(fw);
+        const auto fieldCount = mBitBlockWidth / fw;
+        Type * maskTy = select_mask->getType();
+        if (maskTy->isIntegerTy()) {
+            select_mask = esimd_bitspread(fw, select_mask);
+        }
+
+        Constant * oneSplat = getSplat(fieldCount, ConstantInt::get(fieldTy, 1));
+        Value * movements_remaining = hsimd_partial_sum(fw, CreateXor(select_mask, oneSplat));
+
+        Value * result = nullptr;
+
+        Value * pending = v;
+
+        unsigned shiftAmount = fieldCount;
+        while (shiftAmount > 0) {
+
+            shiftAmount /= 2;
+
+            Value * shift_splat = getSplat(fieldCount, ConstantInt::get(fieldTy, shiftAmount));
+            Value * shift_select = simd_and(movements_remaining, shift_splat);
+            Value * shift_mask = simd_eq(fw, shift_select, shift_splat);
+            Value * shifted = CreateAnd(mvmd_slli(fw, pending, shiftAmount), shift_mask);
+            movements_remaining = CreateXor(movements_remaining, shift_select);
+            Value * keep_mask = simd_eq(fw, movements_remaining, shift_select);
+            Value * newVals = simd_and(pending, keep_mask);
+            if (result) {
+                result = CreateOr(result, newVals);
+            } else {
+                result = newVals;
+            }
+            pending = CreateOr(CreateAnd(pending, CreateNot(shift_mask)), shifted);
+        }
+        return CreateAnd(result, simd_any(fw, select_mask));
+    }
 }
 
 Value * IDISA_Builder::bitblock_any(Value * a) {

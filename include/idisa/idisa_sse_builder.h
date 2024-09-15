@@ -59,6 +59,8 @@ public:
     llvm::Value * esimd_mergeh(unsigned fw, llvm::Value * a, llvm::Value * b) override;
     llvm::Value * esimd_mergel(unsigned fw, llvm::Value * a, llvm::Value * b) override;
     llvm::Value * mvmd_shuffle(unsigned fw, llvm::Value * data_table, llvm::Value * index_vector) override;
+    llvm::Value * mvmd_compress(unsigned fw, llvm::Value * a, llvm::Value * select_mask) override;
+    llvm::Value * mvmd_expand(unsigned fw, llvm::Value * a, llvm::Value * select_mask) override;
     ~IDISA_SSSE3_Builder() {}
 
 };

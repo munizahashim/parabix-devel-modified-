@@ -83,7 +83,9 @@ Value * IDISA_AVX_Builder::CreatePextract(Value * bits, Value * mask, const Twin
         if (width <= 32) {
             Function * pext32 = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pext_32);
             if (width < 32) {
+                assert (bits->getType()->getIntegerBitWidth() <= 32);
                 bits = CreateZExt(bits, getInt32Ty());
+                assert (mask->getType()->getIntegerBitWidth() <= 32);
                 mask = CreateZExt(mask, getInt32Ty());
             }
             Value * r = CreateCall(pext32->getFunctionType(), pext32, {bits, mask}, Name);
@@ -105,7 +107,9 @@ Value * IDISA_AVX_Builder::CreatePdeposit(Value * bits, Value * mask, const Twin
         if (width <= 32) {
             Function * pdep32 = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pdep_32);
             if (width < 32) {
+                assert (bits->getType()->getIntegerBitWidth() <= 32);
                 bits = CreateZExt(bits, getInt32Ty());
+                assert (mask->getType()->getIntegerBitWidth() <= 32);
                 mask = CreateZExt(mask, getInt32Ty());
             }
             Value * r = CreateCall(pdep32->getFunctionType(), pdep32, {bits, mask}, Name);
@@ -514,7 +518,8 @@ Value * IDISA_AVX2_Builder::mvmd_sll(unsigned fw, Value * a, Value * shift, cons
 
 Value * IDISA_AVX2_Builder::mvmd_shuffle(unsigned fw, Value * a, Value * index_vector) {
     if (mBitBlockWidth == 256) {
-        if (fw > 32) {
+        if (fw == 64) {
+#if 0
             const unsigned fieldCount = mBitBlockWidth / fw;
             // Create a table for shuffling with smaller field widths.
             Constant * idxMask = getSplat(fieldCount, ConstantInt::get(getIntNTy(fw), fieldCount-1));
@@ -530,6 +535,12 @@ Value * IDISA_AVX2_Builder::mvmd_shuffle(unsigned fw, Value * a, Value * index_v
             Value * half_fw_indexes = simd_or(idx, mvmd_slli(half_fw, idx, 1));
             half_fw_indexes = simd_add(fw, simd_add(fw, half_fw_indexes, half_fw_indexes), splat01);
             return fwCast(fw, mvmd_shuffle(half_fw, a, half_fw_indexes));
+#else
+            constexpr auto fieldCount = 256 / 64;
+            Value * A = CreateMul(fwCast(64, index_vector), getSplat(fieldCount, getInt64(0x0000000200000002ULL)));
+            index_vector = CreateOr(A, getSplat(fieldCount, getInt64(0x0000000100000000ULL)));
+            return fwCast(64, mvmd_shuffle(32, a, index_vector));
+#endif
         } else if (fw == 32) {
             Function * shuf32Func = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx2_permd);
             return CreateCall(shuf32Func->getFunctionType(), shuf32Func, {fwCast(32, a), fwCast(32, index_vector)});
@@ -538,9 +549,9 @@ Value * IDISA_AVX2_Builder::mvmd_shuffle(unsigned fw, Value * a, Value * index_v
             // but LLVM doesn't seem to have intrinsics for them? Check whether shufflevector can deduce them.
             // For now, we simply transform the 16-bit indices into pairs of adjacent 8-bit ones
             constexpr auto fieldCount = 256 / 16;
-            Value * A = CreateMul(index_vector, getSplat(fieldCount, getInt16(0x0202)));
+            Value * A = CreateMul(fwCast(16, index_vector), getSplat(fieldCount, getInt16(0x0202)));
             index_vector = CreateOr(A, getSplat(fieldCount, getInt16(0x0100)));
-            return fwCast(16, mvmd_shuffle(8, a, index_vector));
+            return fwCast(16, mvmd_shuffle(8, fwCast(8, a), fwCast(8, index_vector)));
         } else if (fw == 8) {
             constexpr unsigned fieldCount = 256 / 8;
 
@@ -595,7 +606,7 @@ Value * IDISA_AVX2_Builder::mvmd_compress(unsigned fw, Value * a, Value * select
 
         if (fw == 64) {
             Function * PDEP_func = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pdep_32);
-            Value * mask = CreateZExt(select_mask, getInt32Ty());
+            Value * mask = CreateZExtOrTrunc(select_mask, getInt32Ty());
             Value * mask32 = CreateMul(CreateCall(PDEP_func->getFunctionType(), PDEP_func, {mask, getInt32(0x55)}), getInt32(3));
             Value * result = fwCast(fw, mvmd_compress(32, fwCast(32, a), CreateTrunc(mask32, getInt8Ty())));
             return result;
@@ -608,7 +619,7 @@ Value * IDISA_AVX2_Builder::mvmd_compress(unsigned fw, Value * a, Value * select
             Function * PDEP_func = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pdep_32);
             Function * const popcount_func = Intrinsic::getDeclaration(getModule(), Intrinsic::ctpop, getInt32Ty());
             // First duplicate each mask bit to select 4-bit fields
-            Value * mask = CreateZExt(select_mask, getInt32Ty());
+            Value * mask = CreateZExtOrTrunc(select_mask, getInt32Ty());
             Value * field_count = CreateCall(popcount_func->getFunctionType(), popcount_func, mask);
             Value * spread = CreateCall(PDEP_func->getFunctionType(), PDEP_func, {mask, getInt32(0x11111111)});
             Value * ext_mask = CreateMul(spread, getInt32(0xF));
@@ -649,6 +660,7 @@ Value * IDISA_AVX2_Builder::mvmd_compress(unsigned fw, Value * a, Value * select
                 assert (fieldCount <= 32);
                 pextFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pext_32);
                 if (LLVM_UNLIKELY(fieldCount < 32)) {
+                    assert (select_mask->getType()->getIntegerBitWidth() <= 32);
                     select_mask = CreateZExt(select_mask, getInt32Ty());
                 }
             }
@@ -675,10 +687,6 @@ Value * IDISA_AVX2_Builder::mvmd_compress(unsigned fw, Value * a, Value * select
                     permute_vec = simd_or(permute_vec, shiftedExpand);
                 }
             }
-
-            a = fwCast(fw, a);
-
-            permute_vec = fwCast(fw, permute_vec);
 
             // // Step 4: Use mvmd_shuffle2 to shuffle using permute_vec
             Value * const shuffled = mvmd_shuffle(fw, a, permute_vec);
@@ -713,6 +721,7 @@ Value * IDISA_AVX2_Builder::mvmd_expand(unsigned fw, Value * a, Value * select_m
                  assert (fieldCount <= 32);
                  pdepFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pdep_32);
                  if (LLVM_UNLIKELY(fieldCount < 32)) {
+                     assert (select_mask->getType()->getIntegerBitWidth() <= 32);
                      select_mask = CreateZExt(select_mask, getInt32Ty());
                  }
              }
@@ -725,9 +734,6 @@ Value * IDISA_AVX2_Builder::mvmd_expand(unsigned fw, Value * a, Value * select_m
              args[1] = select_mask;
 
              IntegerType * intTy = getIntNTy((fieldCount == 64) ? 64 : 32);
-
-             Type * resultTy = fwVectorType(fw);
-
              for (unsigned i = 0; i < m; ++i) {
                  args[0] = ConstantInt::get(intTy, indices[i]);
                  Value * const expanded = CreateCall(pdepFunc->getFunctionType(), pdepFunc, args);
@@ -739,9 +745,6 @@ Value * IDISA_AVX2_Builder::mvmd_expand(unsigned fw, Value * a, Value * select_m
                      permute_vec = simd_or(permute_vec, shiftedExpand);
                  }
              }
-
-             a = fwCast(fw, a);
-             permute_vec = fwCast(fw, permute_vec);
 
              // // Step 4: Use mvmd_shuffle to shuffle using permute_vec
              Value * const shuffled = mvmd_shuffle(fw, a, permute_vec);

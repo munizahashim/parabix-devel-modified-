@@ -1460,9 +1460,10 @@ ByteFilterByMaskKernel::ByteFilterByMaskKernel(LLVMTypeSystemInterface & b, Stre
 : MultiBlockKernel(b, "ByteFilterByMask" + std::to_string(byteStream->getFieldWidth()),
 {Binding{"byteStream", byteStream}, Binding{"filter", filter}},
 {Binding{"output", Packed, PopcountOf("filter")}}, {}, {}, {}) {
-
+    assert (byteStream->getFieldWidth() == Packed->getFieldWidth());
 }
 
+#if 1
 void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
     BasicBlock * entry = b.GetInsertBlock();
     BasicBlock * packLoop = b.CreateBasicBlock("packLoop");
@@ -1506,6 +1507,83 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
     b.CreateCondBr(moreToDo, packLoop, packFinalize);
     b.SetInsertPoint(packFinalize);
+
 }
+
+#else
+
+void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+    BasicBlock * entry = b.GetInsertBlock();
+    BasicBlock * packLoop = b.CreateBasicBlock("packLoop");
+    BasicBlock * packFinalize = b.CreateBasicBlock("packFinalize");
+    Constant * const ZERO = b.getSize(0);
+    Constant * const LOG_2_BLOCK_WIDTH = b.getSize(floor_log2(b.getBitBlockWidth()));
+
+
+    Value * initToWritePos = b.getProducedItemCount("output");
+
+    Value * initialIndex = b.CreateLShr(initToWritePos, LOG_2_BLOCK_WIDTH);
+
+    const auto fieldWidth = getInputStreamSet(0)->getFieldWidth();
+
+    Value * const totalBlocks = b.CreateMul(numOfStrides, b.getSize(fieldWidth));
+
+    Value * const baseDataPtr = b.getInputStreamPackPtr("byteStream", ZERO, ZERO);
+
+
+    assert (fieldWidth <= b.getBitBlockWidth());
+    const auto popCountSize = b.getBitBlockWidth() / fieldWidth;
+    IntegerType * const popCountTy = b.getIntNTy(popCountSize);
+
+    Value * const baseFilterPtr = b.getInputStreamPackPtr("filter", ZERO, ZERO); ;
+
+    b.CreateBr(packLoop);
+
+    b.SetInsertPoint(packLoop);
+    PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
+    blockOffsetPhi->addIncoming(ZERO, entry);
+    PHINode * const toWritePosPhi = b.CreatePHI(b.getSizeTy(), 2);
+    toWritePosPhi->addIncoming(initToWritePos, entry);
+
+    Value * filter = nullptr;
+    if (popCountSize < 8) {
+        Value * ptr = b.CreatePointerCast(baseFilterPtr, b.getInt8Ty()->getPointerTo());
+        const auto packsPerByte = (8 / popCountSize);
+        assert (packsPerByte > 1);
+        Value * pos = b.CreateLShr(blockOffsetPhi, b.getSize(floor_log2(packsPerByte)));
+        filter = b.CreateAlignedLoad(b.getInt8Ty(), b.CreateGEP(b.getInt8Ty(), ptr, pos), 1);
+        filter = b.CreateZExt(filter, b.getSizeTy());
+        Value * off = b.CreateAnd(blockOffsetPhi, b.getSize(packsPerByte - 1));
+        filter = b.CreateLShr(filter, b.CreateShl(off, b.getSize(floor_log2(popCountSize))));
+        filter = b.CreateAnd(filter, b.getSize((1UL << popCountSize) - 1UL));
+    } else {
+        Value * ptr = b.CreatePointerCast(baseFilterPtr, popCountTy->getPointerTo());
+        filter = b.CreateAlignedLoad(popCountTy, b.CreateGEP(popCountTy, ptr, blockOffsetPhi), popCountSize / 8);
+    }
+
+
+    Value * const data = b.CreateAlignedLoad(b.getBitBlockType(), b.CreateGEP(b.getBitBlockType(), baseDataPtr, blockOffsetPhi), b.getBitBlockWidth() / 8);
+    Value * const compressed = b.mvmd_compress(fieldWidth, data, filter);
+
+    Value * const ptr = b.getRawOutputPointer("output", toWritePosPhi);
+
+
+    Value * const toStorePtr = b.CreatePointerCast(ptr, compressed->getType()->getPointerTo());
+    b.CreateAlignedStore(compressed, toStorePtr, 1);
+
+    Value * const elementPopCount = b.CreatePopcount(filter);
+    Value * toWritePos = b.CreateAdd(toWritePosPhi, b.CreateZExt(elementPopCount, b.getSizeTy()));
+
+    Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
+    blockOffsetPhi->addIncoming(nextBlk, packLoop);
+
+    toWritePosPhi->addIncoming(toWritePos, packLoop);
+    Value * moreToDo = b.CreateICmpNE(nextBlk, totalBlocks);
+
+    b.CreateCondBr(moreToDo, packLoop, packFinalize);
+    b.SetInsertPoint(packFinalize);
+}
+
+#endif
 
 }

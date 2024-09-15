@@ -45,6 +45,9 @@ optMode("mode", cl::init(Mode::Any), cl::desc("Set the front-end optimization le
                              clEnumValN(Mode::Any, "any", "standard optimizations")));
 
 
+static cl::opt<unsigned> optTrials("trials", cl::desc("Number of tests to execute"), cl::init(100));
+
+
 static cl::opt<bool> optVerbose("v", cl::desc("Print verbose output"), cl::init(false));
 
 template<size_t FieldWidth>
@@ -298,7 +301,7 @@ int main(int argc, char *argv[]) {
     std::default_random_engine rng(rd());
 
     bool testResult = false;
-    for (unsigned rounds = 0; rounds < 100; ++rounds) {
+    for (unsigned rounds = 0; rounds < optTrials; ++rounds) {
         testResult |= runTestCase(driver, rng);
     }
     return testResult ? -1 : 0;
