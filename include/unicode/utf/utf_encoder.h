@@ -17,6 +17,8 @@ public:
     unsigned common_code_units(codepoint_t cp1, codepoint_t cp2);
     codepoint_t minCodePointWithCommonCodeUnits(codepoint_t cp, unsigned common);
     codepoint_t maxCodePointWithCommonCodeUnits(codepoint_t cp, unsigned common);
+    codepoint_t minCodePointWithPrefix(unsigned code_unit);
+    codepoint_t maxCodePointWithPrefix(unsigned code_unit);
     unsigned nthCodeUnit(codepoint_t cp, unsigned n);
     void setCodeUnitBits(unsigned bits) {mCodeUnitBits = bits;}
     unsigned getCodeUnitBits() {return mCodeUnitBits;}
