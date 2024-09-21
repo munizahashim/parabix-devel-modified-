@@ -836,59 +836,162 @@ StreamSet * InsertionSpreadMask(PipelineBuilder & P,
 }
 
 
-ByteSpreadByMaskKernel::ByteSpreadByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const spread, StreamSet * const Packed)
-: MultiBlockKernel(b, "ByteSpreadByMask" + std::to_string(byteStream->getFieldWidth()),
+ByteSpreadByMaskKernel::ByteSpreadByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const spread, StreamSet * const output, Scalar * streamOffset)
+: MultiBlockKernel(b, "ByteSpreadByMask" + std::to_string(output->getNumElements()) + "x" + std::to_string(byteStream->getFieldWidth()),
 {Binding{"byteStream", byteStream, PopcountOf("spread")}, Binding{"spread", spread, FixedRate(1)}},
-    {Binding{"output", Packed, FixedRate(1)}}, {}, {}, {}) {}
+    {Binding{"output", output, FixedRate(1)}}, {}, {}, {}) {}
 
 void ByteSpreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
     BasicBlock * entry = b.GetInsertBlock();
     BasicBlock * packLoop = b.CreateBasicBlock("packLoop");
     BasicBlock * packFinalize = b.CreateBasicBlock("packFinalize");
-    Constant * const ZERO = b.getSize(0);
+    Constant * const sz_ZERO = b.getSize(0);
+
+    Constant * const sz_ONE = b.getSize(1);
 
     const auto fieldWidth = getInputStreamSet(0)->getFieldWidth();
+    if (LLVM_UNLIKELY(fieldWidth < 8)) {
+        report_fatal_error(Twine{getName(), ": does not support field widths under 8-bits"});
+    }
+    StreamSet * const output = getOutputStreamSet(0);
+    if (LLVM_UNLIKELY(output->getFieldWidth() != fieldWidth)) {
+        report_fatal_error(Twine{getName(), ": input field width does not match output field width"});
+    }
 
     Value * initPos = b.getProcessedItemCount("byteStream");
+
+    const auto numElements = output->getNumElements();
+
+    SmallVector<Value *, 32> pending(numElements);
+
+    ConstantInt * const LOG_2_BLOCK_WIDTH = b.getSize(floor_log2(b.getBitBlockWidth()));
+
+    const auto fieldsPerBlock = (b.getBitBlockWidth() / fieldWidth);
+
+    ConstantInt * const BLOCK_WIDTH_MASK = b.getSize(b.getBitBlockWidth() - 1);
+
+    ConstantInt * const FIELD_WIDTH_MASK = b.getSize(fieldWidth - 1);
+
+    ConstantInt * const FIELDS_PER_BLOCK = b.getSize(fieldsPerBlock);
+
+    ConstantInt * const FIELDS_PER_BLOCK_MASK = b.getSize(fieldsPerBlock - 1);
+
+
+    // TODO: can we safely trust this stream if we read past the data even if we do not actually produce
+    // anything from it?
+
+    Value * const LOG_2_FIELDS_PER_BLOCK = b.getSize(floor_log2(fieldsPerBlock));
+
+    Value * initialPosition = b.CreateAnd(initPos, BLOCK_WIDTH_MASK);
+    Value * initialPackIndex = b.CreateLShr(initialPosition, LOG_2_FIELDS_PER_BLOCK);
+
+
+    FixedVectorType * dataVecTy = b.fwVectorType(fieldWidth); // FixedVectorType::get(b.getIntNTy(fieldWidth), b.getBitBlockWidth() / fieldWidth);
+
+    Value * initialShift = b.CreateAnd(initPos, FIELDS_PER_BLOCK_MASK);
+    Value * const initialToFill = b.CreateSub(FIELDS_PER_BLOCK, initialShift);
+
+    for (unsigned i = 0; i < numElements; ++i) {
+        Value * streamIndex = b.getSize(i);
+        pending[i] = b.CreateBitCast(b.loadInputStreamPack("byteStream", streamIndex, initialPackIndex, sz_ZERO), dataVecTy);
+        pending[i] = b.mvmd_srl(fieldWidth, pending[i], initialShift);
+        assert (pending[i]->getType() == dataVecTy);
+    }
+
+    SmallVector<Value *, 32> spreadElem(fieldWidth);
+    SmallVector<Value *, 32> popCount(fieldWidth + 2);
+    SmallVector<Value *, 32> consumedCountAtField(fieldWidth + 1);
+    SmallVector<Value *, 32> packIndex(fieldWidth);
+    SmallVector<Value *, 32> blockIndex(fieldWidth);
+    SmallVector<PHINode *, 32> pendingPhi(numElements);
+
+    SmallVector<Value *, 32> numberOfUnconsumedDataUnits(fieldWidth);
+    SmallVector<Value *, 32> someItemsAreUndeposited(fieldWidth);
+
+    SmallVector<Value *, 32> unitsRemainingOfPriorLoadedBlock(fieldWidth);
+    SmallVector<Value *, 32> preservePendingData(fieldWidth);
+
+    Constant * ZERO_VEC = ConstantVector::getNullValue(dataVecTy);
+
     b.CreateBr(packLoop);
 
     b.SetInsertPoint(packLoop);
-    PHINode * toReadPosPhi = b.CreatePHI(b.getSizeTy(), 2);
-    toReadPosPhi->addIncoming(initPos, entry);
     PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
-    blockOffsetPhi->addIncoming(ZERO, entry);
+    blockOffsetPhi->addIncoming(sz_ZERO, entry);
+    PHINode * shiftPhi = b.CreatePHI(b.getSizeTy(), 2);
+    shiftPhi->addIncoming(initialShift, entry);
+    PHINode * consumedPhi = b.CreatePHI(b.getSizeTy(), 2);
+    consumedPhi->addIncoming(initialPosition, entry);
+    for (unsigned i = 0; i < numElements; ++i) {
+        PHINode * pPhi = b.CreatePHI(dataVecTy, 2);
+        pPhi->addIncoming(pending[i], entry);
+        pendingPhi[i] = pPhi;
+        pending[i] = pPhi;
+    }
 
     // Load spread vector
-    Value * spreadVec = b.loadInputStreamBlock("spread", ZERO, blockOffsetPhi);
+    Value * spreadVec = b.loadInputStreamBlock("spread", sz_ZERO, blockOffsetPhi);
     FixedVectorType * popVecTy = FixedVectorType::get(b.getIntNTy(b.getBitBlockWidth() / fieldWidth), fieldWidth);
     spreadVec = b.CreateBitCast(spreadVec, popVecTy);
 
-    FixedVectorType * dataVecTy = FixedVectorType::get(b.getIntNTy(fieldWidth), b.getBitBlockWidth() / fieldWidth);
     // Output tracking
-    Value * toReadPos = toReadPosPhi;
-    for (unsigned i = 0; i < fieldWidth; ++i) {
-        Value * spreadElem = b.CreateExtractElement(spreadVec, b.getInt32(i));
-        Value * elementPopCount = b.CreatePopcount(spreadElem);
+    popCount[0] = shiftPhi;
+    consumedCountAtField[0] = consumedPhi;
 
-        // Get a pointer to the next unprocessed item
-        Value * toReadPtr = b.getRawInputPointer("byteStream", toReadPos);
-        toReadPtr = b.CreatePointerCast(toReadPtr, dataVecTy->getPointerTo());
-        Value * data = b.CreateAlignedLoad(dataVecTy, toReadPtr, 1);
+    for (unsigned i = 0; i < numElements; ++i) {
 
-        // Expand the loaded data
-        Value * const expanded = b.CreateBitCast(b.mvmd_expand(fieldWidth, data, spreadElem), b.getBitBlockType());
-        // Store the expanded data in the i-th pack of the current stride
-        b.storeOutputStreamPack("output", ZERO, b.getSize(i), blockOffsetPhi, expanded);
+        Value * streamIndex = b.getSize(i);
 
-        // Update the write position for the next pack
-        toReadPos = b.CreateAdd(toReadPos, b.CreateZExt(elementPopCount, b.getSizeTy()));
+        pending[i] = pendingPhi[i];
 
+        for (unsigned j = 0; j < fieldWidth; ++j) {
+
+            if (i == 0) {
+                spreadElem[j] = b.CreateExtractElement(spreadVec, b.getInt32(j));
+                popCount[j + 1] = b.CreateZExt(b.CreatePopcount(spreadElem[j]), b.getSizeTy());
+                consumedCountAtField[j + 1] = b.CreateAdd(consumedCountAtField[j], popCount[j + 1]);
+                Value * const pos = b.CreateAdd(consumedCountAtField[j], FIELDS_PER_BLOCK_MASK);
+                packIndex[j] = b.CreateAnd(b.CreateLShr(pos, LOG_2_FIELDS_PER_BLOCK), FIELD_WIDTH_MASK);
+                blockIndex[j] = b.CreateLShr(pos, LOG_2_BLOCK_WIDTH);
+                numberOfUnconsumedDataUnits[j] = b.CreateAnd(b.CreateNeg(consumedCountAtField[j]), FIELDS_PER_BLOCK_MASK);
+                someItemsAreUndeposited[j] = b.CreateICmpNE(popCount[j + 1], FIELDS_PER_BLOCK);
+                unitsRemainingOfPriorLoadedBlock[j] = b.CreateSub(popCount[j + 1], numberOfUnconsumedDataUnits[j]);
+                Value * const consumedAllPriorData = b.CreateICmpUGT(popCount[j + 1], numberOfUnconsumedDataUnits[j]);
+                Value * const canReuseLoadedData = b.CreateICmpNE(numberOfUnconsumedDataUnits[j], sz_ZERO);
+                preservePendingData[j] = b.CreateAnd(consumedAllPriorData, canReuseLoadedData);
+            }
+
+            Value * const newData = b.CreateBitCast(b.loadInputStreamPack("byteStream", streamIndex, packIndex[j], blockIndex[j]), dataVecTy);
+
+            Value * result = b.mvmd_sll(fieldWidth, newData, numberOfUnconsumedDataUnits[j]);
+
+            assert (result->getType() == dataVecTy);
+            assert (pending[i]->getType() == dataVecTy);
+
+            result = b.CreateOr(result, pending[i]);
+
+            // Expand the loaded data
+            Value * const expanded = b.CreateBitCast(b.mvmd_expand(fieldWidth, result, spreadElem[j]), b.getBitBlockType());
+            // Store the expanded data in the i-th pack of the current stride
+            b.storeOutputStreamPack("output", streamIndex, b.getSize(j), blockOffsetPhi, expanded);
+            Value * priorPending = b.mvmd_srl(fieldWidth, result, popCount[j + 1]);
+            assert (priorPending->getType() == dataVecTy);
+            priorPending = b.CreateSelect(someItemsAreUndeposited[j], priorPending, ZERO_VEC);
+            Value * newPending = b.mvmd_srl(fieldWidth, newData, unitsRemainingOfPriorLoadedBlock[j]);
+            assert (newPending->getType() == dataVecTy);
+            newPending = b.CreateSelect(preservePendingData[j], newPending, ZERO_VEC);
+            pending[i] = b.CreateOr(newPending, priorPending);
+        }
+
+        assert (pending[i]->getType() == dataVecTy);
+        pendingPhi[i]->addIncoming(pending[i], packLoop);
     }
 
     // Finalize loop
-    toReadPosPhi->addIncoming(toReadPos, packLoop);
+    consumedPhi->addIncoming(consumedCountAtField[fieldWidth], packLoop);
+    shiftPhi->addIncoming(popCount[fieldWidth], packLoop);
 
-    Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
+    Value * nextBlk = b.CreateAdd(blockOffsetPhi, sz_ONE);
     blockOffsetPhi->addIncoming(nextBlk, packLoop);
 
     Value * moreToDo = b.CreateICmpNE(nextBlk, numOfStrides);

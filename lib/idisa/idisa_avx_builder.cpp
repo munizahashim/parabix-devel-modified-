@@ -482,7 +482,7 @@ Value * IDISA_AVX2_Builder::mvmd_srl(unsigned fw, Value * a, Value * shift, cons
         // Insert a zero value at position 0 (OK for shifts > 0)
         Value * a0 = mvmd_insert(fw, a, Constant::getNullValue(fieldTy), 0);
         Value * shifted = CreateCall(permuteFunc->getFunctionType(), permuteFunc, {a0, permuteVec});
-        return simd_if(1, simd_eq(fw, shiftSplat, allZeroes()), a, shifted);
+        return fwCast(32, simd_if(1, simd_eq(fw, shiftSplat, allZeroes()), a, shifted));
     }
     return IDISA_Builder::mvmd_srl(fw, a, shift, safe);
 }
@@ -510,7 +510,7 @@ Value * IDISA_AVX2_Builder::mvmd_sll(unsigned fw, Value * a, Value * shift, cons
         // Insert a zero value at position 7 (OK for shifts > 0)
         Value * a0 = mvmd_insert(fw, a, Constant::getNullValue(fieldTy), 7);
         Value * shifted = CreateCall(permuteFunc->getFunctionType(), permuteFunc, {a0, permuteVec});
-        return simd_if(1, simd_eq(fw, shiftSplat, allZeroes()), a, shifted);
+        return fwCast(32, simd_if(1, simd_eq(fw, shiftSplat, allZeroes()), a, shifted));
     }
     return IDISA_Builder::mvmd_sll(fw, a, shift, safe);
 }
@@ -924,7 +924,7 @@ Value * IDISA_AVX512F_Builder::mvmd_shuffle2(unsigned fw, Value * table0, Value 
                 #undef ZEXT16L
 
                 #undef ZEXT16H
-
+                assert (L->getType() == H->getType());
                 return CreateOr(L, H);
             }
         }

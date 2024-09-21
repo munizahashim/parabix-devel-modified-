@@ -32,8 +32,7 @@ namespace kernel {
 void FilterByMask(PipelineBuilder & P,
                   StreamSet * mask, StreamSet * inputs, StreamSet * outputs,
                   unsigned streamOffset = 0,
-                  unsigned extractionFieldWidth = 64,
-                  bool byteDeletion = false);
+                  unsigned extractionFieldWidth = 64);
 
 //
 // Parallel Prefix Deletion Kernel
@@ -168,7 +167,7 @@ private:
 
 class ByteFilterByMaskKernel final : public MultiBlockKernel {
 public:
-    ByteFilterByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const filter, StreamSet * const Packed);
+    ByteFilterByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const filter, StreamSet * const output, Scalar * streamOffset = nullptr);
 protected:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 };

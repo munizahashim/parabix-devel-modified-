@@ -29,23 +29,26 @@ namespace kernel {
 void FilterByMask(PipelineBuilder & P,
                   StreamSet * mask, StreamSet * inputs, StreamSet * outputs,
                   unsigned streamOffset,
-                  unsigned extractionFieldWidth,
-                  bool byteDeletion) {
-    if (byteDeletion) {
-        StreamSet * const input_streams = P.CreateStreamSet(8);
-        P.CreateKernelCall<S2PKernel>(inputs, input_streams);
-        StreamSet * const output_streams = P.CreateStreamSet(8);
-        StreamSet * const compressed = P.CreateStreamSet(output_streams->getNumElements());
-        std::vector<uint32_t> output_indices = streamutils::Range(streamOffset, streamOffset + output_streams->getNumElements());
-        P.CreateKernelCall<FieldCompressKernel>(Select(mask, {0}), SelectOperationList { Select(input_streams, output_indices)}, compressed, extractionFieldWidth);
-        P.CreateKernelCall<StreamCompressKernel>(mask, compressed, output_streams, extractionFieldWidth);
-        P.CreateKernelCall<P2SKernel>(output_streams, outputs);
-    }
-    else {
+                  unsigned extractionFieldWidth) {
+    if (inputs->getFieldWidth() < 8) {
         StreamSet * const compressed = P.CreateStreamSet(outputs->getNumElements());
         std::vector<uint32_t> output_indices = streamutils::Range(streamOffset, streamOffset + outputs->getNumElements());
         P.CreateKernelCall<FieldCompressKernel>(Select(mask, {0}), SelectOperationList { Select(inputs, output_indices)}, compressed, extractionFieldWidth);
         P.CreateKernelCall<StreamCompressKernel>(mask, compressed, outputs, extractionFieldWidth);
+    } else {
+//        StreamSet * const input_streams = P.CreateStreamSet(8);
+//        P.CreateKernelCall<S2PKernel>(inputs, input_streams);
+//        StreamSet * const output_streams = P.CreateStreamSet(8);
+//        StreamSet * const compressed = P.CreateStreamSet(output_streams->getNumElements());
+//        std::vector<uint32_t> output_indices = streamutils::Range(streamOffset, streamOffset + output_streams->getNumElements());
+//        P.CreateKernelCall<FieldCompressKernel>(Select(mask, {0}), SelectOperationList { Select(input_streams, output_indices)}, compressed, extractionFieldWidth);
+//        P.CreateKernelCall<StreamCompressKernel>(mask, compressed, output_streams, extractionFieldWidth);
+//        P.CreateKernelCall<P2SKernel>(output_streams, outputs);
+        Scalar * offset = nullptr;
+        if (streamOffset) {
+            offset = P.CreateConstant(P.getSize(streamOffset));
+        }
+        P.CreateKernelCall<ByteFilterByMaskKernel>(inputs, mask, outputs, offset);
     }
 }
 
@@ -1456,11 +1459,11 @@ void FilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & kb, llvm::Value
 }
 
 
-ByteFilterByMaskKernel::ByteFilterByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const filter, StreamSet * const Packed)
-: MultiBlockKernel(b, "ByteFilterByMask" + std::to_string(byteStream->getFieldWidth()),
+ByteFilterByMaskKernel::ByteFilterByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const filter, StreamSet * const output, Scalar * streamOffset)
+    : MultiBlockKernel(b, "ByteFilterByMask" + std::to_string(output->getNumElements()) + "x" + std::to_string(byteStream->getFieldWidth()),
 {Binding{"byteStream", byteStream}, Binding{"filter", filter}},
-{Binding{"output", Packed, PopcountOf("filter")}}, {}, {}, {}) {
-    assert (byteStream->getFieldWidth() == Packed->getFieldWidth());
+{Binding{"output", output, PopcountOf("filter")}}, {}, {}, {}) {
+    assert (byteStream->getFieldWidth() == output->getFieldWidth());
 }
 
 #if 1
@@ -1472,7 +1475,15 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
     Value * initToWritePos = b.getProducedItemCount("output");
 
+
+
     const auto fieldWidth = getInputStreamSet(0)->getFieldWidth();
+
+    StreamSet * const output = getOutputStreamSet(0);
+    if (LLVM_UNLIKELY(output->getFieldWidth() != fieldWidth)) {
+        report_fatal_error(Twine{getName(), ": input field width does not match output field width"});
+    }
+
     b.CreateBr(packLoop);
 
     b.SetInsertPoint(packLoop);
@@ -1509,6 +1520,61 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     b.SetInsertPoint(packFinalize);
 
 }
+
+
+//void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+//    BasicBlock * entry = b.GetInsertBlock();
+//    BasicBlock * packLoop = b.CreateBasicBlock("packLoop");
+//    BasicBlock * packFinalize = b.CreateBasicBlock("packFinalize");
+//    Constant * const ZERO = b.getSize(0);
+
+//    Value * initToWritePos = b.getProducedItemCount("output");
+
+
+
+//    const auto fieldWidth = getInputStreamSet(0)->getFieldWidth();
+
+//    StreamSet * const output = getOutputStreamSet(0);
+//    if (LLVM_UNLIKELY(output->getFieldWidth() != fieldWidth)) {
+//        report_fatal_error(Twine{getName(), ": input field width does not match output field width"});
+//    }
+
+//    b.CreateBr(packLoop);
+
+//    b.SetInsertPoint(packLoop);
+//    PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
+//    blockOffsetPhi->addIncoming(ZERO, entry);
+//    PHINode * const toWritePosPhi = b.CreatePHI(b.getSizeTy(), 2);
+//    toWritePosPhi->addIncoming(initToWritePos, entry);
+//    Value * filterVec = b.loadInputStreamBlock("filter", ZERO, blockOffsetPhi);
+
+//    VectorType * popVecTy = FixedVectorType::get(b.getIntNTy(b.getBitBlockWidth() / fieldWidth), fieldWidth);
+
+//    filterVec = b.CreateBitCast(filterVec, popVecTy);
+
+//    Value * toWritePos = toWritePosPhi;
+
+//    for (unsigned i = 0; i < fieldWidth; ++i) {
+//        Value * const filterElem = b.CreateExtractElement(filterVec, b.getInt32(i));
+//        Value * const elementPopCount = b.CreatePopcount(filterElem);
+//        Value * const data = b.loadInputStreamPack("byteStream", ZERO, b.getSize(i), blockOffsetPhi);
+//        Value * const compressed = b.mvmd_compress(fieldWidth, data, filterElem);
+//        Value * const ptr = b.getRawOutputPointer("output", toWritePos);
+//        Value * const toStorePtr = b.CreatePointerCast(ptr, compressed->getType()->getPointerTo());
+//        b.CreateAlignedStore(compressed, toStorePtr, 1);
+//        toWritePos = b.CreateAdd(toWritePos, b.CreateZExt(elementPopCount, b.getSizeTy()));
+//    }
+
+//    Value * nextBlk = b.CreateAdd(blockOffsetPhi, b.getSize(1));
+//    blockOffsetPhi->addIncoming(nextBlk, packLoop);
+
+//    toWritePosPhi->addIncoming(toWritePos, packLoop);
+//    Value * moreToDo = b.CreateICmpNE(nextBlk, numOfStrides);
+
+//    b.CreateCondBr(moreToDo, packLoop, packFinalize);
+//    b.SetInsertPoint(packFinalize);
+
+//}
 
 #else
 
