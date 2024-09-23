@@ -621,6 +621,7 @@ Value * IDISA_AVX2_Builder::mvmd_compress(unsigned fw, Value * a, Value * select
             // First duplicate each mask bit to select 4-bit fields
             Value * mask = CreateZExtOrTrunc(select_mask, getInt32Ty());
             Value * field_count = CreateCall(popcount_func->getFunctionType(), popcount_func, mask);
+            assert (field_count->getType()->getIntegerBitWidth() >= 32);
             Value * spread = CreateCall(PDEP_func->getFunctionType(), PDEP_func, {mask, getInt32(0x11111111)});
             Value * ext_mask = CreateMul(spread, getInt32(0xF));
             // Now extract the 4-bit index values for the required fields.
@@ -630,14 +631,14 @@ Value * IDISA_AVX2_Builder::mvmd_compress(unsigned fw, Value * a, Value * select
                                                 UndefValue::get(v1xi32Ty),
                                                 ConstantVector::getNullValue(v8xi32Ty));
             Constant * Shifts[8];
-            for (unsigned int i = 0; i < 8; i++) {
-                Shifts[i] = getInt32(i*4);
+            for (unsigned i = 0; i < 8; i++) {
+                Shifts[i] = getInt32(i * 4);
             }
             Value * shuf = CreateAnd(CreateLShr(bdcst, ConstantVector::get({Shifts, 8})), mask0000000Fsplaat);
+
             Value * compress = mvmd_shuffle(32, a, shuf);
             Value * field_mask = CreateTrunc(CreateSub(CreateShl(getInt32(1), field_count), getInt32(1)), getInt8Ty());
-            Value * result = CreateAnd(compress, CreateSExt(CreateBitCast(field_mask, v8xi1Ty), v8xi32Ty));
-            return result;
+            return CreateAnd(compress, CreateSExt(CreateBitCast(field_mask, v8xi1Ty), v8xi32Ty));
         } else if (fw >= 8) {
 
             unsigned fieldCount = 256 / fw;
@@ -687,10 +688,12 @@ Value * IDISA_AVX2_Builder::mvmd_compress(unsigned fw, Value * a, Value * select
                     permute_vec = simd_or(permute_vec, shiftedExpand);
                 }
             }
-
             // // Step 4: Use mvmd_shuffle2 to shuffle using permute_vec
             Value * const shuffled = mvmd_shuffle(fw, a, permute_vec);
-            Value * mask = CreateNot(mvmd_sll(fw, ConstantVector::getAllOnesValue(resultTy), CreatePopcount(select_mask)));
+            Value * const count = CreatePopcount(select_mask);
+            Constant * ALL_ONES = ConstantVector::getAllOnesValue(resultTy);
+            Value * mask = CreateNot(mvmd_sll(fw, ALL_ONES, count));
+            mask = CreateSelect(CreateICmpNE(count, ConstantInt::get(intTy, fieldCount)), mask, ALL_ONES);
             assert (shuffled->getType() == mask->getType());
             return CreateAnd(shuffled, mask);
         }

@@ -880,7 +880,7 @@ void ByteSpreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     // TODO: can we safely trust this stream if we read past the data even if we do not actually produce
     // anything from it?
 
-    Value * const LOG_2_FIELDS_PER_BLOCK = b.getSize(floor_log2(fieldsPerBlock));
+    ConstantInt * const LOG_2_FIELDS_PER_BLOCK = b.getSize(floor_log2(fieldsPerBlock));
 
     Value * initialPosition = b.CreateAnd(initPos, BLOCK_WIDTH_MASK);
     Value * initialPackIndex = b.CreateLShr(initialPosition, LOG_2_FIELDS_PER_BLOCK);

@@ -254,11 +254,11 @@ bool runTestCase(CPUDriver & driver, const size_t testLength, const size_t field
 
         llvm::errs() << " TEST: " << testLength << 'x' << fieldWidth << " -- ";
         if (result == 0) {
-            llvm::errs() << "success";
+            llvm::errs() << "success\n";
         } else {
-            llvm::errs() << "failed";
+            llvm::errs() << "failed\n";
+            exit(-1);
         }
-        llvm::errs() << '\n';
     }
 
     return (result != 0);
