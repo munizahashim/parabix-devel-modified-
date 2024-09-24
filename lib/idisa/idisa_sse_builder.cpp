@@ -76,7 +76,7 @@ Value * IDISA_SSE_Builder::mvmd_compress(unsigned fw, Value * a, Value * selecto
             Constant * rotate_mask = ConstantVector::get({rotate_bit, 2});
             Value * rotateControl = simd_eq(64, fwCast(64, simd_and(bdcst, rotate_mask)), allZeroes());
             Value * centralResult = simd_if(1, rotateControl, rotated, a_selected);
-            Value * delete_marks_lo = CreateAnd(CreateZExt(CreateNot(selector), getInt32Ty()), getInt32(3));
+            Value * delete_marks_lo = CreateAnd(CreateZExtOrTrunc(CreateNot(selector), getInt32Ty()), getInt32(3));
             Value * delCount_lo = CreateSub(delete_marks_lo, CreateLShr(delete_marks_lo, 1));
             return mvmd_srl(32, centralResult, delCount_lo);
         }

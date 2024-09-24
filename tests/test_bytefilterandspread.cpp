@@ -313,7 +313,7 @@ bool runTestCase(CPUDriver & driver, std::default_random_engine & rng) {
     if (optTestLength.getNumOccurrences()) {
         testLength = optTestLength.getValue();
     } else {
-        std::uniform_int_distribution<size_t> tlDist(700LL, 300ULL);
+        std::uniform_int_distribution<size_t> tlDist(700LL, 3000ULL);
         testLength = tlDist(rng);
     }
 

@@ -1474,7 +1474,9 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     BasicBlock * entry = b.GetInsertBlock();
     BasicBlock * packLoop = b.CreateBasicBlock("packLoop");
     BasicBlock * packFinalize = b.CreateBasicBlock("packFinalize");
-    Constant * const ZERO = b.getSize(0);
+
+    ConstantInt * const sz_ZERO = b.getSize(0);
+    ConstantInt * const sz_ONE = b.getSize(1);
 
     const auto fieldWidth = getInputStreamSet(0)->getFieldWidth();
 
@@ -1484,7 +1486,7 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     }
 
     const auto numElements = output->getNumElements();
-
+    const auto numInputElements = getInputStreamSet(0)->getNumElements();
     if (numElements > getInputStreamSet(0)->getNumElements()) {
         report_fatal_error(Twine{getName(), ": number of output streams exceeds the input streamset size"});
     }
@@ -1503,125 +1505,190 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
     ConstantInt * const LOG_2_FIELDS_PER_BLOCK = b.getSize(floor_log2(fieldsPerBlock));
 
-    Value * baseStreamIndex = nullptr;
-    if (b.hasScalarField("offset")) {
-        baseStreamIndex = b.getScalarField("offset");
-    }
-
-    Value * initToWritePos = b.getProducedItemCount("output");
-    Value * initialPosition = b.CreateAnd(initToWritePos, BLOCK_WIDTH_MASK);
-    Value * initialPackIndex = b.CreateLShr(initialPosition, LOG_2_FIELDS_PER_BLOCK);
-
-    SmallVector<Value *, 32> pending(numElements);
-    SmallVector<PHINode *, 32> pendingPhi(numElements);
-
-    Constant * const sz_ZERO = b.getSize(0);
-
-    Constant * const sz_ONE = b.getSize(1);
-
     FixedVectorType * dataVecTy = b.fwVectorType(fieldWidth);
 
-    Constant * ZERO_VEC = ConstantVector::getNullValue(dataVecTy);
+    Value * initToWritePos = b.getProducedItemCount("output");
 
-    for (unsigned i = 0; i < numElements; ++i) {
-        Value * streamIndex = b.getSize(i);
-        Value * ptr = b.getOutputStreamPackPtr("output", streamIndex, initialPackIndex, sz_ZERO);
-        pending[i] = b.CreateAlignedLoad(dataVecTy, ptr, b.getBitBlockWidth() / 8);
-    }
+    if (numElements == 1 && numInputElements == 1) {
 
-    b.CreateBr(packLoop);
+        Value * const totalBlocks = b.CreateMul(numOfStrides, b.getSize(fieldWidth));
+        Value * const baseDataPtr = b.getInputStreamPackPtr("byteStream", sz_ZERO, sz_ZERO);
+        assert (fieldWidth <= b.getBitBlockWidth());
+        const auto popCountSize = b.getBitBlockWidth() / fieldWidth;
 
-    b.SetInsertPoint(packLoop);
-    PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
-    blockOffsetPhi->addIncoming(ZERO, entry);
+        Value * const baseFilterPtr = b.getInputStreamPackPtr("filter", sz_ZERO, sz_ZERO); ;
 
-    PHINode * const shiftPhi = b.CreatePHI(b.getSizeTy(), 2);
-    shiftPhi->addIncoming(initialPosition, entry);
+        b.CreateBr(packLoop);
 
-    PHINode * const packIndexPhi = b.CreatePHI(b.getSizeTy(), 2);
-    packIndexPhi->addIncoming(initialPackIndex, entry);
+        b.SetInsertPoint(packLoop);
+        PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
+        blockOffsetPhi->addIncoming(sz_ZERO, entry);
+        PHINode * const toWritePosPhi = b.CreatePHI(b.getSizeTy(), 2);
+        toWritePosPhi->addIncoming(initToWritePos, entry);
 
-    for (unsigned i = 0; i < numElements; ++i) {
-        PHINode * pPhi = b.CreatePHI(dataVecTy, 2);
-        pPhi->addIncoming(pending[i], entry);
-        pendingPhi[i] = pPhi;
-        pending[i] = pPhi;
-    }
-
-    Value * filterVec = b.loadInputStreamBlock("filter", ZERO, blockOffsetPhi);
-
-    VectorType * popVecTy = FixedVectorType::get(b.getIntNTy(b.getBitBlockWidth() / fieldWidth), fieldWidth);
-
-    filterVec = b.CreateBitCast(filterVec, popVecTy);
-
-    SmallVector<Value *, 65> shiftVal(fieldWidth + 1);
-    SmallVector<Value *, 65> fieldPackIndex(fieldWidth + 1);
-
-    SmallVector<Value *, 64> filterElem(fieldWidth);
-    SmallVector<Value *, 64> leftShift(fieldWidth);
-    SmallVector<Value *, 64> packIndex(fieldWidth);
-    SmallVector<Value *, 64> blockIndex(fieldWidth);
-    SmallVector<Value *, 64> rightShift(fieldWidth);
-    SmallVector<Value *, 64> keepCurrentPending(fieldWidth);
-
-
-    for (unsigned i = 0; i < numElements; ++i) {
-
-        ConstantInt * outputStreamIndex = b.getSize(i);
-        Value * inputStreamIndex = outputStreamIndex;
-        if (baseStreamIndex) {
-            inputStreamIndex = b.CreateAdd(outputStreamIndex, baseStreamIndex);
+        Value * filter = nullptr;
+        if (popCountSize < 8) {
+            Value * ptr = b.CreatePointerCast(baseFilterPtr, b.getInt8Ty()->getPointerTo());
+            const auto packsPerByte = (8 / popCountSize);
+            assert (packsPerByte > 1);
+            Value * pos = b.CreateLShr(blockOffsetPhi, b.getSize(floor_log2(packsPerByte)));
+            filter = b.CreateAlignedLoad(b.getInt8Ty(), b.CreateGEP(b.getInt8Ty(), ptr, pos), 1);
+            filter = b.CreateZExt(filter, b.getSizeTy());
+            Value * off = b.CreateAnd(blockOffsetPhi, b.getSize(packsPerByte - 1));
+            filter = b.CreateLShr(filter, b.CreateShl(off, b.getSize(floor_log2(popCountSize))));
+            filter = b.CreateAnd(filter, b.getSize((1UL << popCountSize) - 1UL));
+        } else {
+            IntegerType * const popCountTy = b.getIntNTy(popCountSize);
+            Value * ptr = b.CreatePointerCast(baseFilterPtr, popCountTy->getPointerTo());
+            filter = b.CreateAlignedLoad(popCountTy, b.CreateGEP(popCountTy, ptr, blockOffsetPhi), popCountSize / 8);
         }
 
-        shiftVal[0] = shiftPhi;
-        fieldPackIndex[0] = packIndexPhi;
+        Value * const data = b.CreateAlignedLoad(dataVecTy, b.CreateGEP(dataVecTy, baseDataPtr, blockOffsetPhi), b.getBitBlockWidth() / 8);
+        Value * const compressed = b.mvmd_compress(fieldWidth, data, filter);
 
-        for (unsigned j = 0; j < fieldWidth; ++j) {
-            if (i == 0) {
-                filterElem[j] = b.CreateExtractElement(filterVec, b.getInt32(j));
-                Value * const elementPopCount = b.CreateZExt(b.CreatePopcount(filterElem[j]), b.getSizeTy());
-                leftShift[j] = b.CreateAnd(shiftVal[j], FIELDS_PER_BLOCK_MASK);
-                packIndex[j] = b.CreateAnd(fieldPackIndex[j], FIELD_WIDTH_MASK);
-                blockIndex[j] = b.CreateLShr(fieldPackIndex[j], LOG_2_FIELD_WIDTH);
-                rightShift[j] = b.CreateSub(FIELDS_PER_BLOCK, leftShift[j]);
-                Value * nextShiftVal = b.CreateAdd(shiftVal[j], elementPopCount);
-                Value * nextPackIndex = b.CreateLShr(nextShiftVal, LOG_2_FIELDS_PER_BLOCK);
-                keepCurrentPending[j] = b.CreateICmpEQ(fieldPackIndex[j], nextPackIndex);
-                fieldPackIndex[j + 1] = nextPackIndex;
-                shiftVal[j + 1] = nextShiftVal;
+        Value * const ptr = b.getRawOutputPointer("output", toWritePosPhi);
+
+        Value * const toStorePtr = b.CreatePointerCast(ptr, compressed->getType()->getPointerTo());
+        b.CreateAlignedStore(compressed, toStorePtr, 1);
+
+        Value * const elementPopCount = b.CreatePopcount(filter);
+        Value * toWritePos = b.CreateAdd(toWritePosPhi, b.CreateZExt(elementPopCount, b.getSizeTy()));
+
+        Value * nextBlk = b.CreateAdd(blockOffsetPhi, sz_ONE);
+        blockOffsetPhi->addIncoming(nextBlk, packLoop);
+
+        toWritePosPhi->addIncoming(toWritePos, packLoop);
+        Value * moreToDo = b.CreateICmpNE(nextBlk, totalBlocks);
+
+        b.CreateCondBr(moreToDo, packLoop, packFinalize);
+
+        b.SetInsertPoint(packFinalize);
+
+    } else {
+
+        Value * baseStreamIndex = nullptr;
+        if (b.hasScalarField("offset")) {
+            baseStreamIndex = b.getScalarField("offset");
+            if (DebugOptionIsSet(codegen::EnableAsserts)) {
+                Value * const maxElem = b.CreateAdd(baseStreamIndex, b.getSize(numElements));
+                Value * valid = b.CreateICmpULE(maxElem, b.getSize(numInputElements));
+                b.CreateAssert(valid, "%s: stream index plus output streamset size exceeds input streamset size",
+                               b.GetString(getName()), baseStreamIndex, b.getSize(numElements), b.getSize(numInputElements));
             }
-            Value * const data = b.loadInputStreamPack("byteStream", inputStreamIndex, b.getSize(j), blockOffsetPhi);
-            Value * const compressed = b.mvmd_compress(fieldWidth, data, filterElem[j]);
-            Value * lshiftVal = b.mvmd_sll(fieldWidth, compressed, leftShift[j]);
-            Value * toWriteVal = b.CreateOr(pending[i], lshiftVal);
-            b.storeOutputStreamPack("output", outputStreamIndex, packIndex[j], blockIndex[j], toWriteVal);
-            Value * rshiftVal = b.mvmd_srl(fieldWidth, compressed, rightShift[j]);
-            rshiftVal = b.CreateSelect(b.CreateICmpNE(leftShift[j], sz_ZERO), rshiftVal, ZERO_VEC);
-            pending[i] = b.CreateSelect(keepCurrentPending[j], toWriteVal, rshiftVal);
         }
+
+        Value * initialPosition = b.CreateAnd(initToWritePos, BLOCK_WIDTH_MASK);
+        Value * initialPackIndex = b.CreateLShr(initialPosition, LOG_2_FIELDS_PER_BLOCK);
+
+        SmallVector<Value *, 32> pending(numElements);
+        SmallVector<PHINode *, 32> pendingPhi(numElements);
+
+        Constant * ZERO_VEC = ConstantVector::getNullValue(dataVecTy);
+
+        for (unsigned i = 0; i < numElements; ++i) {
+            Value * streamIndex = b.getSize(i);
+            Value * ptr = b.getOutputStreamPackPtr("output", streamIndex, initialPackIndex, sz_ZERO);
+            pending[i] = b.CreateAlignedLoad(dataVecTy, ptr, b.getBitBlockWidth() / 8);
+        }
+
+        b.CreateBr(packLoop);
+
+        b.SetInsertPoint(packLoop);
+        PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
+        blockOffsetPhi->addIncoming(sz_ZERO, entry);
+
+        PHINode * const shiftPhi = b.CreatePHI(b.getSizeTy(), 2);
+        shiftPhi->addIncoming(initialPosition, entry);
+
+        PHINode * const packIndexPhi = b.CreatePHI(b.getSizeTy(), 2);
+        packIndexPhi->addIncoming(initialPackIndex, entry);
+
+        for (unsigned i = 0; i < numElements; ++i) {
+            PHINode * pPhi = b.CreatePHI(dataVecTy, 2);
+            pPhi->addIncoming(pending[i], entry);
+            pendingPhi[i] = pPhi;
+            pending[i] = pPhi;
+        }
+
+        Value * filterVec = b.loadInputStreamBlock("filter", sz_ZERO, blockOffsetPhi);
+
+        VectorType * popVecTy = FixedVectorType::get(b.getIntNTy(b.getBitBlockWidth() / fieldWidth), fieldWidth);
+
+        filterVec = b.CreateBitCast(filterVec, popVecTy);
+
+        SmallVector<Value *, 65> shiftVal(fieldWidth + 1);
+        SmallVector<Value *, 65> fieldPackIndex(fieldWidth + 1);
+
+        SmallVector<Value *, 64> filterElem(fieldWidth);
+        SmallVector<Value *, 64> leftShift(fieldWidth);
+        SmallVector<Value *, 64> packIndex(fieldWidth);
+        SmallVector<Value *, 64> blockIndex(fieldWidth);
+        SmallVector<Value *, 64> rightShift(fieldWidth);
+        SmallVector<Value *, 64> keepCurrentPending(fieldWidth);
+
+
+        for (unsigned i = 0; i < numElements; ++i) {
+
+            ConstantInt * outputStreamIndex = b.getSize(i);
+            Value * inputStreamIndex = outputStreamIndex;
+            if (baseStreamIndex) {
+                inputStreamIndex = b.CreateAdd(outputStreamIndex, baseStreamIndex);
+            }
+
+            shiftVal[0] = shiftPhi;
+            fieldPackIndex[0] = packIndexPhi;
+
+            for (unsigned j = 0; j < fieldWidth; ++j) {
+                if (i == 0) {
+                    filterElem[j] = b.CreateExtractElement(filterVec, b.getInt32(j));
+                    Value * const elementPopCount = b.CreateZExt(b.CreatePopcount(filterElem[j]), b.getSizeTy());
+                    leftShift[j] = b.CreateAnd(shiftVal[j], FIELDS_PER_BLOCK_MASK);
+                    packIndex[j] = b.CreateAnd(fieldPackIndex[j], FIELD_WIDTH_MASK);
+                    blockIndex[j] = b.CreateLShr(fieldPackIndex[j], LOG_2_FIELD_WIDTH);
+                    rightShift[j] = b.CreateSub(FIELDS_PER_BLOCK, leftShift[j]);
+                    Value * nextShiftVal = b.CreateAdd(shiftVal[j], elementPopCount);
+                    Value * nextPackIndex = b.CreateLShr(nextShiftVal, LOG_2_FIELDS_PER_BLOCK);
+                    keepCurrentPending[j] = b.CreateICmpEQ(fieldPackIndex[j], nextPackIndex);
+                    fieldPackIndex[j + 1] = nextPackIndex;
+                    shiftVal[j + 1] = nextShiftVal;
+                }
+                Value * const data = b.loadInputStreamPack("byteStream", inputStreamIndex, b.getSize(j), blockOffsetPhi);
+                Value * const compressed = b.mvmd_compress(fieldWidth, data, filterElem[j]);
+                Value * lshiftVal = b.mvmd_sll(fieldWidth, compressed, leftShift[j]);
+                Value * toWriteVal = b.CreateOr(pending[i], lshiftVal);
+                b.storeOutputStreamPack("output", outputStreamIndex, packIndex[j], blockIndex[j], toWriteVal);
+                Value * rshiftVal = b.mvmd_srl(fieldWidth, compressed, rightShift[j]);
+                rshiftVal = b.CreateSelect(b.CreateICmpNE(leftShift[j], sz_ZERO), rshiftVal, ZERO_VEC);
+                pending[i] = b.CreateSelect(keepCurrentPending[j], toWriteVal, rshiftVal);
+            }
+        }
+
+        for (unsigned i = 0; i < numElements; ++i) {
+            pendingPhi[i]->addIncoming(pending[i], packLoop);
+        }
+
+        packIndexPhi->addIncoming(fieldPackIndex[fieldWidth], packLoop);
+
+        shiftPhi->addIncoming(shiftVal[fieldWidth], packLoop);
+
+        Value * nextBlk = b.CreateAdd(blockOffsetPhi, sz_ONE);
+        blockOffsetPhi->addIncoming(nextBlk, packLoop);
+
+        Value * moreToDo = b.CreateICmpNE(nextBlk, numOfStrides);
+
+        b.CreateCondBr(moreToDo, packLoop, packFinalize);
+
+        b.SetInsertPoint(packFinalize);
+        Value * packIdx = b.CreateAnd(fieldPackIndex[fieldWidth], FIELD_WIDTH_MASK);
+        Value * blkIdx = b.CreateLShr(fieldPackIndex[fieldWidth], LOG_2_FIELD_WIDTH);
+        for (unsigned i = 0; i < numElements; ++i) {
+            b.storeOutputStreamPack("output", b.getSize(i), packIdx, blkIdx, pending[i]);
+        }
+
+
+
     }
 
-    for (unsigned i = 0; i < numElements; ++i) {
-        pendingPhi[i]->addIncoming(pending[i], packLoop);
-    }
-
-    packIndexPhi->addIncoming(fieldPackIndex[fieldWidth], packLoop);
-
-    shiftPhi->addIncoming(shiftVal[fieldWidth], packLoop);
-
-    Value * nextBlk = b.CreateAdd(blockOffsetPhi, sz_ONE);
-    blockOffsetPhi->addIncoming(nextBlk, packLoop);
-
-    Value * moreToDo = b.CreateICmpNE(nextBlk, numOfStrides);
-
-    b.CreateCondBr(moreToDo, packLoop, packFinalize);
-
-    b.SetInsertPoint(packFinalize);
-    Value * packIdx = b.CreateAnd(fieldPackIndex[fieldWidth], FIELD_WIDTH_MASK);
-    Value * blkIdx = b.CreateLShr(fieldPackIndex[fieldWidth], LOG_2_FIELD_WIDTH);
-    for (unsigned i = 0; i < numElements; ++i) {
-        b.storeOutputStreamPack("output", b.getSize(i), packIdx, blkIdx, pending[i]);
-    }
 
 }
 
