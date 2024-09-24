@@ -43,7 +43,7 @@ static cl::opt<bool, true> OptShowExternals("ShowExternals", cl::location(ShowEx
 
 bool UseByteFilterByMask;
 static cl::opt<bool, true> OptUseByteFilterByMask("UseByteFilterByMask", cl::location(UseByteFilterByMask),
-                                         cl::desc("Use ByteFilterByMask."), cl::init(false));
+                                         cl::desc("Use ByteFilterByMask."), cl::init(true));
 
 bool UseNestedColourizationPipeline;
 static cl::opt<bool, true> OptUsePipelinedColourization("UseNestedColourizationPipeline", cl::location(UseNestedColourizationPipeline),

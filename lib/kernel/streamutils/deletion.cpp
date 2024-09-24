@@ -36,16 +36,8 @@ void FilterByMask(PipelineBuilder & P,
         P.CreateKernelCall<FieldCompressKernel>(Select(mask, {0}), SelectOperationList { Select(inputs, output_indices)}, compressed, extractionFieldWidth);
         P.CreateKernelCall<StreamCompressKernel>(mask, compressed, outputs, extractionFieldWidth);
     } else {
-//        StreamSet * const input_streams = P.CreateStreamSet(8);
-//        P.CreateKernelCall<S2PKernel>(inputs, input_streams);
-//        StreamSet * const output_streams = P.CreateStreamSet(8);
-//        StreamSet * const compressed = P.CreateStreamSet(output_streams->getNumElements());
-//        std::vector<uint32_t> output_indices = streamutils::Range(streamOffset, streamOffset + output_streams->getNumElements());
-//        P.CreateKernelCall<FieldCompressKernel>(Select(mask, {0}), SelectOperationList { Select(input_streams, output_indices)}, compressed, extractionFieldWidth);
-//        P.CreateKernelCall<StreamCompressKernel>(mask, compressed, output_streams, extractionFieldWidth);
-//        P.CreateKernelCall<P2SKernel>(output_streams, outputs);
         Scalar * offset = nullptr;
-        if (streamOffset) {
+        if (streamOffset || inputs->getNumElements() != outputs->getNumElements()) {
             offset = P.CreateConstant(P.getSize(streamOffset));
         }
         P.CreateKernelCall<ByteFilterByMaskKernel>(inputs, mask, outputs, offset);
@@ -1460,10 +1452,22 @@ void FilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & kb, llvm::Value
 
 
 ByteFilterByMaskKernel::ByteFilterByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const filter, StreamSet * const output, Scalar * streamOffset)
-    : MultiBlockKernel(b, "ByteFilterByMask" + std::to_string(output->getNumElements()) + "x" + std::to_string(byteStream->getFieldWidth()),
+: MultiBlockKernel(b, [&]() {
+    std::string tmp;
+    raw_string_ostream nm(tmp);
+    nm << "ByteFilterByMask" << output->getNumElements() << 'x' << byteStream->getFieldWidth();
+    if (streamOffset) {
+        nm << 'S';
+    }
+    nm.flush();
+    return tmp;
+}(),
 {Binding{"byteStream", byteStream}, Binding{"filter", filter}},
 {Binding{"output", output, PopcountOf("filter")}}, {}, {}, {}) {
     assert (byteStream->getFieldWidth() == output->getFieldWidth());
+    if (streamOffset) {
+        mInputScalars.emplace_back("offset", streamOffset);
+    }
 }
 
 void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
@@ -1481,6 +1485,10 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
     const auto numElements = output->getNumElements();
 
+    if (numElements > getInputStreamSet(0)->getNumElements()) {
+        report_fatal_error(Twine{getName(), ": number of output streams exceeds the input streamset size"});
+    }
+
     const auto fieldsPerBlock = (b.getBitBlockWidth() / fieldWidth);
 
     ConstantInt * const BLOCK_WIDTH_MASK = b.getSize(b.getBitBlockWidth() - 1);
@@ -1495,6 +1503,10 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
     ConstantInt * const LOG_2_FIELDS_PER_BLOCK = b.getSize(floor_log2(fieldsPerBlock));
 
+    Value * baseStreamIndex = nullptr;
+    if (b.hasScalarField("offset")) {
+        baseStreamIndex = b.getScalarField("offset");
+    }
 
     Value * initToWritePos = b.getProducedItemCount("output");
     Value * initialPosition = b.CreateAnd(initToWritePos, BLOCK_WIDTH_MASK);
@@ -1555,7 +1567,11 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
     for (unsigned i = 0; i < numElements; ++i) {
 
-        ConstantInt * streamIndex = b.getSize(i);
+        ConstantInt * outputStreamIndex = b.getSize(i);
+        Value * inputStreamIndex = outputStreamIndex;
+        if (baseStreamIndex) {
+            inputStreamIndex = b.CreateAdd(outputStreamIndex, baseStreamIndex);
+        }
 
         shiftVal[0] = shiftPhi;
         fieldPackIndex[0] = packIndexPhi;
@@ -1574,11 +1590,11 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
                 fieldPackIndex[j + 1] = nextPackIndex;
                 shiftVal[j + 1] = nextShiftVal;
             }
-            Value * const data = b.loadInputStreamPack("byteStream", streamIndex, b.getSize(j), blockOffsetPhi);
+            Value * const data = b.loadInputStreamPack("byteStream", inputStreamIndex, b.getSize(j), blockOffsetPhi);
             Value * const compressed = b.mvmd_compress(fieldWidth, data, filterElem[j]);
             Value * lshiftVal = b.mvmd_sll(fieldWidth, compressed, leftShift[j]);
             Value * toWriteVal = b.CreateOr(pending[i], lshiftVal);
-            b.storeOutputStreamPack("output", streamIndex, packIndex[j], blockIndex[j], toWriteVal);
+            b.storeOutputStreamPack("output", outputStreamIndex, packIndex[j], blockIndex[j], toWriteVal);
             Value * rshiftVal = b.mvmd_srl(fieldWidth, compressed, rightShift[j]);
             rshiftVal = b.CreateSelect(b.CreateICmpNE(leftShift[j], sz_ZERO), rshiftVal, ZERO_VEC);
             pending[i] = b.CreateSelect(keepCurrentPending[j], toWriteVal, rshiftVal);

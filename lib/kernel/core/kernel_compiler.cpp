@@ -1476,7 +1476,7 @@ KernelCompiler::ScalarRef KernelCompiler::getThreadLocalScalarFieldPtr(KernelBui
  * @brief getScalarValuePtr
  ** ------------------------------------------------------------------------------------------------------------- */
 bool KernelCompiler::hasScalarField(const llvm::StringRef name) const {
-    return mScalarFieldMap.count(name) == 0;
+    return mScalarFieldMap.count(name) != 0;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

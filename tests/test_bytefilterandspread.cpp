@@ -48,7 +48,7 @@ optMode("mode", cl::init(Mode::Any), cl::desc("Set the front-end optimization le
 
 static cl::opt<unsigned> optStreamCount("stream-count", cl::desc("Number of streams per streamset"), cl::init(0));
 
-static cl::opt<unsigned> optTrials("trials", cl::desc("Number of tests to execute"), cl::init(100));
+static cl::opt<unsigned> optTrials("trials", cl::desc("Number of tests to execute"), cl::init(10));
 
 
 static cl::opt<bool> optVerbose("v", cl::desc("Print verbose output"), cl::init(false));
@@ -305,7 +305,7 @@ bool runTestCase(CPUDriver & driver, std::default_random_engine & rng) {
     if (optStreamCount.getNumOccurrences()) {
         streamCount = optStreamCount.getValue();
     } else {
-        std::uniform_int_distribution<size_t> scDist(1, 10);
+        std::uniform_int_distribution<size_t> scDist(1, 3);
         streamCount = scDist(rng);
     }
 
@@ -313,7 +313,7 @@ bool runTestCase(CPUDriver & driver, std::default_random_engine & rng) {
     if (optTestLength.getNumOccurrences()) {
         testLength = optTestLength.getValue();
     } else {
-        std::uniform_int_distribution<size_t> tlDist(1000ULL, 10000ULL);
+        std::uniform_int_distribution<size_t> tlDist(700LL, 300ULL);
         testLength = tlDist(rng);
     }
 

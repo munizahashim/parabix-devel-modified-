@@ -33,11 +33,19 @@ void SpreadByMask(PipelineBuilder & P,
                   StreamExpandOptimization opt,
                   unsigned expansionFieldWidth,
                   ProcessingRateProbabilityDistribution itemsPerOutputUnit) {
-    unsigned streamCount = outputs->getNumElements();
-    StreamSet * const expanded = P.CreateStreamSet(streamCount);
-    Scalar * base = P.CreateConstant(P.getSize(streamOffset));
-    P.CreateKernelCall<StreamExpandKernel>(mask, toSpread, expanded, base, zeroExtend, opt, expansionFieldWidth, itemsPerOutputUnit);
-    P.CreateKernelCall<FieldDepositKernel>(mask, expanded, outputs, expansionFieldWidth);
+    if (toSpread->getFieldWidth() < 8) {
+        unsigned streamCount = outputs->getNumElements();
+        StreamSet * const expanded = P.CreateStreamSet(streamCount);
+        Scalar * base = P.CreateConstant(P.getSize(streamOffset));
+        P.CreateKernelCall<StreamExpandKernel>(mask, toSpread, expanded, base, zeroExtend, opt, expansionFieldWidth, itemsPerOutputUnit);
+        P.CreateKernelCall<FieldDepositKernel>(mask, expanded, outputs, expansionFieldWidth);
+    } else {
+        Scalar * offset = nullptr;
+        if (streamOffset || toSpread->getNumElements() != outputs->getNumElements()) {
+            offset = P.CreateConstant(P.getSize(streamOffset));
+        }
+        P.CreateKernelCall<ByteSpreadByMaskKernel>(toSpread, mask, outputs, offset);
+    }
 }
 
 
@@ -837,9 +845,22 @@ StreamSet * InsertionSpreadMask(PipelineBuilder & P,
 
 
 ByteSpreadByMaskKernel::ByteSpreadByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const spread, StreamSet * const output, Scalar * streamOffset)
-: MultiBlockKernel(b, "ByteSpreadByMask" + std::to_string(output->getNumElements()) + "x" + std::to_string(byteStream->getFieldWidth()),
-{Binding{"byteStream", byteStream, PopcountOf("spread")}, Binding{"spread", spread, FixedRate(1)}},
-    {Binding{"output", output, FixedRate(1)}}, {}, {}, {}) {}
+: MultiBlockKernel(b, [&]() {
+   std::string tmp;
+   raw_string_ostream nm(tmp);
+   nm << "ByteSpreadByMask" << output->getNumElements() << 'x' << byteStream->getFieldWidth();
+   if (streamOffset) {
+       nm << 'S';
+   }
+   nm.flush();
+   return tmp;
+}(),
+{Binding{"byteStream", byteStream, PopcountOf("spread")}, Binding{"spread", spread}},
+{Binding{"output", output}}, {}, {}, {}) {
+    if (streamOffset) {
+        mInputScalars.emplace_back("offset", streamOffset);
+    }
+}
 
 void ByteSpreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
     BasicBlock * entry = b.GetInsertBlock();
@@ -861,6 +882,10 @@ void ByteSpreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     Value * initPos = b.getProcessedItemCount("byteStream");
 
     const auto numElements = output->getNumElements();
+
+    if (numElements > getInputStreamSet(0)->getNumElements()) {
+        report_fatal_error(Twine{getName(), ": number of output streams exceeds the input streamset size"});
+    }
 
     SmallVector<Value *, 32> pending(numElements);
 
@@ -885,6 +910,10 @@ void ByteSpreadByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     Value * initialPosition = b.CreateAnd(initPos, BLOCK_WIDTH_MASK);
     Value * initialPackIndex = b.CreateLShr(initialPosition, LOG_2_FIELDS_PER_BLOCK);
 
+    Value * baseStreamIndex = nullptr;
+    if (b.hasScalarField("offset")) {
+        baseStreamIndex = b.getScalarField("offset");
+    }
 
     FixedVectorType * dataVecTy = b.fwVectorType(fieldWidth); // FixedVectorType::get(b.getIntNTy(fieldWidth), b.getBitBlockWidth() / fieldWidth);
 

@@ -30,6 +30,13 @@ Value * KernelBuilder::getThreadLocalHandle() const noexcept {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief hasScalarField
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool KernelBuilder::hasScalarField(const StringRef fieldName) const {
+    return COMPILER->hasScalarField(fieldName);
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief getScalarFieldPtr
  ** ------------------------------------------------------------------------------------------------------------- */
 KernelBuilder::ScalarRef KernelBuilder::getScalarFieldPtr(const StringRef fieldName) {
