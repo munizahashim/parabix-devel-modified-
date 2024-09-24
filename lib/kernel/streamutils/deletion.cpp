@@ -1555,10 +1555,10 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
 
     for (unsigned i = 0; i < numElements; ++i) {
 
+        ConstantInt * streamIndex = b.getSize(i);
+
         shiftVal[0] = shiftPhi;
         fieldPackIndex[0] = packIndexPhi;
-
-        Value * streamIndex = b.getSize(i);
 
         for (unsigned j = 0; j < fieldWidth; ++j) {
             if (i == 0) {
@@ -1574,7 +1574,7 @@ void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
                 fieldPackIndex[j + 1] = nextPackIndex;
                 shiftVal[j + 1] = nextShiftVal;
             }
-            Value * const data = b.loadInputStreamPack("byteStream", ZERO, b.getSize(j), blockOffsetPhi);
+            Value * const data = b.loadInputStreamPack("byteStream", streamIndex, b.getSize(j), blockOffsetPhi);
             Value * const compressed = b.mvmd_compress(fieldWidth, data, filterElem[j]);
             Value * lshiftVal = b.mvmd_sll(fieldWidth, compressed, leftShift[j]);
             Value * toWriteVal = b.CreateOr(pending[i], lshiftVal);

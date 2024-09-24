@@ -59,6 +59,8 @@ public:
         mPreservesKernels = value;
     }
 
+    unsigned getBitBlockWidth() const final;
+
 protected:
 
     kernel::StreamSet * CreateStreamSet(const unsigned NumElements = 1, const unsigned FieldWidth = 1) noexcept;
@@ -74,8 +76,6 @@ protected:
     kernel::Scalar * CreateConstant(not_null<llvm::Constant *> value) noexcept;
 
     kernel::Scalar * CreateCommandLineScalar(kernel::CommandLineScalarType type) noexcept;
-
-    unsigned getBitBlockWidth() const final;
 
     llvm::VectorType * getBitBlockType() const final;
 

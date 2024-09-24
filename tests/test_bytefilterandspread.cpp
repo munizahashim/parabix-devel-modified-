@@ -23,6 +23,8 @@
 #include <limits>
 #include <boost/core/bit.hpp>
 
+#include <llvm/Support/raw_os_ostream.h>
+
 using namespace kernel;
 using namespace llvm;
 using namespace testing;
@@ -44,6 +46,7 @@ optMode("mode", cl::init(Mode::Any), cl::desc("Set the front-end optimization le
                              clEnumValN(Mode::Spread, "spread", "trivial optimizations"),
                              clEnumValN(Mode::Any, "any", "standard optimizations")));
 
+static cl::opt<unsigned> optStreamCount("stream-count", cl::desc("Number of streams per streamset"), cl::init(0));
 
 static cl::opt<unsigned> optTrials("trials", cl::desc("Number of tests to execute"), cl::init(100));
 
@@ -51,19 +54,51 @@ static cl::opt<unsigned> optTrials("trials", cl::desc("Number of tests to execut
 static cl::opt<bool> optVerbose("v", cl::desc("Print verbose output"), cl::init(false));
 
 template<size_t FieldWidth>
-uint32_t runTestCase(CPUDriver & driver, const size_t testLength, const Mode mode, std::default_random_engine & rng) {
+uint32_t runTestCase(CPUDriver & driver, const size_t streamCount, const size_t testLength, const Mode mode, std::default_random_engine & rng) {
 
     using datatype_t = typename boost::uint_t<FieldWidth>::exact;
 
     using Allocator = AlignedAllocator<uint8_t, (512 / 8)>;
 
+    if (LLVM_UNLIKELY(streamCount == 0 || testLength == 0)) {
+        return 0U;
+    }
+
+    const auto blockWidth = driver.getBitBlockWidth();
+
+    assert ((blockWidth % 64) == 0 && blockWidth > 64);
+
     Allocator alloc;
 
-    datatype_t * const source = (datatype_t*)alloc.allocate(testLength * sizeof(datatype_t));
+    size_t sourceDataLength = (testLength + 511ULL) & ~511ULL;
+
+    datatype_t * const source = (datatype_t*)alloc.allocate(sourceDataLength * streamCount * sizeof(datatype_t));
 
     std::uniform_int_distribution<datatype_t> dataDist(0ULL, std::numeric_limits<datatype_t>::max());
-    for (size_t i = 0; i < testLength; ++i) {
-        source[i] = dataDist(rng);
+
+    assert ((sourceDataLength % blockWidth) == 0);
+
+    for (size_t i = 0, out = 0; i < sourceDataLength; i += blockWidth) {
+
+        if (LLVM_LIKELY((i + blockWidth) <= testLength)) {
+            for (size_t j = 0; j < (streamCount * blockWidth); ++j) {
+                source[out++] = dataDist(rng);
+            }
+        } else if (i < testLength) {
+            const auto m = testLength - i;
+            for (size_t j = 0; j < streamCount; ++j) {
+                for (size_t k = 0; k < m; ++k) {
+                    source[out++] = dataDist(rng);
+                }
+                for (size_t k = m; k < blockWidth; ++k) {
+                    source[out++] = 0;
+                }
+            }
+        } else {
+            for (size_t j = 0; j < (streamCount * blockWidth); ++j) {
+                source[out++] = 0;
+            }
+        }
     }
 
     std::uniform_int_distribution<uint64_t> markDist(0ULL, std::numeric_limits<uint64_t>::max());
@@ -87,7 +122,6 @@ uint32_t runTestCase(CPUDriver & driver, const size_t testLength, const Mode mod
 
         for (size_t i = 0; i < markerLength; ++i) {
             uint64_t v = markDist(rng);
-
             while (LLVM_UNLIKELY(popCount > testLength)) {
                 // remove rightmost bit
                 assert (v);
@@ -101,27 +135,30 @@ uint32_t runTestCase(CPUDriver & driver, const size_t testLength, const Mode mod
 
         resultLength = (popCount + 511ULL) & ~511ULL;
 
-        result = (datatype_t*)alloc.allocate(resultLength * sizeof(datatype_t));
+        const auto resultBytes = resultLength * streamCount * sizeof(datatype_t);
 
-        size_t out = 0;
+        result = (datatype_t*)alloc.allocate(resultBytes);
+        std::memset(result, 0, resultBytes);
 
-        for (size_t i = 0; i < markerLength; ++i) {
+        const auto markersPerBlock = (blockWidth / 64);
 
-            auto v = markers[i];
-            while (v) {
-                const auto p = boost::core::countr_zero(v);
-                assert ((v & (1ULL << p)) != 0);
-                v ^= (1ULL << p);
-                assert (out <= resultLength);
-                result[out++] = source[(i * 64) | p];
+        for (size_t j = 0; j < streamCount; ++j) {
+            size_t out = j * blockWidth;
+            for (size_t i = 0; i < markerLength; ++i) {
+                auto v = markers[i];
+                const auto base = (j * blockWidth) + ((i % markersPerBlock) * 64) + ((i / markersPerBlock) * streamCount * blockWidth);
+                while (v) {
+                    const auto p = boost::core::countr_zero(v);
+                    assert ((v & (1ULL << p)) != 0);
+                    v ^= (1ULL << p);
+                    assert (result[out] == 0);
+                    assert ((base | p) == (base + p));
+                    result[out++] = source[base | p];
+                    if ((out % blockWidth) == 0) {
+                        out += (streamCount - 1) * blockWidth;
+                    }
+                }
             }
-
-        }
-
-        assert (out == popCount);
-
-        for (; out < resultLength; ++out) {
-            result[out] = 0;
         }
 
         markerLength = testLength;
@@ -163,41 +200,39 @@ uint32_t runTestCase(CPUDriver & driver, const size_t testLength, const Mode mod
 
         markerLength = (total * 64);
         resultLength = (markerLength + 511) & ~511;
-        result = (datatype_t*)alloc.allocate(resultLength * sizeof(datatype_t));
+        const auto resultBytes = resultLength * streamCount * sizeof(datatype_t);
+        result = (datatype_t*)alloc.allocate(resultBytes);
+        std::memset(result, 0, resultBytes);
 
-        size_t in = 0;
-        size_t out = 0;
+        const auto markersPerBlock = (blockWidth / 64);
 
-        for (size_t i = 0; i < total; ++i) {
-            uint64_t v = markers[i];
-            while (v) {
-                const auto p = boost::core::countr_zero(v);
-                assert ((v & (1ULL << p)) != 0);
-                v ^= (1ULL << p);
-                const size_t nextOut = (i * 64) | p;
-                assert (nextOut < resultLength);
-                for (; out < nextOut; ++out) {
-                    assert (out < resultLength);
-                    result[out] = 0;
+        for (size_t j = 0; j < streamCount; ++j) {
+            size_t in = j * blockWidth;
+            for (size_t i = 0; i < total; ++i) {
+                uint64_t v = markers[i];
+                const auto base = (j * blockWidth) + ((i % markersPerBlock) * 64) + ((i / markersPerBlock) * streamCount * blockWidth);
+                while (v) {
+                    const auto p = boost::core::countr_zero(v);
+                    assert ((v & (1ULL << p)) != 0);
+                    v ^= (1ULL << p);
+                    const size_t nextOut = base | p;
+                    assert (result[nextOut] == 0);
+                    result[nextOut] = source[in++];
+                    if ((in % blockWidth) == 0) {
+                        in += (streamCount - 1) * blockWidth;
+                    }
                 }
-                assert (in < testLength);
-                assert (out < resultLength);
-                result[out++] = source[in++];
             }
         }
-        assert (in == testLength);
 
-        for (; out < resultLength; ++out) {
-            result[out] = 0;
-        }
     }
 
     auto P = CreatePipeline(driver,
-                            Input<streamset_t>{"source", 1, FieldWidth}, Input<streamset_t>{"markers", 1, 1},
-                            Input<streamset_t>{"result", 1, FieldWidth},
+                            Input<streamset_t>{"source", streamCount, FieldWidth}, Input<streamset_t>{"markers", 1, 1},
+                            Input<streamset_t>{"result", streamCount, FieldWidth},
                             Input<uint32_t &>{"output"});
 
-    StreamSet * generated = P.CreateStreamSet(1, FieldWidth);
+    StreamSet * generated = P.CreateStreamSet(streamCount, FieldWidth);
 
     if (mode == Mode::Filter) {
         P.CreateKernelCall<ByteFilterByMaskKernel>(P.getInputStreamSet(0), P.getInputStreamSet(1), generated);
@@ -225,19 +260,19 @@ uint32_t runTestCase(CPUDriver & driver, const size_t testLength, const Mode mod
 }
 
 
-bool runTestCase(CPUDriver & driver, const size_t testLength, const size_t fieldWidth, const Mode mode, std::default_random_engine & rng) {
+bool runTestCase(CPUDriver & driver, const size_t streamCount, const size_t testLength, const size_t fieldWidth, const Mode mode, std::default_random_engine & rng) {
 
     uint32_t result = 0;
 
     try {
         if (fieldWidth == 8) {
-            result = runTestCase<8>(driver, testLength, mode, rng);
+            result = runTestCase<8>(driver, streamCount, testLength, mode, rng);
         } else if (fieldWidth == 16) {
-            result = runTestCase<16>(driver, testLength, mode, rng);
+            result = runTestCase<16>(driver, streamCount, testLength, mode, rng);
         } else if (fieldWidth == 32) {
-            result = runTestCase<32>(driver, testLength, mode, rng);
+            result = runTestCase<32>(driver, streamCount, testLength, mode, rng);
         } else if (fieldWidth == 64) {
-            result = runTestCase<64>(driver, testLength, mode, rng);
+            result = runTestCase<64>(driver, streamCount, testLength, mode, rng);
         } else {
             llvm::report_fatal_error("Unexpected field width");
         }
@@ -252,7 +287,7 @@ bool runTestCase(CPUDriver & driver, const size_t testLength, const size_t field
             llvm::errs() << "SPREAD";
         }
 
-        llvm::errs() << " TEST: " << testLength << 'x' << fieldWidth << " -- ";
+        llvm::errs() << " TEST: " << streamCount << 'x' << testLength << 'x' << fieldWidth << " -- ";
         if (result == 0) {
             llvm::errs() << "success\n";
         } else {
@@ -265,6 +300,14 @@ bool runTestCase(CPUDriver & driver, const size_t testLength, const size_t field
 }
 
 bool runTestCase(CPUDriver & driver, std::default_random_engine & rng) {
+
+    size_t streamCount = 0;
+    if (optStreamCount.getNumOccurrences()) {
+        streamCount = optStreamCount.getValue();
+    } else {
+        std::uniform_int_distribution<size_t> scDist(1, 10);
+        streamCount = scDist(rng);
+    }
 
     size_t testLength = 0;
     if (optTestLength.getNumOccurrences()) {
@@ -290,7 +333,7 @@ bool runTestCase(CPUDriver & driver, std::default_random_engine & rng) {
         mode = optMode.getValue();
     }
 
-    return runTestCase(driver, testLength, fieldWidth, mode, rng);
+    return runTestCase(driver, streamCount, testLength, fieldWidth, mode, rng);
 }
 
 
