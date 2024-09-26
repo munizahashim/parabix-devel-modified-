@@ -21,7 +21,11 @@
 #include <random>
 #include <util/aligned_allocator.h>
 #include <limits>
+#if BOOST_VERSION >= 107600
 #include <boost/core/bit.hpp>
+#endif
+
+
 
 #include <llvm/Support/raw_os_ostream.h>
 
@@ -52,6 +56,30 @@ static cl::opt<unsigned> optTrials("trials", cl::desc("Number of tests to execut
 
 
 static cl::opt<bool> optVerbose("v", cl::desc("Print verbose output"), cl::init(false));
+
+
+#if BOOST_VERSION < 107600
+template <typename T> int scan_forward_zeroes(const T x) noexcept;
+template <> inline int scan_forward_zeroes<unsigned int>(const unsigned int x) noexcept { return __builtin_ctz(x); }
+template <> inline int scan_forward_zeroes<unsigned long>(const unsigned long x) noexcept { return __builtin_ctzl(x); }
+template <> inline int scan_forward_zeroes<unsigned long long>(const unsigned long long x) noexcept { return __builtin_ctzll(x); }
+
+template <typename T> unsigned get_popcount(const T x) noexcept;
+template <> inline unsigned get_popcount<unsigned int>(const unsigned int x) noexcept { return __builtin_popcount(x); }
+template <> inline unsigned get_popcount<unsigned long>(const unsigned long x) noexcept { return __builtin_popcountl(x); }
+template <> inline unsigned get_popcount<unsigned long long>(const unsigned long long x) noexcept { return __builtin_popcountll(x); }
+
+#else
+template <typename T> int scan_forward_zeroes(const T x) noexcept {
+    return boost::core::countr_zero<T>(x);
+}
+template <typename T> unsigned get_popcount(const T x) noexcept {
+    return boost::core::popcount<T>(x);
+}
+#endif
+
+
+
 
 template<size_t FieldWidth>
 uint32_t runTestCase(CPUDriver & driver, const size_t streamCount, const size_t testLength, const Mode mode, std::default_random_engine & rng) {
@@ -130,7 +158,7 @@ uint32_t runTestCase(CPUDriver & driver, const size_t streamCount, const size_t 
             }
             assert (popCount <= testLength);
             markers[i] = v;
-            popCount += boost::core::popcount(v);
+            popCount += get_popcount(v);
         }
 
         resultLength = (popCount + 511ULL) & ~511ULL;
@@ -148,7 +176,7 @@ uint32_t runTestCase(CPUDriver & driver, const size_t streamCount, const size_t 
                 auto v = markers[i];
                 const auto base = (j * blockWidth) + ((i % markersPerBlock) * 64) + ((i / markersPerBlock) * streamCount * blockWidth);
                 while (v) {
-                    const auto p = boost::core::countr_zero(v);
+                    const auto p = scan_forward_zeroes(v);
                     assert ((v & (1ULL << p)) != 0);
                     v ^= (1ULL << p);
                     assert (result[out] == 0);
@@ -176,7 +204,7 @@ uint32_t runTestCase(CPUDriver & driver, const size_t streamCount, const size_t 
         while (popCount < testLength) {
 
             uint64_t v = markDist(rng);
-            popCount += boost::core::popcount(v);
+            popCount += get_popcount(v);
 
             if (LLVM_UNLIKELY(total >= capacity)) {
                 // resize
@@ -212,7 +240,7 @@ uint32_t runTestCase(CPUDriver & driver, const size_t streamCount, const size_t 
                 uint64_t v = markers[i];
                 const auto base = (j * blockWidth) + ((i % markersPerBlock) * 64) + ((i / markersPerBlock) * streamCount * blockWidth);
                 while (v) {
-                    const auto p = boost::core::countr_zero(v);
+                    const auto p = scan_forward_zeroes(v);
                     assert ((v & (1ULL << p)) != 0);
                     v ^= (1ULL << p);
                     const size_t nextOut = base | p;
