@@ -490,27 +490,28 @@ Value * IDISA_AVX2_Builder::mvmd_srl(unsigned fw, Value * a, Value * shift, cons
 Value * IDISA_AVX2_Builder::mvmd_sll(unsigned fw, Value * a, Value * shift, const bool safe) {
     // Intrinsic::x86_avx2_permd) allows an efficient implementation for field width 32.
     // Translate larger field widths to 32 bits.
-    if (fw > 32) {
-        return fwCast(fw, mvmd_sll(32, a, CreateMul(shift, ConstantInt::get(shift->getType(), fw/32)), safe));
-    }
-    if ((mBitBlockWidth == 256) && (fw == 32)) {
-        Function * permuteFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx2_permd);
-        const unsigned fieldCount = mBitBlockWidth/fw;
-        Type * fieldTy = getIntNTy(fw);
-        SmallVector<Constant *, 16> indexes(fieldCount);
-        for (unsigned int i = 0; i < fieldCount; i++) {
-            indexes[i] = ConstantInt::get(fieldTy, i);
+    if (mBitBlockWidth == 256) {
+        if (fw > 32) {
+            return fwCast(fw, mvmd_sll(32, a, CreateMul(shift, ConstantInt::get(shift->getType(), fw/32)), safe));
+        } else if (fw == 32) {
+            Function * permuteFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx2_permd);
+            const unsigned fieldCount = mBitBlockWidth/fw;
+            Type * fieldTy = getIntNTy(fw);
+            SmallVector<Constant *, 16> indexes(fieldCount);
+            for (unsigned int i = 0; i < fieldCount; i++) {
+                indexes[i] = ConstantInt::get(fieldTy, i);
+            }
+            Constant * indexVec = ConstantVector::get(indexes);
+            Value * shiftSplat = simd_fill(fw, CreateZExtOrTrunc(shift, fieldTy));
+            Value * permuteVec = CreateSub(indexVec, shiftSplat);
+            // Negative indexes are for fields that must be zeroed.  Convert the
+            // permute constant to an all ones value, that will select item 7.
+            permuteVec = simd_or(permuteVec, simd_lt(fw, permuteVec, fwCast(fw, allZeroes())));
+            // Insert a zero value at position 7 (OK for shifts > 0)
+            Value * a0 = mvmd_insert(fw, a, Constant::getNullValue(fieldTy), 7);
+            Value * shifted = CreateCall(permuteFunc->getFunctionType(), permuteFunc, {a0, permuteVec});
+            return fwCast(32, simd_if(1, simd_eq(fw, shiftSplat, allZeroes()), a, shifted));
         }
-        Constant * indexVec = ConstantVector::get(indexes);
-        Value * shiftSplat = simd_fill(fw, CreateZExtOrTrunc(shift, fieldTy));
-        Value * permuteVec = CreateSub(indexVec, shiftSplat);
-        // Negative indexes are for fields that must be zeroed.  Convert the
-        // permute constant to an all ones value, that will select item 7.
-        permuteVec = simd_or(permuteVec, simd_lt(fw, permuteVec, fwCast(fw, allZeroes())));
-        // Insert a zero value at position 7 (OK for shifts > 0)
-        Value * a0 = mvmd_insert(fw, a, Constant::getNullValue(fieldTy), 7);
-        Value * shifted = CreateCall(permuteFunc->getFunctionType(), permuteFunc, {a0, permuteVec});
-        return fwCast(32, simd_if(1, simd_eq(fw, shiftSplat, allZeroes()), a, shifted));
     }
     return IDISA_Builder::mvmd_sll(fw, a, shift, safe);
 }
@@ -836,31 +837,33 @@ Value * IDISA_AVX512F_Builder::esimd_bitspread(unsigned fw, Value * bitmask) {
 }
 
 Value * IDISA_AVX512F_Builder::mvmd_srl(unsigned fw, Value * a, Value * shift, const bool safe) {
-    const unsigned fieldCount = mBitBlockWidth/fw;
-    Type * fieldTy = getIntNTy(fw);
-    SmallVector<Constant *, 16> indexes(fieldCount);
-    for (unsigned int i = 0; i < fieldCount; i++) {
-        indexes[i] = ConstantInt::get(fieldTy, i);
-    }
-    Constant * indexVec = ConstantVector::get(indexes);
-    Value * permuteVec = CreateAdd(indexVec, simd_fill(fw, CreateZExtOrTrunc(shift, fieldTy)));
-    if (mBitBlockWidth == 512) {
-        return bitCast(mvmd_shuffle2(fw, fwCast(fw, a), fwCast(fw, allZeroes()), permuteVec));
+    if (mBitBlockWidth == 512 && fw >= 8) {
+        const auto fieldCount = 512 / fw;
+        Type * fieldTy = getIntNTy(fw);
+        SmallVector<Constant *, 64> indexes(fieldCount);
+        for (unsigned i = 0; i < fieldCount; i++) {
+            indexes[i] = ConstantInt::get(fieldTy, i);
+        }
+        Constant * indexVec = ConstantVector::get(indexes);
+        Value * broadcast = simd_fill(fw, CreateZExtOrTrunc(shift, fieldTy));
+        Value * permuteVec = CreateAdd(indexVec, broadcast);
+        return mvmd_shuffle2(fw, fwCast(fw, a), fwCast(fw, allZeroes()), permuteVec);
     }
     return IDISA_Builder::mvmd_srl(fw, a, shift, safe);
 }
 
 Value * IDISA_AVX512F_Builder::mvmd_sll(unsigned fw, Value * a, Value * shift, const bool safe) {
-    const unsigned fieldCount = mBitBlockWidth/fw;
-    Type * fieldTy = getIntNTy(fw);
-    SmallVector<Constant *, 16> indexes(fieldCount);
-    for (unsigned int i = 0; i < fieldCount; i++) {
-        indexes[i] = ConstantInt::get(fieldTy, fieldCount + i);
-    }
-    Constant * indexVec = ConstantVector::get(indexes);
-    Value * permuteVec = CreateSub(indexVec, simd_fill(fw, CreateZExtOrTrunc(shift, fieldTy)));
-    if (mBitBlockWidth == 512) {
-        return bitCast(mvmd_shuffle2(fw, fwCast(fw, allZeroes()), fwCast(fw, a), permuteVec));
+    if (mBitBlockWidth == 512 && fw >= 8) {
+        const auto fieldCount = 512 / fw;
+        Type * fieldTy = getIntNTy(fw);
+        SmallVector<Constant *, 64> indexes(fieldCount);
+        for (unsigned i = 0; i < fieldCount; i++) {
+            indexes[i] = ConstantInt::get(fieldTy, fieldCount + i);
+        }
+        Constant * indexVec = ConstantVector::get(indexes);
+        Value * broadcast = simd_fill(fw, CreateZExtOrTrunc(shift, fieldTy));
+        Value * permuteVec = CreateSub(indexVec, broadcast);
+        return mvmd_shuffle2(fw, fwCast(fw, allZeroes()), fwCast(fw, a), permuteVec);
     }
     return IDISA_Builder::mvmd_sll(fw, a, shift);
 }
@@ -901,33 +904,40 @@ Value * IDISA_AVX512F_Builder::mvmd_shuffle2(unsigned fw, Value * table0, Value 
                 // <0, 63, 1, 62, ...> as a pattern. Thus we build up both the results from selecting the lower and higher
                 // tables separately then OR them together.
 
-                Constant * const ZEROES = ConstantVector::getNullValue(fwVectorType(8));
+
+                VectorType * vty = fwVectorType(8);
+
+                assert (index_vector->getType() == vty);
+
+                Constant * const ZEROES = ConstantVector::getNullValue(vty);
 
                 #define ZEXT16L(T) esimd_mergel(8, (T), ZEROES)
+                #define ZEXT16H(T) esimd_mergeh(8, (T), ZEROES)
 
-                #define ZEXT16H(T) ZEXT16L(mvmd_srli(8, (T), 32))
-
-                Constant * const ALL_32 = getSplat(512 / 8, getInt8(32));
-                Value * const InL = simd_lt(8, index_vector, ALL_32);
-                assert (index_vector->getType() == InL->getType());
+                Constant * const ALL_64 = getSplat(512 / 8, getInt8(64));
+                Value * const InL = simd_lt(8, index_vector, ALL_64);
+                assert (InL->getType() == vty);
                 Value * IndexVectorL = CreateAnd(index_vector, InL);
-
-                auto SelectFromHalfTable = [&](Value * Indices, Value * T0, Value * T1, Value * Mask) {
-                    Value * const A = mvmd_shuffle2(16, T0, T1, ZEXT16L(Indices));
-                    Value * const B = mvmd_shuffle2(16, T0, T1, ZEXT16H(Indices));
-                    return CreateAnd(fwCast(8, hsimd_packl(16, A, B)), Mask);
-                };
-
-                Value * const L = SelectFromHalfTable(IndexVectorL, ZEXT16L(table0), ZEXT16L(table1), InL);
                 Value * const InH = CreateNot(InL);
-                assert (index_vector->getType() == InH->getType());
-                Value * const IndexVectorH = CreateAnd(CreateSub(index_vector, ALL_32), InH);
-                Value * const H = SelectFromHalfTable(IndexVectorH, ZEXT16H(table0), ZEXT16H(table1), InH);
-
+                Value * IndexVectorH = CreateAnd(CreateSub(index_vector, ALL_64), InH);
+                Value * IndexVector = CreateOr(IndexVectorL, IndexVectorH);
+                Value * const IL = ZEXT16L(IndexVector);
+                Value * const IH = ZEXT16H(IndexVector);
+                auto SelectFromHalfTable = [&](Value * table, Value * Mask) {
+                    Value * T0 = ZEXT16L(table);
+                    Value * T1 = ZEXT16H(table);
+                    Value * const A = mvmd_shuffle2(16, T0, T1, IL);
+                    Value * const B = mvmd_shuffle2(16, T0, T1, IH);
+                    Value * packed = fwCast(8, hsimd_packl(16, A, B));
+                    return CreateAnd(packed, Mask);
+                };
                 #undef ZEXT16L
-
                 #undef ZEXT16H
-                assert (L->getType() == H->getType());
+
+                Value * const L = SelectFromHalfTable(table0, InL);
+                assert (L->getType() == vty);
+                Value * const H = SelectFromHalfTable(table1, InH);
+                assert (H->getType() == vty);
                 return CreateOr(L, H);
             }
         }
@@ -979,7 +989,7 @@ Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, Value * a, Value * sel
     }
 
     if (mBitBlockWidth == 512 && fw == 8) {
-        if (!hostCPUFeatures.hasAVX512VBMI2){
+        if (hostCPUFeatures.hasAVX512VBMI2){
  #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(9, 0, 0)
             Function * compressFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_compress_b_512);
             return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(8, a), fwCast(8, allZeroes()), mask});
@@ -1008,7 +1018,7 @@ Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, Value * a, Value * sel
                 assert (fieldCount <= 32);
                 pextFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pext_32);
                 if (LLVM_UNLIKELY(fieldCount < 32)) {
-                    mask = CreateZExt(mask, getIntNTy(fieldCount));
+                    mask = CreateZExt(mask, getInt32Ty());
                 }
             }
 
@@ -1017,9 +1027,14 @@ Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, Value * a, Value * sel
             Value * permute_vec = nullptr;
             const auto m = floor_log2(fieldCount);
             FixedArray<Value *, 2> args;
-            args[1] = mask;
+            args[1] = select_mask;
+
+            IntegerType * intTy = getIntNTy((fieldCount == 64) ? 64 : 32);
+
+            Type * vTy = fwVectorType(fw);
+
             for (unsigned i = 0; i < m; ++i) {
-                args[0] = getIntN(fieldCount, indices[i]);
+                args[0] = ConstantInt::get(intTy, indices[i]);
                 Value * const expanded = CreateCall(pextFunc->getFunctionType(), pextFunc, args);
                 Value * byteExpanded = esimd_bitspread(fw, expanded);
                 if (i == 0) {
@@ -1030,18 +1045,22 @@ Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, Value * a, Value * sel
                 }
             }
 
-            a = fwCast(fw, a);
-            permute_vec = fwCast(fw, permute_vec);
-
             // // Step 4: Use mvmd_shuffle2 to shuffle using permute_vec
-            Value * zero_vec = Constant::getNullValue(a->getType());
-            Value * const shuffled = mvmd_shuffle2(8, a, zero_vec, permute_vec);
-            return CreateAnd(shuffled, simd_any(fw, esimd_bitspread(fw, mask)));
+            Constant * zero_vec = ConstantVector::getNullValue(vTy);
+            Value * const shuffled = mvmd_shuffle2(fw, a, zero_vec, CreateBitCast(permute_vec, vTy));
+            Value * const count = CreatePopcount(CreateZExt(select_mask, intTy));
+            assert (count->getType() == intTy);
+            // try a bitspread + any? check ASM
+            Constant * ALL_ONES = ConstantVector::getAllOnesValue(vTy);
+            Value * mask = CreateNot(mvmd_sll(fw, ALL_ONES, count, false));
+            mask = CreateSelect(CreateICmpNE(count, ConstantInt::get(intTy, fieldCount)), mask, ALL_ONES);
+            assert (shuffled->getType() == mask->getType());
+            return CreateAnd(shuffled, mask);
         }
 
      }
 
-    return IDISA_AVX_Builder::mvmd_compress(fw, a, select_mask);
+    return IDISA_AVX2_Builder::mvmd_compress(fw, a, select_mask);
 }
 
 Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, Value * a, Value * select_mask) {
@@ -1069,7 +1088,7 @@ Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, Value * a, Value * selec
             assert (fieldCount <= 32);
             pdepFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pdep_32);
             if (LLVM_UNLIKELY(fieldCount < 32)) {
-                mask = CreateZExt(mask, getIntNTy(fieldCount));
+                mask = CreateZExt(mask, getInt32Ty());
             }
         }
 
@@ -1079,9 +1098,11 @@ Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, Value * a, Value * selec
         const auto m = floor_log2(fieldCount);
         FixedArray<Value *, 2> args;
         args[1] = mask;
+        const auto popFW = (fieldCount == 64) ? 64U : 32U;
         for (unsigned i = 0; i < m; ++i) {
-            args[0] = getIntN(fieldCount, indices[i]);
+            args[0] = getIntN(popFW, indices[i]);
             Value * const expanded = CreateCall(pdepFunc->getFunctionType(), pdepFunc, args);
+            assert (expanded->getType()->getIntegerBitWidth() == popFW);
             Value * byteExpanded = esimd_bitspread(fw, expanded);
             if (i == 0) {
                 permute_vec = byteExpanded;
@@ -1099,7 +1120,7 @@ Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, Value * a, Value * selec
         Value * const shuffled = mvmd_shuffle2(fw, a, zero_vec, permute_vec);
         return CreateAnd(shuffled, simd_any(fw, esimd_bitspread(fw, mask)));
     }
-    return IDISA_AVX_Builder::mvmd_expand(fw, a, select_mask);
+    return IDISA_AVX2_Builder::mvmd_expand(fw, a, select_mask);
 }
 
 Value * IDISA_AVX512F_Builder:: mvmd_slli(unsigned fw, Value * a, unsigned shift) {
