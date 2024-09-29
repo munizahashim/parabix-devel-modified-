@@ -125,7 +125,7 @@ test_count = 0
 failure_count = 0
 
 
-colorizationRE = re.compile("\x1B[[]01;31m\x1B[[]K|\x1B[[]m")
+colorizationRE = re.compile("\\x1B\\x5B01;31m\\x1B\\x5BK|\\x1B\\x5Bm")
 def filter_colorization(grep_output):
     return colorizationRE.sub("", grep_output)
 
