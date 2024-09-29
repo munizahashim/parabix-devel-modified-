@@ -26,7 +26,7 @@
 #include <boost/range/adaptor/reversed.hpp>
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/topological_sort.hpp>
-#include <boost/function_output_iterator.hpp>
+#include <boost/iterator/function_output_iterator.hpp>
 #include <boost/functional/hash.hpp>
 #include <util/extended_boost_graph_containers.h>
 
