@@ -112,32 +112,32 @@ codepoint_t UTF_Encoder::maxCodePointWithCommonCodeUnits(codepoint_t cp, unsigne
 
 codepoint_t UTF_Encoder::minCodePointWithPrefix(unsigned prefix) {
     if (mCodeUnitBits == 8) {
-        if (prefix <= 0xDF) {
-            return std::max((prefix & 0x1F) << 6, 0x80u);
-        } else if (prefix <= 0xEF) {
-            return std::max((prefix & 0x0F) << 12, 0x800u);
+        if (prefix <= 0xDFu) {
+            return std::max((prefix & 0x1Fu) << 6, 0x80u);
+        } else if (prefix <= 0xEFu) {
+            return std::max((prefix & 0x0Fu) << 12, 0x800u);
         } else {
-            return std::max((prefix & 0x07) << 18, 0x10000u);
+            return std::max((prefix & 0x07u) << 18, 0x10000u);
         }
     } else if (mCodeUnitBits == 16) {
-        if ((prefix & 0xD8) == 0xD8) return 0x10000;
-        return 0x0;
-    } else return 0;
+        if ((prefix & 0xD8u) == 0xD8u) return 0x10000;
+        return 0x0u;
+    } else return 0u;
 }
 
 codepoint_t UTF_Encoder::maxCodePointWithPrefix(unsigned prefix) {
     if (mCodeUnitBits == 8) {
-        if (prefix <= 0xDF) {
-            return minCodePointWithPrefix(prefix) | 0x3F;
-        } else if (prefix <= 0xEF) {
-            return minCodePointWithPrefix(prefix) | 0xFFF;
+        if (prefix <= 0xDFu) {
+            return minCodePointWithPrefix(prefix) | 0x3Fu;
+        } else if (prefix <= 0xEFu) {
+            return minCodePointWithPrefix(prefix) | 0xFFFu;
         } else {
-            return minCodePointWithPrefix(prefix) | 0x3FFFF;
+            return std::min(minCodePointWithPrefix(prefix) | 0x3FFFFu, 0x10FFFFu);
         }
     } else if (mCodeUnitBits == 16) {
-        if ((prefix & 0xD8) == 0xD8) return 0x10FFFF;
-        return 0xFFFF;
-    } else return 0x10FFFF;
+        if ((prefix & 0xD8u) == 0xD8u) return 0x10FFFFu;
+        return 0xFFFFu;
+    } else return 0x10FFFFu;
 }
 
 

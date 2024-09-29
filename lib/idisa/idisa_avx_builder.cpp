@@ -932,8 +932,8 @@ Value * IDISA_AVX512F_Builder:: mvmd_slli(unsigned fw, Value * a, unsigned shift
     } else {
         unsigned field32_shift = (shift * fw) / 32;
         unsigned bit_shift = (shift * fw) % 32;
-        return simd_or(simd_slli(32, mvmd_slli(32, a, field32_shift), bit_shift),
-                       simd_srli(32, mvmd_slli(32, a, field32_shift + 1), 32-bit_shift));
+        return bitCast(simd_or(simd_slli(32, mvmd_slli(32, a, field32_shift), bit_shift),
+                               simd_srli(32, mvmd_slli(32, a, field32_shift + 1), 32-bit_shift)));
     }
 }
 
@@ -946,18 +946,19 @@ Value * IDISA_AVX512F_Builder:: mvmd_dslli(unsigned fw, Value * a, Value * b, un
     }
     const unsigned fieldCount = mBitBlockWidth/fw;
     if ((fw == 32) || (hostCPUFeatures.hasAVX512BW && (fw == 16)))   {
+        //llvm::errs() << " fw = " << fw << ", shift = " << shift << "\n";
         Type * fwTy = getIntNTy(fw);
         SmallVector<Constant *, 16> indices(fieldCount);
         for (unsigned i = 0; i < fieldCount; i++) {
             indices[i] = ConstantInt::get(fwTy, i + fieldCount - shift);
         }
         return bitCast(mvmd_shuffle2(fw, fwCast(fw, b), fwCast(fw, a), ConstantVector::get(indices)));
-
     } else {
         unsigned field32_shift = (shift * fw) / 32;
         unsigned bit_shift = (shift * fw) % 32;
-        return simd_or(simd_slli(32, mvmd_dslli(32, a, b, field32_shift), bit_shift),
-                       simd_srli(32, mvmd_dslli(32, a, b, field32_shift + 1), 32-bit_shift));
+        ///llvm::errs() << " fw = " << fw << ", field32_shift = " << field32_shift << ", bit_shift = " << bit_shift << "\n";
+        return bitCast(simd_or(simd_slli(32, mvmd_dslli(32, a, b, field32_shift), bit_shift),
+                               simd_srli(32, mvmd_dslli(32, a, b, field32_shift + 1), 32-bit_shift)));
     }
 }
 

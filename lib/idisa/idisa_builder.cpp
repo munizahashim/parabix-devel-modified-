@@ -960,14 +960,25 @@ Value * IDISA_Builder::mvmd_srli(unsigned fw, Value * a, unsigned shift) {
 }
 
 Value * IDISA_Builder::mvmd_dslli(unsigned fw, Value * a, Value * b, unsigned shift) {
-    if (fw < 8) UnsupportedFieldWidthError(fw, "mvmd_dslli");
     if (shift == 0) return a;
-    const auto field_count = getVectorBitWidth(a) / fw;
-    SmallVector<Constant *, 16> Idxs(field_count);
-    for (unsigned i = 0; i < field_count; i++) {
-        Idxs[i] = getInt32(i + field_count - shift);
+    if (fw > 32) {
+        return mvmd_dslli(32, a, b, shift * (fw/32));
+    } else if (((shift % 2) == 0) && (fw < 32)) {
+        return mvmd_dslli(2 * fw, a, b, shift / 2);
     }
-    return CreateShuffleVector(fwCast(fw, b), fwCast(fw, a), ConstantVector::get(Idxs));
+    if (fw >= 16) {
+        const auto field_count = getVectorBitWidth(a) / fw;
+        SmallVector<Constant *, 16> Idxs(field_count);
+        for (unsigned i = 0; i < field_count; i++) {
+            Idxs[i] = getInt32(i + field_count - shift);
+        }
+        return bitCast(CreateShuffleVector(fwCast(fw, b), fwCast(fw, a), ConstantVector::get(Idxs)));
+    } else {
+        unsigned field32_shift = (shift * fw) / 32;
+        unsigned bit_shift = (shift * fw) % 32;
+        return bitCast(simd_or(simd_slli(32, mvmd_dslli(32, a, b, field32_shift), bit_shift),
+                               simd_srli(32, mvmd_dslli(32, a, b, field32_shift + 1), 32-bit_shift)));
+    }
 }
 
 Value * IDISA_Builder::mvmd_shuffle(unsigned fw, Value * table, Value * index_vector) {
