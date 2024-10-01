@@ -918,7 +918,7 @@ void Unicode_Range_Compiler::compileUnguardedSubrange(CC_List & ccs, EnclosingIn
             }
         }
     } else {
-        unsigned significant_bits = enclosingRange.significant_bits();
+        unsigned significant_bits = enclosing.range.significant_bits();
         std::string alphabet = "Low" + std::to_string(significant_bits);
         cc::CodeUnitAlphabet CodeAlpha(alphabet, alphabet, significant_bits);
         codepoint_t mask = (1U << significant_bits) - 1;
@@ -1055,7 +1055,8 @@ void U21_Compiler::createInitialHierarchy(CC_List & ccs) {
         extract_CCs_by_range(nonASCII_Range, ccs, nonASCII_ccs);
         Basis_Set UnifiedBasis = prepareUnifiedBasis(nonASCII_Range);
         Unicode_Range_Compiler range_compiler(UnifiedBasis, mTargets, nested);
-        range_compiler.compile(nonASCII_ccs, nonASCII_Range, nonASCII);
+        EnclosingInfo nonASCII_info(nonASCII_Range, mMask);
+        range_compiler.compile(nonASCII_ccs, nonASCII_info);
     } else {
         Range UnicodeRange{0, 0x10FFFF};
         Basis_Set UnifiedBasis = prepareUnifiedBasis(UnicodeRange);
@@ -1107,6 +1108,7 @@ protected:
     void extendLengthHierarchy(PabloAST * enclosingTest, PabloBuilder & pb);
     void prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloAST * enclosingTest, PabloBuilder & pb);
     void prepareFullBlockSets(U8_Seq_Kind k, PabloBuilder & pb);
+    void compileRange(CC_List & ccs, EnclosingInfo & enclosing, PabloBuilder & pb);
     PabloAST * compilePrefix(re::CC * prefixCC, PabloBuilder & pb);
     virtual void prepareSuffix(unsigned scope, PabloBuilder & pb) = 0;
     virtual void prepareScope(unsigned scope, PabloBuilder & pb) = 0;
@@ -1329,12 +1331,8 @@ void U8_Compiler::prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloAST * enclosin
         t = combinePrefixSuffix(k, t, pb);
         mSeqData[k].test = t;
         Range testRange{mEncoder.minCodePointWithPrefix(lo_pfx), mEncoder.maxCodePointWithPrefix(hi_pfx)};
-        Basis_Set UnifiedBasis = prepareUnifiedBasis(testRange);
-        Unicode_Range_Compiler range_compiler(UnifiedBasis, mTargets, pb);
-        CC_List rangeCCs(mSeqData[k].seqCCs.size());
-        extract_CCs_by_range(testRange, mSeqData[k].seqCCs, rangeCCs);
         EnclosingInfo rangeInfo(testRange, t);
-        range_compiler.compile(rangeCCs, rangeInfo);
+        compileRange(mSeqData[k].seqCCs, rangeInfo, pb);
     }
     for (auto it : mSeqData[k].highCostPrefixSet) {
         for (auto pfx = lo_codepoint(it); pfx <= hi_codepoint(it); pfx++) {
@@ -1349,12 +1347,8 @@ void U8_Compiler::prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloAST * enclosin
             auto nested = pb.createScope();
             pb.createIf(mSeqData[k].test, nested);
             Range testRange{mEncoder.minCodePointWithPrefix(pfx), mEncoder.maxCodePointWithPrefix(pfx)};
-            CC_List rangeCCs(mSeqData[k].seqCCs.size());
-            extract_CCs_by_range(testRange, mSeqData[k].seqCCs, rangeCCs);
-            Basis_Set UnifiedBasis = prepareUnifiedBasis(testRange);
-            Unicode_Range_Compiler range_compiler(UnifiedBasis, mTargets, nested);
             EnclosingInfo rangeInfo(testRange, t);
-            range_compiler.compile(rangeCCs, rangeInfo);
+            compileRange(mSeqData[k].seqCCs, rangeInfo, nested);
         }
     }
     /*
@@ -1376,6 +1370,15 @@ void U8_Compiler::prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloAST * enclosin
        range_compiler.compile(mSeqData[k].seqCCs, rangeInfo);
     }
     */
+}
+
+
+void U8_Compiler::compileRange(CC_List & ccs, EnclosingInfo & rangeInfo, PabloBuilder & pb) {
+    CC_List rangeCCs(ccs.size());
+    extract_CCs_by_range(rangeInfo.range, ccs, rangeCCs);
+    Basis_Set UnifiedBasis = prepareUnifiedBasis(rangeInfo.range);
+    Unicode_Range_Compiler range_compiler(UnifiedBasis, mTargets, pb);
+    range_compiler.compile(rangeCCs, rangeInfo);
 }
 
 class U8_Lookahead_Compiler : public U8_Compiler {
