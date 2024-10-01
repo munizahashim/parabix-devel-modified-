@@ -371,17 +371,23 @@ void StreamCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Valu
         // However, field number operations will sometimes produce a zero, for
         // fields that are not selected.  So we add 1 to field numbers first.
         Value * fieldNo = b.simd_add(mFW, initialFieldNo, oneSplat);
+        assert (fieldNo->getType() == oneSplat->getType());
         // Now move bits back and combine to produce consecutive field numbers.
         Value * firstFieldNoSplat = b.simd_fill(mFW, b.mvmd_extract(mFW, fieldNo, 0));
+        assert (firstFieldNoSplat->getType() == fieldNo->getType());
         Value * finalFieldNo = b.CreateAdd(firstFieldNoSplat, intSequence);
+        assert (finalFieldNo->getType() == fieldNo->getType());
         for (unsigned step = 0; step < fieldMovementSteps; step++) {
-            unsigned mov = 1 << step;
+            unsigned mov = 1UL << step;
+            assert (finalFieldNo->getType() == fieldNo->getType());
             Value * fieldMovement = b.CreateSub(finalFieldNo, fieldNo);
             Value * movSplat = b.simd_fill(mFW, b.getIntN(mFW, mov));
             fieldsToMove[blk][step] = b.simd_eq(mFW, movSplat, b.simd_and(movSplat, fieldMovement));
             Value * receivingFields = b.mvmd_srli(mFW, fieldsToMove[blk][step], mov);
             Value * newFieldNos = b.simd_if(1, receivingFields, b.mvmd_srli(mFW, fieldNo, mov), fieldNo);
+            newFieldNos = b.CreateBitCast(newFieldNos, fieldNo->getType());
             combine[blk][step] = b.simd_and(b.simd_eq(mFW, fieldNo, newFieldNos), receivingFields);
+            assert (newFieldNos->getType() == fieldNo->getType());
             fieldNo = newFieldNos;
         }
         //
@@ -398,12 +404,14 @@ void StreamCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Valu
         Value * increment = b.CreateZExtOrTrunc(b.mvmd_extract(mFW, initialFieldNo, 0), fwTy);
         updatedFieldIdx[blk] = b.CreateAdd(pendingFieldIdx[blk], increment);
         pendingSpaceFilled[blk] = b.CreateICmpEQ(updatedFieldIdx[blk], numFieldConst);
+        assert (numFieldConst->getType() == updatedFieldIdx[blk]->getType());
         shftBack[blk] = b.CreateSub(numFieldConst, updatedFieldIdx[blk]);
         //
         // Now determine the total amount of pending items and whether
         // the pending data all fits within the pendingOutput.
         Value * nextPendingItems = b.CreateAdd(pendingItems[blk], newPendingItems);
         doesFit[blk] = b.CreateICmpULT(nextPendingItems, BLOCK_WIDTH);
+        assert (nextPendingItems->getType() == BLOCK_WIDTH->getType());
         pendingItems[blk+1] = b.CreateSelect(doesFit[blk], nextPendingItems, b.CreateSub(nextPendingItems, BLOCK_WIDTH));
         inputOffset[blk+1] = b.CreateAdd(inputOffset[blk], ONE);
         Value * nextOutputOffset = b.CreateAdd(outputOffset[blk], ONE);

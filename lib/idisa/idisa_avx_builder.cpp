@@ -264,7 +264,7 @@ Value * IDISA_AVX2_Builder::hsimd_packus(unsigned fw, Value * a, Value * b) {
             Idxs[i + field_count/2] = getInt32(2*i + 1);
         }
         Constant * shuffleMask = ConstantVector::get(Idxs);
-        return bitCast(CreateShuffleVector(packed, UndefValue::get(fwVectorType(64)), shuffleMask));
+        return CreateShuffleVector(packed, UndefValue::get(fwVectorType(64)), shuffleMask);
     }
     // Otherwise use default logic.
     return IDISA_Builder::hsimd_packus(fw, a, b);
@@ -281,7 +281,7 @@ Value * IDISA_AVX2_Builder::hsimd_packss(unsigned fw, Value * a, Value * b) {
             Idxs[i + field_count/2] = getInt32(2*i + 1);
         }
         Constant * shuffleMask = ConstantVector::get(Idxs);
-        return bitCast(CreateShuffleVector(packed, UndefValue::get(fwVectorType(64)), shuffleMask));
+        return CreateShuffleVector(packed, UndefValue::get(fwVectorType(64)), shuffleMask);
     }
     // Otherwise use default logic.
     return IDISA_Builder::hsimd_packus(fw, a, b);
@@ -317,6 +317,7 @@ std::pair<Value *, Value *> IDISA_AVX2_Builder::bitblock_add_with_carry(Value * 
 }
 
 std::pair<Value *, Value *> IDISA_AVX2_Builder::bitblock_advance(Value * a, Value * shiftin, unsigned shift) {
+    assert (a->getType() == mBitBlockType);
     if (shiftin->getType() == getInt8Ty() && shift == 1) {
         const uint32_t fw = mBitBlockWidth / 8;
         Type * const v32xi8Ty = FixedVectorType::get(getInt8Ty(), 32);
@@ -787,9 +788,7 @@ Value * IDISA_AVX512F_Builder::hsimd_packl(unsigned fw, Value * a, Value * b) {
         Constant * shuffleMask = ConstantVector::get({Idxs, 64});
         Value * a1 = CreateTrunc(fwCast(fw, a), FixedVectorType::get(getInt8Ty(), 32));
         Value * b1 = CreateTrunc(fwCast(fw, b), FixedVectorType::get(getInt8Ty(), 32));
-        Value * c = CreateShuffleVector(a1, b1, shuffleMask);
-        c = bitCast(c);
-        return c;
+        return CreateShuffleVector(a1, b1, shuffleMask);
     }
     return IDISA_Builder::hsimd_packl(fw, a, b);
 }
@@ -805,7 +804,7 @@ Value * IDISA_AVX512F_Builder::hsimd_packus(unsigned fw, Value * a, Value * b) {
             Idxs[i + field_count/2] = getInt32(2*i + 1);
         }
         Constant * shuffleMask = ConstantVector::get(Idxs);
-        return bitCast(CreateShuffleVector(fwCast(64, packed), UndefValue::get(fwVectorType(64)), shuffleMask));
+        return CreateShuffleVector(fwCast(64, packed), UndefValue::get(fwVectorType(64)), shuffleMask);
     }
     // Otherwise use default logic.
     return IDISA_Builder::hsimd_packus(fw, a, b);
@@ -822,7 +821,7 @@ Value * IDISA_AVX512F_Builder::hsimd_packss(unsigned fw, Value * a, Value * b) {
             Idxs[i + field_count/2] = getInt32(2*i + 1);
         }
         Constant * shuffleMask = ConstantVector::get(Idxs);
-        return bitCast(CreateShuffleVector(fwCast(64, packed), UndefValue::get(fwVectorType(64)), shuffleMask));
+        return CreateShuffleVector(fwCast(64, packed), UndefValue::get(fwVectorType(64)), shuffleMask);
     }
     // Otherwise use default logic.
     return IDISA_Builder::hsimd_packus(fw, a, b);
@@ -1126,26 +1125,28 @@ Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, Value * a, Value * selec
 Value * IDISA_AVX512F_Builder:: mvmd_slli(unsigned fw, Value * a, unsigned shift) {
     if (shift == 0) return a;
     if (fw > 32) {
-        return mvmd_slli(32, a, shift * (fw/32));
+        return fwCast(fw, mvmd_slli(32, a, shift * (fw/32)));
     } else if (((shift % 2) == 0) && (fw < 32)) {
-        return mvmd_slli(2 * fw, a, shift / 2);
+        return fwCast(fw, mvmd_slli(2 * fw, a, shift / 2));
     }
     if ((fw == 32) || (hostCPUFeatures.hasAVX512BW && (fw == 16)))   {
         return mvmd_dslli(fw, a, allZeroes(), shift);
     } else {
         unsigned field32_shift = (shift * fw) / 32;
         unsigned bit_shift = (shift * fw) % 32;
-        return bitCast(simd_or(simd_slli(32, mvmd_slli(32, a, field32_shift), bit_shift),
-                               simd_srli(32, mvmd_slli(32, a, field32_shift + 1), 32-bit_shift)));
+        Value * const L = simd_slli(32, mvmd_slli(32, a, field32_shift), bit_shift);
+        Value * const R = simd_srli(32, mvmd_slli(32, a, field32_shift + 1), 32-bit_shift);
+        assert (L->getType() == R->getType());
+        return fwCast(fw, CreateOr(L, R));
     }
 }
 
 Value * IDISA_AVX512F_Builder:: mvmd_dslli(unsigned fw, Value * a, Value * b, unsigned shift) {
     if (shift == 0) return a;
     if (fw > 32) {
-        return mvmd_dslli(32, a, b, shift * (fw/32));
+        return fwCast(fw, mvmd_dslli(32, a, b, shift * (fw/32)));
     } else if (((shift % 2) == 0) && (fw < 32)) {
-        return mvmd_dslli(2 * fw, a, b, shift / 2);
+        return fwCast(fw, mvmd_dslli(2 * fw, a, b, shift / 2));
     }
     const unsigned fieldCount = mBitBlockWidth/fw;
     if ((fw == 32) || (hostCPUFeatures.hasAVX512BW && (fw == 16)))   {
@@ -1155,13 +1156,14 @@ Value * IDISA_AVX512F_Builder:: mvmd_dslli(unsigned fw, Value * a, Value * b, un
         for (unsigned i = 0; i < fieldCount; i++) {
             indices[i] = ConstantInt::get(fwTy, i + fieldCount - shift);
         }
-        return bitCast(mvmd_shuffle2(fw, fwCast(fw, b), fwCast(fw, a), ConstantVector::get(indices)));
+        return mvmd_shuffle2(fw, fwCast(fw, b), fwCast(fw, a), ConstantVector::get(indices));
     } else {
         unsigned field32_shift = (shift * fw) / 32;
         unsigned bit_shift = (shift * fw) % 32;
-        ///llvm::errs() << " fw = " << fw << ", field32_shift = " << field32_shift << ", bit_shift = " << bit_shift << "\n";
-        return bitCast(simd_or(simd_slli(32, mvmd_dslli(32, a, b, field32_shift), bit_shift),
-                               simd_srli(32, mvmd_dslli(32, a, b, field32_shift + 1), 32-bit_shift)));
+        Value * const L = simd_slli(32, mvmd_dslli(32, a, b, field32_shift), bit_shift);
+        Value * const R = simd_srli(32, mvmd_dslli(32, a, b, field32_shift + 1), 32-bit_shift);
+        assert (L->getType() == R->getType());
+        return fwCast(fw, CreateOr(L, R));
     }
 }
 
@@ -1185,7 +1187,7 @@ Value * IDISA_AVX512F_Builder::simd_popcount(unsigned fw, Value * a) {
     }
     if (hostCPUFeatures.hasAVX512BW && (fw == 64)) {
         Function * horizSADfunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_psad_bw_512);
-        return bitCast(CreateCall(horizSADfunc->getFunctionType(), horizSADfunc, {fwCast(8, simd_popcount(8, a)), fwCast(8, allZeroes())}));
+        return CreateCall(horizSADfunc->getFunctionType(), horizSADfunc, {fwCast(8, simd_popcount(8, a)), fwCast(8, allZeroes())});
     }
     //https://en.wikipedia.org/wiki/Hamming_weight#Efficient_implementation
     if((fw == 64) && (mBitBlockWidth == 512)){
@@ -1305,26 +1307,39 @@ Value * IDISA_AVX512F_Builder::simd_if(unsigned fw, Value * cond, Value * a, Val
         // Form the 8-bit table for simd-if based on the bitwise values from cond, a and b.
         //   (cond, a, b) =  (111), (110), (101), (100), (011), (010), (001), (000)
         // if(cond, a, b) =    1      1      0      0      1      0      1      0    = 0xCA
-        return simd_ternary(0xCA, cond, a, b);
+        return simd_ternary(0xCA, bitCast(cond), bitCast(a), bitCast(b));
     }
     return IDISA_AVX2_Builder::simd_if(fw, cond, a, b);
 }
 
 Value * IDISA_AVX512F_Builder::simd_ternary(unsigned char mask, Value * a, Value * b, Value * c) {
-    if (mask == 0) return allZeroes();
-    else if (mask == 0xFF) return allOnes();
+    assert (a->getType() == b->getType());
+    assert (b->getType() == c->getType());
+
+    if (mask == 0) {
+        return allZeroes();
+    }
+    if (mask == 0xFF) {
+        return allOnes();
+    }
 
     unsigned char not_a_mask = mask & 0x0F;
     unsigned char a_mask = (mask >> 4) & 0x0F;
-    if (a_mask == not_a_mask) return IDISA_AVX2_Builder::simd_binary(a_mask, b, c);
+    if (a_mask == not_a_mask) {
+        return simd_binary(a_mask, b, c);
+    }
 
     unsigned char b_mask = ((mask & 0xC0) >> 4) | ((mask & 0x0C) >> 2);
     unsigned char not_b_mask = ((mask & 0x30) >> 2) | (mask & 0x03);
-    if (b_mask == not_b_mask) return IDISA_AVX2_Builder::simd_binary(b_mask, a, c);
+    if (b_mask == not_b_mask) {
+        return simd_binary(b_mask, a, c);
+    }
 
     unsigned char c_mask = ((mask & 0x80) >> 4) | ((mask & 0x20) >> 3) | ((mask & 0x08) >> 2) | ((mask & 02) >> 1);
     unsigned char not_c_mask = ((mask & 0x40) >> 3) | ((mask & 0x10) >> 2) | ((mask & 0x04) >> 1) | (mask & 01);
-    if (c_mask == not_c_mask) return IDISA_AVX2_Builder::simd_binary(c_mask, a, b);
+    if (c_mask == not_c_mask) {
+        return simd_binary(c_mask, a, b);
+    }
 
     Constant * simd_mask = ConstantInt::get(getInt32Ty(), mask);
 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(7, 0, 0)
@@ -1335,11 +1350,11 @@ Value * IDISA_AVX512F_Builder::simd_ternary(unsigned char mask, Value * a, Value
     Function * ternLogicFn = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_pternlog_d_512);
     Value * args[4] = {fwCast(32, a), fwCast(32, b), fwCast(32, c), simd_mask};
 #endif
-    Value * rslt = CreateCall(ternLogicFn->getFunctionType(), ternLogicFn, args);
-    return bitCast(rslt);
+    return bitCast(CreateCall(ternLogicFn->getFunctionType(), ternLogicFn, args));
 }
 
 std::pair<Value *, Value *> IDISA_AVX512F_Builder::bitblock_advance(Value * a, Value * shiftin, unsigned shift) {
+    assert (a->getType() == mBitBlockType);
     if (shift == 1 && shiftin->getType() == getInt8Ty()) {
         const uint32_t fw = 64;
         Value * const ci_mask = CreateBitCast(shiftin, FixedVectorType::get(getInt1Ty(), 8));

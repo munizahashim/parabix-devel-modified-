@@ -185,7 +185,7 @@ Value * IDISA_Builder::simd_fill(unsigned fw, Value * a) {
 Value * IDISA_Builder::simd_add(unsigned fw, Value * a, Value * b) {
     const unsigned vectorWidth = getVectorBitWidth(a);
     if (fw == 1) {
-        return simd_xor(a, b);
+        return fwCast(1, simd_xor(a, b));
     } else if (fw < 8) {
         Constant * hi_bit_mask = Constant::getIntegerValue(getIntNTy(vectorWidth),
                                                            APInt::getSplat(vectorWidth, APInt::getHighBitsSet(fw, 1)));
@@ -193,14 +193,14 @@ Value * IDISA_Builder::simd_add(unsigned fw, Value * a, Value * b) {
                                                            APInt::getSplat(vectorWidth, APInt::getLowBitsSet(fw, fw-1)));
         Value * hi_xor = simd_xor(simd_and(a, hi_bit_mask), simd_and(b, hi_bit_mask));
         Value * part_sum = simd_add(32, simd_and(a, lo_bit_mask), simd_and(b, lo_bit_mask));
-        return simd_xor(part_sum, hi_xor);
+        return fwCast(fw, simd_xor(part_sum, hi_xor));
     }
     return CreateAdd(fwCast(fw, a), fwCast(fw, b));
 }
 
 Value * IDISA_Builder::simd_sub(unsigned fw, Value * a, Value * b) {
     if (fw == 1) {
-        return simd_xor(a, b);
+        return fwCast(1, simd_xor(a, b));
     }
     if (fw < 8) UnsupportedFieldWidthError(fw, "sub");
     return CreateSub(fwCast(fw, a), fwCast(fw, b));
@@ -732,44 +732,72 @@ Value * IDISA_Builder::simd_if(unsigned fw, Value * cond, Value * a, Value * b) 
 //    1      0     y
 //    1      1     x
 Value * IDISA_Builder::simd_binary(unsigned char truth_table_mask, Value * bit_1, Value * bit_0) {
+    assert (bit_1->getType() == bit_0->getType());
     switch(truth_table_mask) {
-        case 0x00: return allZeroes();
-        case 0x01: return CreateNot(CreateOr(bit_1, bit_0));
-        case 0x02: return CreateAnd(CreateNot(bit_1), bit_0);
-        case 0x03: return CreateNot(bit_1);
-        case 0x04: return CreateAnd(bit_1, CreateNot(bit_0));
-        case 0x05: return CreateNot(bit_0);
-        case 0x06: return CreateXor(bit_1, bit_0);
-        case 0x07: return CreateNot(CreateAnd(bit_1, bit_0));
-        case 0x08: return CreateAnd(bit_1, bit_0);
-        case 0x09: return CreateNot(CreateXor(bit_1, bit_0));
-        case 0x0A: return bit_0;
-        case 0x0B: return CreateOr(CreateNot(bit_1), bit_0);
-        case 0x0C: return bit_1;
-        case 0x0D: return CreateOr(bit_1, CreateNot(bit_0));
-        case 0x0E: return CreateOr(bit_1, bit_0);
-        case 0x0F: return allOnes();
+        case 0x00:
+            return allZeroes();
+        case 0x01:
+            return CreateNot(CreateOr(bit_1, bit_0));
+        case 0x02:
+            return CreateAnd(CreateNot(bit_1), bit_0);
+        case 0x03:
+            return CreateNot(bit_1);
+        case 0x04:
+            return CreateAnd(bit_1, CreateNot(bit_0));
+        case 0x05:
+            return CreateNot(bit_0);
+        case 0x06:
+            return CreateXor(bit_1, bit_0);
+        case 0x07:
+            return CreateNot(CreateAnd(bit_1, bit_0));
+        case 0x08:
+            return CreateAnd(bit_1, bit_0);
+        case 0x09:
+            return CreateNot(CreateXor(bit_1, bit_0));
+        case 0x0A:
+            return bit_0;
+        case 0x0B:
+            return CreateOr(CreateNot(bit_1), bit_0);
+        case 0x0C:
+            return bit_1;
+        case 0x0D:
+            return CreateOr(bit_1, CreateNot(bit_0));
+        case 0x0E:
+            return CreateOr(bit_1, bit_0);
+        case 0x0F:
+            return allOnes();
         default: report_fatal_error("simd_binary mask is in wrong format!");
     }
 }
 
 Value * IDISA_Builder::simd_ternary(unsigned char mask, Value * a, Value * b, Value * c) {
-    if (mask == 0) return allZeroes();
-    else if (mask == 0xFF) return allOnes();
+    assert (a->getType() == b->getType());
+    assert (b->getType() == c->getType());
+
+    if (mask == 0) {
+        return allZeroes();
+    }
+    if (mask == 0xFF) {
+        return allOnes();
+    }
 
     unsigned char not_a_mask = mask & 0x0F;
     unsigned char a_mask = (mask >> 4) & 0x0F;
-    if (a_mask == not_a_mask) return simd_binary(a_mask, b, c);
+    if (a_mask == not_a_mask) {
+        return simd_binary(a_mask, b, c);
+    }
 
     unsigned char b_mask = ((mask & 0xC0) >> 4) | ((mask & 0x0C) >> 2);
     unsigned char not_b_mask = ((mask & 0x30) >> 2) | (mask & 0x03);
-    if (b_mask == not_b_mask) return simd_binary(b_mask, a, c);
+    if (b_mask == not_b_mask) {
+        return simd_binary(b_mask, a, c);
+    }
 
     unsigned char c_mask = ((mask & 0x80) >> 4) | ((mask & 0x20) >> 3) | ((mask & 0x08) >> 2) | ((mask & 02) >> 1);
     unsigned char not_c_mask = ((mask & 0x40) >> 3) | ((mask & 0x10) >> 2) | ((mask & 0x04) >> 1) | (mask & 01);
-    if (c_mask == not_c_mask) return simd_binary(c_mask, a, b);
-
-    if ((a_mask ^ not_a_mask) == 0x0F) return CreateXor(a, simd_binary(not_a_mask, b, c));
+    if (c_mask == not_c_mask) {
+        return simd_binary(c_mask, a, b);
+    }
 
     Value * bc_hi = simd_binary(a_mask, b, c);
     Value * bc_lo = simd_binary(not_a_mask, b, c);
@@ -899,8 +927,8 @@ Value * IDISA_Builder::hsimd_packl(unsigned fw, Value * a, Value * b) {
         Value * aLo = simd_srli(fw_wkg, a, fw/2);
         Value * bLo = simd_srli(fw_wkg, b, fw/2);
         return hsimd_packl(fw*2,
-                           bitCast(simd_or(simd_select_hi(fw, aLo), simd_select_lo(fw, a))),
-                           bitCast(simd_or(simd_select_hi(fw, bLo), simd_select_lo(fw, b))));
+                           simd_or(simd_select_hi(fw, aLo), simd_select_lo(fw, a)),
+                           simd_or(simd_select_hi(fw, bLo), simd_select_lo(fw, b)));
     }
     Value * aVec = fwCast(fw/2, a);
     Value * bVec = fwCast(fw/2, b);
@@ -1004,8 +1032,9 @@ Value * IDISA_Builder::mvmd_slli(unsigned fw, Value * a, unsigned shift) {
     if (fw < 8) UnsupportedFieldWidthError(fw, "mvmd_slli");
     if (shift == 0) return a;
     Value * a1 = fwCast(fw, a);
-    Value * shifted = mvmd_dslli(fw, a1, Constant::getNullValue(a1->getType()), shift);
-    return shifted;
+    Value * r = mvmd_dslli(fw, a1, Constant::getNullValue(a1->getType()), shift);
+    assert (r->getType() == a1->getType());
+    return r;
 }
 
 Value * IDISA_Builder::mvmd_srli(unsigned fw, Value * a, unsigned shift) {
@@ -1019,9 +1048,9 @@ Value * IDISA_Builder::mvmd_srli(unsigned fw, Value * a, unsigned shift) {
 Value * IDISA_Builder::mvmd_dslli(unsigned fw, Value * a, Value * b, unsigned shift) {
     if (shift == 0) return a;
     if (fw > 32) {
-        return mvmd_dslli(32, a, b, shift * (fw/32));
+        return fwCast(fw, mvmd_dslli(32, a, b, shift * (fw/32)));
     } else if (((shift % 2) == 0) && (fw < 32)) {
-        return mvmd_dslli(2 * fw, a, b, shift / 2);
+        return fwCast(fw, mvmd_dslli(2 * fw, a, b, shift / 2));
     }
     if (fw >= 16) {
         const auto field_count = getVectorBitWidth(a) / fw;
@@ -1029,12 +1058,13 @@ Value * IDISA_Builder::mvmd_dslli(unsigned fw, Value * a, Value * b, unsigned sh
         for (unsigned i = 0; i < field_count; i++) {
             Idxs[i] = getInt32(i + field_count - shift);
         }
-        return bitCast(CreateShuffleVector(fwCast(fw, b), fwCast(fw, a), ConstantVector::get(Idxs)));
+        return CreateShuffleVector(fwCast(fw, b), fwCast(fw, a), ConstantVector::get(Idxs));
     } else {
         unsigned field32_shift = (shift * fw) / 32;
         unsigned bit_shift = (shift * fw) % 32;
-        return bitCast(simd_or(simd_slli(32, mvmd_dslli(32, a, b, field32_shift), bit_shift),
-                               simd_srli(32, mvmd_dslli(32, a, b, field32_shift + 1), 32-bit_shift)));
+        Value * const L = simd_slli(32, mvmd_dslli(32, a, b, field32_shift), bit_shift);
+        Value * const R = simd_srli(32, mvmd_dslli(32, a, b, field32_shift + 1), 32-bit_shift);
+        return fwCast(fw, CreateOr(L, R));
     }
 }
 
@@ -1109,10 +1139,11 @@ Value * IDISA_Builder::mvmd_expand(unsigned fw, Value * v, Value * select_mask) 
 
         Constant * oneSplat = getSplat(fieldCount, ConstantInt::get(fieldTy, 1));
         Value * movements_remaining = hsimd_partial_sum(fw, CreateXor(select_mask, oneSplat));
-
+        assert (movements_remaining->getType() == oneSplat->getType());
         Value * result = nullptr;
 
         Value * pending = v;
+        assert (v->getType() == oneSplat->getType());
 
         unsigned shiftAmount = fieldCount;
         while (shiftAmount > 0) {
@@ -1120,18 +1151,29 @@ Value * IDISA_Builder::mvmd_expand(unsigned fw, Value * v, Value * select_mask) 
             shiftAmount /= 2;
 
             Value * shift_splat = getSplat(fieldCount, ConstantInt::get(fieldTy, shiftAmount));
-            Value * shift_select = simd_and(movements_remaining, shift_splat);
+            assert (shift_splat->getType() == oneSplat->getType());
+            Value * shift_select = CreateAnd(movements_remaining, shift_splat);
+            assert (shift_select->getType() == oneSplat->getType());
             Value * shift_mask = simd_eq(fw, shift_select, shift_splat);
+            assert (shift_mask->getType() == oneSplat->getType());
             Value * shifted = CreateAnd(mvmd_slli(fw, pending, shiftAmount), shift_mask);
+            assert (shifted->getType() == oneSplat->getType());
             movements_remaining = CreateXor(movements_remaining, shift_select);
+            assert (movements_remaining->getType() == oneSplat->getType());
             Value * keep_mask = simd_eq(fw, movements_remaining, shift_select);
-            Value * newVals = simd_and(pending, keep_mask);
+            assert (keep_mask->getType() == oneSplat->getType());
+            Value * newVals = CreateAnd(pending, keep_mask);
+            assert (newVals->getType() == oneSplat->getType());
             if (result) {
+                assert (result->getType() == newVals->getType());
                 result = CreateOr(result, newVals);
             } else {
                 result = newVals;
             }
-            pending = CreateOr(CreateAnd(pending, CreateNot(shift_mask)), shifted);
+            Value * A = CreateAnd(pending, CreateNot(shift_mask));
+            assert (A->getType() == oneSplat->getType());
+            pending = CreateOr(A, shifted);
+            assert (pending->getType() == oneSplat->getType());
         }
         return CreateAnd(result, simd_any(fw, select_mask));
     }
@@ -1184,6 +1226,7 @@ std::pair<Value *, Value *> IDISA_Builder::bitblock_subtract_with_borrow(Value *
 
 // full shift producing {shiftout, shifted}
 std::pair<Value *, Value *> IDISA_Builder::bitblock_advance(Value * a, Value * shiftin, unsigned shift) {
+    assert (a->getType() == mBitBlockType);
     Type * const shiftTy = shiftin->getType();
     Value * shiftin_bitblock;
     if (shiftTy == mBitBlockType) {
@@ -1197,6 +1240,7 @@ std::pair<Value *, Value *> IDISA_Builder::bitblock_advance(Value * a, Value * s
     if (shiftTy != mBitBlockType) {
         shiftout = CreateTrunc(CreateBitCast(shiftout, getIntNTy(mBitBlockWidth)), shiftTy);
     }
+    assert (shifted->getType() == mBitBlockType);
     return std::pair<Value *, Value *>(shiftout, shifted);
 }
 

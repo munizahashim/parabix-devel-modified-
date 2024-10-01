@@ -196,9 +196,10 @@ void StreamExpandKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value 
     // the current field.
 
     Value * partialSum = b.hsimd_partial_sum(mFieldWidth, fieldPopCounts);
+    assert (partialSum->getType() == fwSplat->getType());
     Value * const blockPopCount = b.CreateZExtOrTrunc(b.CreateExtractElement(partialSum, numFields - 1), sizeTy);
     partialSum = b.mvmd_slli(mFieldWidth, partialSum, 1);
-
+    assert (partialSum->getType() == fwSplat->getType());
     Value * const source_field_lo = b.CreateUDiv(partialSum, fwSplat);
     Value * const source_field_hi = b.CreateUDiv(b.CreateAdd(partialSum, fw_sub1Splat), fwSplat);
     Value * const source_shift_lo = b.CreateAnd(partialSum, fw_sub1Splat);  // parallel URem

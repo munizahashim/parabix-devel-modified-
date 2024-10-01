@@ -141,6 +141,7 @@ std::pair<Value *, Value *> IDISA_SSE2_Builder::bitblock_advance(Value * a, Valu
     Value * shifted = nullptr;
     Value * shiftout = nullptr;
     Type * shiftTy = shiftin->getType();
+    assert (a->getType() == mBitBlockType);
     if (LLVM_UNLIKELY(shift == 0)) {
         return std::pair<Value *, Value *>(Constant::getNullValue(shiftTy), a);
     }
@@ -149,12 +150,14 @@ std::pair<Value *, Value *> IDISA_SSE2_Builder::bitblock_advance(Value * a, Valu
         si = bitCast(CreateZExt(shiftin, getIntNTy(mBitBlockWidth)));
     }
     if (LLVM_UNLIKELY(shift == mBitBlockWidth)) {
+        assert (si->getType() == mBitBlockType);
         return std::pair<Value *, Value *>(CreateBitCast(a, shiftTy), si);
     }
 #ifndef LEAVE_CARRY_UNNORMALIZED
     if (LLVM_UNLIKELY((shift % 8) == 0)) { // Use a single whole-byte shift, if possible.
         shifted = bitCast(simd_or(mvmd_slli(8, a, shift / 8), si));
         shiftout = bitCast(mvmd_srli(8, a, (mBitBlockWidth - shift) / 8));
+        assert (shifted->getType() == mBitBlockType);
         return std::pair<Value *, Value *>(CAST_SHIFT_OUT(shiftout), shifted);
     }
     Value * shiftback = simd_srli(SHIFT_FIELDWIDTH, a, SHIFT_FIELDWIDTH - (shift % SHIFT_FIELDWIDTH));
@@ -185,6 +188,7 @@ std::pair<Value *, Value *> IDISA_SSE2_Builder::bitblock_advance(Value * a, Valu
         throw std::runtime_error("Unsupported shift.");
     }
 #endif
+    assert (shifted->getType() == mBitBlockType);
     return std::pair<Value *, Value *>(CAST_SHIFT_OUT(shiftout), shifted);
 }
     
