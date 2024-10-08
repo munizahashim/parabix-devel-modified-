@@ -1354,43 +1354,44 @@ void U8_Compiler::prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb) 
     mSeqData[k].byte1CC = codeUnitCC(mSeqData[k].seqCCs, 1);
     //
     Range narrowed = CC_Set_Range(mSeqData[k].seqCCs);
-    if (narrowed.is_empty()) return;
-    PabloAST * t = compilePrefix(mSeqData[k].byte1CC, pb);
-    mSeqData[k].test = t;
-    //auto nested = pb.createScope();
-    //pb.createIf(mSeqData[k].test, nested);
-    prepareScope(k, pb);
-    //
-    for (auto it : mSeqData[k].lowCostPrefixSet) {
-        auto lo_pfx = lo_codepoint(it);
-        auto hi_pfx = hi_codepoint(it);
-        if (UTF_CompilationTracing) {
-            llvm::errs() << "lowCostPrefixSet for [";
-            llvm::errs().write_hex(lo_pfx);
-            llvm::errs() << ", ";
-            llvm::errs().write_hex(hi_pfx);
-            llvm::errs() << "]\n";
-        }
-        PabloAST * t = compilePrefix(re::makeCC(lo_pfx, hi_pfx, &Byte), pb);
+    if (!narrowed.is_empty()) {
+        PabloAST * t = compilePrefix(mSeqData[k].byte1CC, pb);
         mSeqData[k].test = t;
-        Range testRange{mEncoder.minCodePointWithPrefix(lo_pfx), mEncoder.maxCodePointWithPrefix(hi_pfx)};
-        EnclosingInfo rangeInfo(testRange, t);
-        compileRange(k, rangeInfo, pb);
-    }
-    for (auto it : mSeqData[k].highCostPrefixSet) {
-        for (auto pfx = lo_codepoint(it); pfx <= hi_codepoint(it); pfx++) {
+        //auto nested = pb.createScope();
+        //pb.createIf(mSeqData[k].test, nested);
+        prepareScope(k, pb);
+        //
+        for (auto it : mSeqData[k].lowCostPrefixSet) {
+            auto lo_pfx = lo_codepoint(it);
+            auto hi_pfx = hi_codepoint(it);
             if (UTF_CompilationTracing) {
-                llvm::errs() << "highCostPrefixSet for [";
-                llvm::errs().write_hex(pfx);
+                llvm::errs() << "lowCostPrefixSet for [";
+                llvm::errs().write_hex(lo_pfx);
+                llvm::errs() << ", ";
+                llvm::errs().write_hex(hi_pfx);
                 llvm::errs() << "]\n";
             }
-            PabloAST * t = compilePrefix(re::makeCC(pfx, &Byte), pb);
+            PabloAST * t = compilePrefix(re::makeCC(lo_pfx, hi_pfx, &Byte), pb);
             mSeqData[k].test = t;
-            auto nested = pb.createScope();
-            pb.createIf(mSeqData[k].test, nested);
-            Range testRange{mEncoder.minCodePointWithPrefix(pfx), mEncoder.maxCodePointWithPrefix(pfx)};
+            Range testRange{mEncoder.minCodePointWithPrefix(lo_pfx), mEncoder.maxCodePointWithPrefix(hi_pfx)};
             EnclosingInfo rangeInfo(testRange, t);
-            compileRange(k, rangeInfo, nested);
+            compileRange(k, rangeInfo, pb);
+        }
+        for (auto it : mSeqData[k].highCostPrefixSet) {
+            for (auto pfx = lo_codepoint(it); pfx <= hi_codepoint(it); pfx++) {
+                if (UTF_CompilationTracing) {
+                    llvm::errs() << "highCostPrefixSet for [";
+                    llvm::errs().write_hex(pfx);
+                    llvm::errs() << "]\n";
+                }
+                PabloAST * t = compilePrefix(re::makeCC(pfx, &Byte), pb);
+                mSeqData[k].test = t;
+                auto nested = pb.createScope();
+                pb.createIf(mSeqData[k].test, nested);
+                Range testRange{mEncoder.minCodePointWithPrefix(pfx), mEncoder.maxCodePointWithPrefix(pfx)};
+                EnclosingInfo rangeInfo(testRange, t);
+                compileRange(k, rangeInfo, nested);
+            }
         }
     }
     for (unsigned i = 0; i < mSeqData[k].seqCCs.size(); i++) {
