@@ -36,6 +36,7 @@ static cl::opt<unsigned> ShiftCostFactor("ShiftCostFactor", cl::init(10), cl::ca
 static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", cl::init(15), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> PartitioningCostThreshhold("PartitioningCostThreshhold", cl::init(12), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(4), cl::cat(codegen::CodeGenOptions));
+static cl::opt<unsigned> UnifiedBasisBytes("UnifiedBasisBytes", cl::desc("Create unified basis from the final n bytes (default 0)"), cl::init(0), cl::cat(codegen::CodeGenOptions));
 enum class InitialTestMode {PrefixCC, RangeCC, NonASCII};
 static cl::opt<InitialTestMode> InitialTest("InitialTest", cl::ValueOptional,
 cl::values(
@@ -53,6 +54,7 @@ std::string kernelAnnotation() {
     a += "i" + std::to_string(IfEmbeddingCostThreshhold);
     a += "p" + std::to_string(PartitioningCostThreshhold);
     a += "f" + std::to_string(PartitioningFactor);
+    a += "u" + std::to_string(UnifiedBasisBytes);
     if (InitialTest == InitialTestMode::NonASCII) {
         a += "+nA";
     } else if (InitialTest == InitialTestMode::RangeCC) {
@@ -1097,11 +1099,11 @@ struct SeqData {
 
 class U8_Compiler : public New_UTF_Compiler {
 public:
-    U8_Compiler(pablo::Var * v, PabloBuilder & pb, pablo::PabloAST * mask) : New_UTF_Compiler(v, pb, mask), mPrefixScope(0) {
+    U8_Compiler(pablo::Var * v, PabloBuilder & pb, pablo::PabloAST * mask) : New_UTF_Compiler(v, pb, mask), mScopePosition(0) {
         mEncoder.setCodeUnitBits(8);
     }
 protected:
-    unsigned                mPrefixScope;
+    unsigned                mScopePosition;
     SeqData                 mSeqData[4];
     re::CC * codeUnitCC(re::CC *, unsigned pos = 1);
     re::CC * codeUnitCC(CC_List & ccs, unsigned pos = 1);
@@ -1113,11 +1115,12 @@ protected:
     void extendLengthHierarchy(EnclosingInfo & info, PabloBuilder & pb);
     void prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb);
     CC_List prepareFullBlockSets(U8_Seq_Kind k, CC_List ccs, PabloAST * enclosing_test, unsigned code_unit, PabloBuilder & pb);
+    void compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, unsigned code_unit, PabloBuilder & pb);
     virtual void compileRange(U8_Seq_Kind k, EnclosingInfo & enclosing, PabloBuilder & pb);
-    PabloAST * compilePrefix(re::CC * prefixCC, PabloBuilder & pb);
+    virtual PabloAST * compileCodeUnit(re::CC * unitCC, unsigned pos, PabloBuilder & pb) = 0;
     virtual void prepareSuffix(unsigned scope, PabloBuilder & pb) = 0;
     virtual void prepareScope(unsigned scope, PabloBuilder & pb) = 0;
-    virtual PabloAST * fullBlockCompletion(U8_Seq_Kind k, unsigned pos, PabloAST * pfx, PabloBuilder & pb) = 0;
+    virtual PabloAST * adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) = 0;
 };
 
 re::CC * U8_Compiler::codeUnitCC(re::CC * cc, unsigned pos) {
@@ -1226,16 +1229,12 @@ void U8_Compiler::lengthAnalysis(CC_List & ccs) {
     }
 }
 
-PabloAST * U8_Compiler::compilePrefix(re::CC * prefixCC, PabloBuilder & pb) {
-    return cc::Parabix_CC_Compiler_Builder(mScopeBasis[mPrefixScope]).compileCC(prefixCC, pb);
-}
-
 void U8_Compiler::preparePrefixTests(PabloBuilder & pb) {
     for (unsigned k = TwoByte; k <= FourByte; k++) {
         if (mSeqData[k].actualRange.is_empty()) {
             mSeqData[k].test = nullptr;
         } else {
-            mSeqData[k].test = compilePrefix(mSeqData[k].byte1CC, pb);
+            mSeqData[k].test = compileCodeUnit(mSeqData[k].byte1CC, 1, pb);
             mSeqData[k].testRange.lo = mEncoder.minCodePointWithCommonCodeUnits(mSeqData[k].actualRange.lo, 1);
             mSeqData[k].testRange.hi = mEncoder.maxCodePointWithCommonCodeUnits(mSeqData[k].actualRange.hi, 1);
         }
@@ -1284,7 +1283,7 @@ void U8_Compiler::createInitialHierarchy(CC_List & ccs) {
                 unsigned lo_prefix = mEncoder.nthCodeUnit(actual_subrange.lo, 1);
                 unsigned hi_prefix = mEncoder.nthCodeUnit(actual_subrange.hi, 1);
                 re::CC * prefix_range_CC = re::makeCC(lo_prefix, hi_prefix, &Byte);
-                rangeTest = combineAnd(mMask, compilePrefix(prefix_range_CC, mPB), mPB);
+                rangeTest = combineAnd(mMask, compileCodeUnit(prefix_range_CC, 1, mPB), mPB);
             } else { // InitialTest == InitialTestMode::PrefixCC
                 preparePrefixTests(mPB);
                 rangeTest = mSeqData[TwoByte].combinedTest;
@@ -1326,11 +1325,12 @@ CC_List U8_Compiler::prepareFullBlockSets(U8_Seq_Kind k, CC_List ccs, PabloAST *
         }
         re::CC * fullBlockCC = re::makeCC(fullBlockSets[i], &Unicode);
         re::CC * unitCC = codeUnitCC(fullBlockCC, code_unit);
-        PabloAST * t = compilePrefix(unitCC, pb);
+        PabloAST * t =  compileCodeUnit(unitCC, code_unit, pb);
         if (code_unit > 1) {
             t = pb.createAnd(enclosing_test, t);
         }
-        t = fullBlockCompletion(k, code_unit, t, pb);
+        unsigned lgth = k + 1;
+        t = adjustPosition(t, code_unit, lgth, pb);
         if (UTF_CompilationTracing) {
             llvm::errs() << "prepareFullBlockSets[" ;
             llvm::errs().write_hex(fullBlockCC->min_codepoint());
@@ -1355,7 +1355,7 @@ void U8_Compiler::prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb) 
     //
     Range narrowed = CC_Set_Range(mSeqData[k].seqCCs);
     if (!narrowed.is_empty()) {
-        PabloAST * t = compilePrefix(mSeqData[k].byte1CC, pb);
+        PabloAST * t = compileCodeUnit(mSeqData[k].byte1CC, 1, pb);
         mSeqData[k].test = t;
         //auto nested = pb.createScope();
         //pb.createIf(mSeqData[k].test, nested);
@@ -1371,7 +1371,7 @@ void U8_Compiler::prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb) 
                 llvm::errs().write_hex(hi_pfx);
                 llvm::errs() << "]\n";
             }
-            PabloAST * t = compilePrefix(re::makeCC(lo_pfx, hi_pfx, &Byte), pb);
+            PabloAST * t = compileCodeUnit(re::makeCC(lo_pfx, hi_pfx, &Byte), 1, pb);
             mSeqData[k].test = t;
             Range testRange{mEncoder.minCodePointWithPrefix(lo_pfx), mEncoder.maxCodePointWithPrefix(hi_pfx)};
             EnclosingInfo rangeInfo(testRange, t);
@@ -1384,7 +1384,7 @@ void U8_Compiler::prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb) 
                     llvm::errs().write_hex(pfx);
                     llvm::errs() << "]\n";
                 }
-                PabloAST * t = compilePrefix(re::makeCC(pfx, &Byte), pb);
+                PabloAST * t = compileCodeUnit(re::makeCC(pfx, &Byte), 1, pb);
                 mSeqData[k].test = t;
                 auto nested = pb.createScope();
                 pb.createIf(mSeqData[k].test, nested);
@@ -1403,9 +1403,111 @@ void U8_Compiler::prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb) 
 void U8_Compiler::compileRange(U8_Seq_Kind k, EnclosingInfo & rangeInfo, PabloBuilder & pb) {
     CC_List rangeCCs(mSeqData[k].seqCCs.size());
     extract_CCs_by_range(rangeInfo.range, mSeqData[k].seqCCs, rangeCCs);
-    Basis_Set UnifiedBasis = prepareUnifiedBasis(rangeInfo.range);
-    Unicode_Range_Compiler range_compiler(UnifiedBasis, mSeqData[k].targets, pb);
-    range_compiler.compile(rangeCCs, rangeInfo);
+    unsigned len = k+1;
+    if (UnifiedBasisBytes >= len) {
+        Basis_Set UnifiedBasis = prepareUnifiedBasis(rangeInfo.range);
+        Unicode_Range_Compiler range_compiler(UnifiedBasis, mSeqData[k].targets, pb);
+        range_compiler.compile(rangeCCs, rangeInfo);
+    } else {
+        compileFromCodeUnit(k, rangeInfo, 1, pb);
+    }
+}
+
+//
+// Precondition: partial compilation of CCs within the enclosing.range has
+// been completed and is available as a PabloAST in the enclosing.test.
+// Precondition: code_unit >= 2 and the enclosing.range has a partial
+// UTF-8 sequence that is an exact sequence of bytes for prior units.
+void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, unsigned code_unit, PabloBuilder & pb) {
+    unsigned lgth = mEncoder.encoded_length(enclosing.range.hi);
+    assert(mEncoder.maxCodePointWithCommonCodeUnits(enclosing.range.lo, code_unit - 1) >= enclosing.range.hi &&
+           "compileAtCodeUnit called with range having code unit difference prior to code_unit pos");
+    CC_List rangeCCs(mSeqData[k].seqCCs.size());
+    extract_CCs_by_range(enclosing.range, mSeqData[k].seqCCs, rangeCCs);
+    if (UnifiedBasisBytes >= (lgth - code_unit + 1)) {
+        Basis_Set UnifiedBasis = prepareUnifiedBasis(enclosing.range);
+        Unicode_Range_Compiler range_compiler(UnifiedBasis, mSeqData[k].targets, pb);
+        range_compiler.compile(rangeCCs, enclosing);
+        return;
+    }
+
+    PabloAST * enclosing_test = adjustPosition(enclosing.test, enclosing.testPosition, code_unit, pb);
+    if (UTF_CompilationTracing) {
+        llvm::errs() << "compileFromCodeUnit(" << enclosing.range.hex_string() << ")\n";
+        llvm::errs() << "  enclosing.testPosition = " << enclosing.testPosition << "\n";
+        llvm::errs() << "  code_unit = " << code_unit << "\n";
+    }
+    if (lgth == code_unit) {  // At the final code unit position
+        for (unsigned i = 0; i < rangeCCs.size(); i++) {
+            re::CC * unitCC = codeUnitCC(rangeCCs[i], code_unit);
+            PabloAST * compiled = pb.createAnd(enclosing_test, compileCodeUnit(unitCC, code_unit, pb), "compiled");
+            pb.createAssign(mSeqData[k].targets[i], pb.createOr(mSeqData[k].targets[i], compiled));
+        }
+    } else {
+        // First deal with the cases that some CCs are full for entire
+        // ranges associated with some code units at this level.
+        rangeCCs = prepareFullBlockSets(k, rangeCCs, enclosing_test, code_unit, pb);
+        //
+        // Now determine the individual code units and compile them.
+        std::map<unsigned, EnclosingInfo> code_unit_map;
+        for (unsigned i = 0; i < rangeCCs.size(); i++) {
+            for (auto rg : *rangeCCs[i]) {
+                codepoint_t lo = lo_codepoint(rg);
+                codepoint_t hi = hi_codepoint(rg);
+                unsigned lo_unit = mEncoder.nthCodeUnit(lo, code_unit);
+                unsigned hi_unit = mEncoder.nthCodeUnit(hi, code_unit);
+                codepoint_t unit_range_base = mEncoder.minCodePointWithCommonCodeUnits(lo, code_unit);
+                for (unsigned unit = lo_unit; unit <= hi_unit; unit++) {
+                    if (UTF_CompilationTracing) {
+                        llvm::errs() << "unit = " << unit << "\n";
+                    }
+                    codepoint_t unit_range_top = mEncoder.maxCodePointWithCommonCodeUnits(unit_range_base, code_unit);
+                    auto f = code_unit_map.find(unit);
+                    if (f == code_unit_map.end()) {
+                        PabloAST * t = compileCodeUnit(re::makeCC(unit, &Byte), code_unit, pb);
+                        t = pb.createAnd(enclosing_test, t);
+                        Range unitRange{unit_range_base, unit_range_top};
+                        code_unit_map.emplace(unit, EnclosingInfo{unitRange, t, code_unit});
+                        if (UTF_CompilationTracing) {
+                            llvm::errs() << "  range = " << unitRange.hex_string() << "\n";
+                        }
+                    }
+                    unit_range_base = unit_range_top + 1;  // for next unit in loop
+                }
+            }
+        }
+        // Process all remaining code units individually, first compiling those
+        // for which no if embedding is required because the cost model is low.
+        std::vector<unsigned> highCostUnits;
+        std::vector<EnclosingInfo> highCostInfo;
+        std::vector<CC_List> highCostCCs;
+        for (auto e : code_unit_map) {
+            CC_List subrangeCCs(rangeCCs.size());
+            extract_CCs_by_range(e.second.range, rangeCCs, subrangeCCs);
+            if (costModel(subrangeCCs) < IfEmbeddingCostThreshhold) {
+                if (UTF_CompilationTracing) {
+                    llvm::errs() << "low cost unit = " << e.first << "\n";
+                    llvm::errs() << "  range = " << e.second.range.hex_string() << "\n";
+                    llvm::errs() << "  code_unit = " << code_unit << "\n";
+                }
+                compileFromCodeUnit(k, e.second, code_unit + 1, pb);
+            } else {
+                highCostUnits.push_back(e.first);
+                highCostInfo.push_back(e.second);
+                highCostCCs.push_back(subrangeCCs);
+            }
+        }
+        for (unsigned i = 0; i < highCostInfo.size(); i++) {
+            if (UTF_CompilationTracing) {
+                llvm::errs() << "highCostUnits[i]" << highCostUnits[i] << ")\n";
+                llvm::errs() << "  range = " << highCostInfo[i].range.hex_string() << "\n";
+                llvm::errs() << "  code_unit = " << code_unit << "\n";
+            }
+            auto nested = pb.createScope();
+            pb.createIf(highCostInfo[i].test, nested);
+            compileFromCodeUnit(k, highCostInfo[i], code_unit + 1, nested);
+        }
+    }
 }
 
 class U8_Lookahead_Compiler : public U8_Compiler {
@@ -1414,7 +1516,8 @@ public:
 protected:
     void prepareSuffix(unsigned scope, PabloBuilder & pb) override;
     void prepareScope(unsigned scope, PabloBuilder & pb) override;
-    PabloAST * fullBlockCompletion(U8_Seq_Kind k, unsigned pos, PabloAST * pfx, PabloBuilder & pb) override;
+    PabloAST * adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) override;
+    PabloAST * compileCodeUnit(re::CC * unitCC, unsigned pos, PabloBuilder & pb) override;
     Basis_Set prepareUnifiedBasis(Range basis_range) override;
 };
 
@@ -1425,9 +1528,9 @@ protected:
     PabloAST * mSuffix;
     void prepareSuffix(unsigned scope, PabloBuilder & pb) override;
     void prepareScope(unsigned scope, PabloBuilder & pb) override;
-    PabloAST * fullBlockCompletion(U8_Seq_Kind k, unsigned pos, PabloAST * pfx, PabloBuilder & pb) override;
+    PabloAST * adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) override;
+    PabloAST * compileCodeUnit(re::CC * unitCC, unsigned pos, PabloBuilder & pb) override;
     Basis_Set prepareUnifiedBasis(Range basis_range) override;
-    void compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, unsigned code_unit, PabloBuilder & pb);
     void compileRange(U8_Seq_Kind k, EnclosingInfo & enclosing, PabloBuilder & pb) override;
 };
 
@@ -1465,8 +1568,14 @@ void U8_Lookahead_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
     }
 }
 
-PabloAST *  U8_Lookahead_Compiler::fullBlockCompletion(U8_Seq_Kind k, unsigned pos, PabloAST * pfx, PabloBuilder & pb) {
-    return pb.createAnd(pfx, mSeqData[k].suffixTest);
+PabloAST *  U8_Lookahead_Compiler::adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) {
+    // The lookahead compiler calculates everything at the first byte position,
+    // so no adjustment is needed.
+    return t;
+}
+
+PabloAST * U8_Lookahead_Compiler::compileCodeUnit(re::CC * unitCC, unsigned unitPos, PabloBuilder & pb) {
+    return cc::Parabix_CC_Compiler_Builder(mScopeBasis[unitPos - 1]).compileCC(unitCC, pb);
 }
 
 Basis_Set U8_Lookahead_Compiler::prepareUnifiedBasis(Range cc_range) {
@@ -1516,6 +1625,7 @@ void U8_Advance_Compiler::prepareSuffix(unsigned scope, PabloBuilder & pb) {
 }
 
 void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
+    mScopePosition = scope;
     /*
     if (mSeqData[scope].byte1CC->empty()) return;
     // For each prior suffix, we need 6 data bits.
@@ -1548,8 +1658,14 @@ void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
      */
 }
 
-PabloAST *  U8_Advance_Compiler::fullBlockCompletion(U8_Seq_Kind k, unsigned pos, PabloAST * pfx, PabloBuilder & pb) {
-    return pb.createAdvance(pfx, k+1-pos);
+PabloAST * U8_Advance_Compiler::compileCodeUnit(re::CC * unitCC, unsigned unitPos, PabloBuilder & pb) {
+    //llvm::errs() << "mScopePosition = " << mScopePosition << ", unitPos = " << unitPos << "\n";
+    return cc::Parabix_CC_Compiler_Builder(mScopeBasis[0]).compileCC(unitCC, pb);
+}
+
+PabloAST *  U8_Advance_Compiler::adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) {
+    if (from == to) return t;
+    return pb.createAdvance(t, to - from);
 }
 
 Basis_Set U8_Advance_Compiler::prepareUnifiedBasis(Range cc_range) {
@@ -1581,100 +1697,6 @@ Basis_Set U8_Advance_Compiler::prepareUnifiedBasis(Range cc_range) {
 
 void U8_Advance_Compiler::compileRange(U8_Seq_Kind k, EnclosingInfo & rangeInfo, PabloBuilder & pb) {
     compileFromCodeUnit(k, rangeInfo, 1, pb);
-}
-
-
-//
-// Precondition: partial compilation of CCs within the enclosing.range has
-// been completed and is available as a PabloAST in the enclosing.test.
-// Precondition: code_unit >= 2 and the enclosing.range has a partial
-// UTF-8 sequence that is an exact sequence of bytes for prior units.
-void U8_Advance_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, unsigned code_unit, PabloBuilder & pb) {
-    unsigned lgth = mEncoder.encoded_length(enclosing.range.hi);
-    assert(mEncoder.maxCodePointWithCommonCodeUnits(enclosing.range.lo, code_unit - 1) >= enclosing.range.hi &&
-           "compileAtCodeUnit called with range having code unit difference prior to code_unit pos");
-    CC_List rangeCCs(mSeqData[k].seqCCs.size());
-    extract_CCs_by_range(enclosing.range, mSeqData[k].seqCCs, rangeCCs);
-
-    PabloAST * enclosing_test = enclosing.test;
-    if (enclosing.testPosition != code_unit) {
-        enclosing_test = pb.createAdvance(enclosing_test, code_unit - enclosing.testPosition);
-    }
-    if (UTF_CompilationTracing) {
-        llvm::errs() << "compileFromCodeUnit(" << enclosing.range.hex_string() << ")\n";
-        llvm::errs() << "  enclosing.testPosition = " << enclosing.testPosition << "\n";
-        llvm::errs() << "  code_unit = " << code_unit << "\n";
-    }
-    if (lgth == code_unit) {  // At the final code unit position
-        for (unsigned i = 0; i < rangeCCs.size(); i++) {
-            re::CC * unitCC = codeUnitCC(rangeCCs[i], code_unit);
-            PabloAST * compiled = pb.createAnd(enclosing_test, compilePrefix(unitCC, pb), "compiled");
-            pb.createAssign(mSeqData[k].targets[i], pb.createOr(mSeqData[k].targets[i], compiled));
-        }
-    } else {
-        // First deal with the cases that some CCs are full for entire
-        // ranges associated with some code units at this level.
-        rangeCCs = prepareFullBlockSets(k, rangeCCs, enclosing_test, code_unit, pb);
-        //
-        // Now determine the individual code units and compile them.
-        std::map<unsigned, EnclosingInfo> code_unit_map;
-        for (unsigned i = 0; i < rangeCCs.size(); i++) {
-            for (auto rg : *rangeCCs[i]) {
-                codepoint_t lo = lo_codepoint(rg);
-                codepoint_t hi = hi_codepoint(rg);
-                unsigned lo_unit = mEncoder.nthCodeUnit(lo, code_unit);
-                unsigned hi_unit = mEncoder.nthCodeUnit(hi, code_unit);
-                codepoint_t unit_range_base = mEncoder.minCodePointWithCommonCodeUnits(lo, code_unit);
-                for (unsigned unit = lo_unit; unit <= hi_unit; unit++) {
-                    if (UTF_CompilationTracing) {
-                        llvm::errs() << "unit = " << unit << "\n";
-                    }
-                    codepoint_t unit_range_top = mEncoder.maxCodePointWithCommonCodeUnits(unit_range_base, code_unit);
-                    auto f = code_unit_map.find(unit);
-                    if (f == code_unit_map.end()) {
-                        PabloAST * t = pb.createAnd(enclosing_test, compilePrefix(re::makeCC(unit, &Byte), pb));
-                        Range unitRange{unit_range_base, unit_range_top};
-                        code_unit_map.emplace(unit, EnclosingInfo{unitRange, t, code_unit});
-                        if (UTF_CompilationTracing) {
-                            llvm::errs() << "  range = " << unitRange.hex_string() << "\n";
-                        }
-                    }
-                    unit_range_base = unit_range_top + 1;  // for next unit in loop
-                }
-            }
-        }
-        // Process all remaining code units individually, first compiling those
-        // for which no if embedding is required because the cost model is low.
-        std::vector<unsigned> highCostUnits;
-        std::vector<EnclosingInfo> highCostInfo;
-        std::vector<CC_List> highCostCCs;
-        for (auto e : code_unit_map) {
-            CC_List subrangeCCs(rangeCCs.size());
-            extract_CCs_by_range(e.second.range, rangeCCs, subrangeCCs);
-            if (costModel(subrangeCCs) < IfEmbeddingCostThreshhold) {
-                if (UTF_CompilationTracing) {
-                    llvm::errs() << "low cost unit = " << e.first << "\n";
-                    llvm::errs() << "  range = " << e.second.range.hex_string() << "\n";
-                    llvm::errs() << "  code_unit = " << code_unit << "\n";
-                }
-                compileFromCodeUnit(k, e.second, code_unit + 1, pb);
-            } else {
-                highCostUnits.push_back(e.first);
-                highCostInfo.push_back(e.second);
-                highCostCCs.push_back(subrangeCCs);
-            }
-        }
-        for (unsigned i = 0; i < highCostInfo.size(); i++) {
-            if (UTF_CompilationTracing) {
-                llvm::errs() << "highCostUnits[i]" << highCostUnits[i] << ")\n";
-                llvm::errs() << "  range = " << highCostInfo[i].range.hex_string() << "\n";
-                llvm::errs() << "  code_unit = " << code_unit << "\n";
-            }
-            auto nested = pb.createScope();
-            pb.createIf(highCostInfo[i].test, nested);
-            compileFromCodeUnit(k, highCostInfo[i], code_unit + 1, nested);
-        }
-    }
 }
 
 UTF_Compiler::UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb,
