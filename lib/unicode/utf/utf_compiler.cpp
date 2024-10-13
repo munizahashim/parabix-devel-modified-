@@ -36,6 +36,7 @@ static cl::opt<unsigned> ShiftCostFactor("ShiftCostFactor", cl::init(10), cl::ca
 static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", cl::init(15), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> PartitioningCostThreshhold("PartitioningCostThreshhold", cl::init(12), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(4), cl::cat(codegen::CodeGenOptions));
+static cl::opt<bool> SuffixOptimization("SuffixOptimization", cl::init(false), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> UnifiedBasisBytes("UnifiedBasisBytes", cl::desc("Create unified basis from the final n bytes (default 0)"), cl::init(0), cl::cat(codegen::CodeGenOptions));
 enum class InitialTestMode {PrefixCC, RangeCC, NonASCII};
 static cl::opt<InitialTestMode> InitialTest("InitialTest", cl::ValueOptional,
@@ -1559,10 +1560,13 @@ void U8_Lookahead_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
     for (unsigned sfx = 1; sfx <= scope; sfx++) {
         bool basis_needed = mScopeBasis[sfx].size() == 0;
         if (basis_needed) {
-            mScopeBasis[sfx].resize(6);
-            for (unsigned i = 0; i < mScopeBasis[sfx].size(); i++) {
+            mScopeBasis[sfx].resize(8);
+            for (unsigned i = 0; i < 6; i++) {
                 mScopeBasis[sfx][i] = pb.createLookahead(mScopeBasis[0][i], sfx);
             }
+            // Set the expected suffix bits - the final suffixTest will confirm.
+            mScopeBasis[sfx][6] = pb.createZeroes();
+            mScopeBasis[sfx][7] = pb.createOnes();
             mSeqData[scope].test = pb.createAnd(mSeqData[scope].test, mSeqData[sfx].suffixTest);
         }
     }
@@ -1660,6 +1664,15 @@ void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
 
 PabloAST * U8_Advance_Compiler::compileCodeUnit(re::CC * unitCC, unsigned unitPos, PabloBuilder & pb) {
     //llvm::errs() << "mScopePosition = " << mScopePosition << ", unitPos = " << unitPos << "\n";
+    if (SuffixOptimization && (unitPos > 1)) {
+        Basis_Set suffixBasis(8);
+        for (unsigned i = 0; i < 6; i++) {
+            suffixBasis[i] = mScopeBasis[0][i];
+        }
+        suffixBasis[6] = pb.createZeroes();
+        suffixBasis[7] = pb.createOnes();
+        return cc::Parabix_CC_Compiler_Builder(suffixBasis).compileCC(unitCC, pb);
+    }
     return cc::Parabix_CC_Compiler_Builder(mScopeBasis[0]).compileCC(unitCC, pb);
 }
 
