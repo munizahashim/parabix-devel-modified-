@@ -1288,10 +1288,10 @@ void FilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & kb, llvm::Value
     std::vector<Value *> pendingDataPtr(mPendingSetCount);
     for (unsigned i = 0; i < mPendingSetCount; i++) {
         Value * pending = kb.getScalarField("pendingData" + std::to_string(i));
-        pendingDataPtr[i] = kb.CreateAlloca(pending->getType());
+        pendingDataPtr[i] = kb.CreateAllocaAtEntryPoint(pending->getType());
         kb.CreateStore(pending, pendingDataPtr[i]);
     }
-    Value * produceOffsetPtr = kb.CreateAlloca(baseProducedOffset->getType());
+    Value * produceOffsetPtr = kb.CreateAllocaAtEntryPoint(baseProducedOffset->getType());
     kb.CreateStore(baseProducedOffset, produceOffsetPtr);
 
     kb.CreateBr(stridePrologue);

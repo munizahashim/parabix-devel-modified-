@@ -31,10 +31,11 @@ void s2p_step(KernelBuilder & b, Value * s0, Value * s1, Value * hi_mask, unsign
 }
 
 void s2p_bitpairs(KernelBuilder & b, Value * input[], Value * bitpairs[]) {
+    Constant * himask2 = b.simd_himask(2);
     for (unsigned i = 0; i < 4; i++) {
         Value * s0 = input[2 * i];
         Value * s1 = input[2 * i + 1];
-        s2p_step(b, s0, s1, b.simd_himask(2), 1, bitpairs[2*i], bitpairs[2*i+1]);
+        s2p_step(b, s0, s1, himask2, 1, bitpairs[2*i], bitpairs[2*i+1]);
     }
 }
 
@@ -49,21 +50,23 @@ void s2p_bitquads(KernelBuilder & b, Value * bitpairs[], Value * bitquads[]) {
     Value * bit66662222[2];
     Value * bit55551111[2];
     Value * bit77773333[2];
+    Constant * himask4 = b.simd_himask(4);
     for (unsigned j = 0; j < 2; j++) {
         s2p_step(b, bit66442200[2*j], bit66442200[2*j+1],
-                 b.simd_himask(4), 2, bit66662222[j], bit44440000[j]);
+                 himask4, 2, bit66662222[j], bit44440000[j]);
         bitquads[j] = bit44440000[j];
         bitquads[4+j] = bit66662222[j];
         s2p_step(b, bit77553311[2*j], bit77553311[2*j+1],
-                 b.simd_himask(4), 2, bit77773333[j], bit55551111[j]);
+                 himask4, 2, bit77773333[j], bit55551111[j]);
         bitquads[2+j] = bit55551111[j];
         bitquads[6+j] = bit77773333[j];
     }
 }
 
 void s2p_completion_from_quads(KernelBuilder & b, Value * bitquads[], Value * output[]) {
+    Constant * himask8 = b.simd_himask(8);
     for (unsigned i = 0; i < 4; i++) {
-        s2p_step(b, bitquads[2*i], bitquads[2*i + 1], b.simd_himask(8), 4, output[i+4], output[i]);
+        s2p_step(b, bitquads[2*i], bitquads[2*i + 1], himask8, 4, output[i+4], output[i]);
     }
 }
 
@@ -136,22 +139,25 @@ void S2PKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfSt
     BasicBlock * s2pBody = nullptr;     // conditional block dependent on mZeroMask
     BasicBlock * s2pStore =  nullptr;   // conditional block dependent on mZeroMask
     BasicBlock * s2pDone = b.CreateBasicBlock("s2pDone");
-    Constant * const ZERO = b.getSize(0);
+    Constant * const sz_ZERO = b.getSize(0);
     Value * numOfBlocks = numOfStrides;
     if (getStride() != b.getBitBlockWidth()) {
         numOfBlocks = b.CreateShl(numOfStrides, b.getSize(floor_log2(getStride()/b.getBitBlockWidth())));
     }
+    const StreamSet * byteStreamSet = b.getInputStreamSet("byteStream");
+    const auto fieldWidth = byteStreamSet->getFieldWidth();
+
     b.CreateBr(s2pLoop);
 
     b.SetInsertPoint(s2pLoop);
     PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2); // block offset from the base block, e.g. 0, 1, 2, ...
-    blockOffsetPhi->addIncoming(ZERO, entry);
+    blockOffsetPhi->addIncoming(sz_ZERO, entry);
     Value * zeroMask = nullptr;
     Value * bytepack[8];
     Value * basisbits[8];
     if (mZeroMask) {
-        zeroMask = b.loadInputStreamBlock("mZeroMask", ZERO, blockOffsetPhi);
-        for (unsigned i = 0; i < mNumOfStreams; ++i) {
+        zeroMask = b.loadInputStreamBlock("mZeroMask", sz_ZERO, blockOffsetPhi);
+        for (unsigned i = 0; i < fieldWidth; ++i) {
             basisbits[i] = b.allZeroes();
         }
         s2pBody = b.CreateBasicBlock("s2pBody");
@@ -160,14 +166,14 @@ void S2PKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfSt
         b.SetInsertPoint(s2pBody);
    }
     for (unsigned i = 0; i < 8; i++) {
-        bytepack[i] = b.loadInputStreamPack("byteStream", ZERO, b.getInt32(i), blockOffsetPhi);
+        bytepack[i] = b.loadInputStreamPack("byteStream", sz_ZERO, b.getInt32(i), blockOffsetPhi);
     }
     s2p(b, bytepack, basisbits);
     if (mZeroMask) {
         b.CreateBr(s2pStore);
         b.SetInsertPoint(s2pStore);
     }
-    for (unsigned i = 0; i < mNumOfStreams; ++i) {
+    for (unsigned i = 0; i < fieldWidth; ++i) {
         if (mZeroMask) {
             basisbits[i] = b.simd_and(basisbits[i], zeroMask);
         }
@@ -203,8 +209,7 @@ S2PKernel::S2PKernel(LLVMTypeSystemInterface & ts,
 , makeInputBindings(codeUnitStream, zeroMask)
 , makeOutputBindings(BasisBits)
 , {}, {}, {})
-, mZeroMask(zeroMask != nullptr)
-, mNumOfStreams(BasisBits->getNumElements()) {
+, mZeroMask(zeroMask != nullptr) {
     assert (codeUnitStream->getFieldWidth() == BasisBits->getNumElements());
 }
 

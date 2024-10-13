@@ -382,6 +382,7 @@ Kernel::ParamMap::PairEntry PipelineKernel::createRepeatingStreamSet(KernelBuild
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineKernel::runOptimizationPasses(KernelBuilder & b) const {
     COMPILER->runOptimizationPasses(b);
+    Kernel::runOptimizationPasses(b);
 }
 
 #define JOIN3(X,Y,Z) BOOST_JOIN(X,BOOST_JOIN(Y,Z))
@@ -594,9 +595,23 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     };
     SmallVector<Value *, 16> segmentArgs(doSegment->arg_size());
 
-    if (LLVM_UNLIKELY(numOfStreamSets > 0)) {
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    PointerType * const int8PtrTy = b.getInt8PtrTy();
+    IntegerType * const intPtrTy = b.getIntPtrTy(m->getDataLayout());
+    FixedArray<Type *, 4> fields;
+    fields[0] = int8PtrTy; // mod name
+    fields[1] = int8PtrTy; // func name
+    fields[2] = int8PtrTy; // bb name
+    fields[3] = intPtrTy; // offset
+    StructType * trackerObjTy = StructType::get(b.getContext(), fields);
+    Value * const trackerObj = b.CreateAlignedMalloc(b.getTypeSize(trackerObjTy), sizeof(void*));
+    #endif
 
-        auto argCount = suppliedArgs;
+
+
+    auto segmentArgCount = suppliedArgs;
+
+    if (LLVM_UNLIKELY(numOfStreamSets > 0)) {
 
         ConstantInt * const i32_ZERO = b.getInt32(0);
         ConstantInt * const i32_ONE = b.getInt32(1);
@@ -612,14 +627,14 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
             // virtual base input address
             fields[1] = i32_ZERO;
             Value * const vbaPtr = b.CreateGEP(streamSetTy, streamSetArg, fields);
-            segmentArgs[argCount++] = b.CreateLoad(voidPtrTy, vbaPtr);
+            segmentArgs[segmentArgCount++] = b.CreateLoad(voidPtrTy, vbaPtr);
             // processed input items
             fields[1] = i32_ONE;
             Value * const processedPtr = b.CreateAllocaAtEntryPoint(b.getSizeTy());
             b.CreateStore(sz_ZERO, processedPtr);
-            segmentArgs[argCount++] = processedPtr; // updatable
+            segmentArgs[segmentArgCount++] = processedPtr; // updatable
             // accessible input items
-            segmentArgs[argCount++] = b.CreateLoad(int64Ty, b.CreateGEP(streamSetTy, streamSetArg, fields));
+            segmentArgs[segmentArgCount++] = b.CreateLoad(int64Ty, b.CreateGEP(streamSetTy, streamSetArg, fields));
         }
 
         for (auto i = mOutputStreamSets.size(); i--; ) {
@@ -628,19 +643,26 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
 
             // shared dynamic buffer handle or virtual base output address
             fields[1] = i32_ZERO;
-            segmentArgs[argCount++] = b.CreateGEP(streamSetTy, streamSetArg, fields);
+            segmentArgs[segmentArgCount++] = b.CreateGEP(streamSetTy, streamSetArg, fields);
 
             // produced output items
             fields[1] = i32_ONE;
             Value * const itemPtr = b.CreateGEP(streamSetTy, streamSetArg, fields);
-            segmentArgs[argCount++] = itemPtr;
-            segmentArgs[argCount++] = b.CreateLoad(int64Ty, itemPtr);
+            segmentArgs[segmentArgCount++] = itemPtr;
+            segmentArgs[segmentArgCount++] = b.CreateLoad(int64Ty, itemPtr);
         }
-
-        assert (argCount == doSegment->arg_size());
     }
+
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    segmentArgs[segmentArgCount++] = trackerObj;
+    #endif
+    assert (segmentArgCount == doSegment->arg_size());
+
     Value * sharedHandle = nullptr;
     NestedStateObjs toFree;
+//    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+//    toFree.push_back(trackerObj);
+//    #endif
     ParamMap paramMap;
 
     // construct any repeating streamsets and add them to the map
@@ -710,6 +732,10 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         paramMap.set(scalar, value);
     }
 
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    paramMap.setEntryPointTracker(trackerObj);
+    #endif
+
     InitArgs args;
     sharedHandle = constructFamilyKernels(b, args, paramMap, toFree);
     assert (isStateful() || sharedHandle == nullptr);
@@ -725,6 +751,9 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
             args.push_back(sharedHandle);
         }
         args.push_back(ConstantPointerNull::get(getThreadLocalStateType()->getPointerTo()));
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        args.push_back(trackerObj);
+        #endif
         threadLocalHandle = initializeThreadLocalInstance(b, args);
         segmentArgs[argCount++] = threadLocalHandle;
         toFree.push_back(threadLocalHandle);
@@ -736,8 +765,6 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         report_fatal_error(StringRef(doSegment->getName()) + " cannot be externally synchronized");
     }
 
-
-
     // allocate any internal stream sets
     if (LLVM_LIKELY(allocatesInternalStreamSets())) {
         Constant * const sz_ONE = b.getSize(1);
@@ -748,6 +775,9 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         }
         // pass in the desired number of segments
         allocArgs.push_back(sz_ONE);
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        allocArgs.push_back(trackerObj);
+        #endif
         b.CreateCall(allocShared->getFunctionType(), allocShared, allocArgs);
         if (LLVM_LIKELY(hasThreadLocal())) {
             Function * const allocThreadLocal = getAllocateThreadLocalInternalStreamSetsFunction(b);
@@ -757,6 +787,9 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
             }
             allocArgs.push_back(threadLocalHandle);
             allocArgs.push_back(sz_ONE);
+            #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+            allocArgs.push_back(trackerObj);
+            #endif
             b.CreateCall(allocThreadLocal->getFunctionType(), allocThreadLocal, allocArgs);
         }
     }
@@ -814,9 +847,18 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     if (LLVM_LIKELY(hasThreadLocal())) {
         finalizeArgs.push_back(threadLocalHandle);
         finalizeArgs.push_back(threadLocalHandle);
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        finalizeArgs.push_back(trackerObj);
+        #endif
         finalizeThreadLocalInstance(b, finalizeArgs);
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        finalizeArgs.pop_back();
+        #endif
         finalizeArgs.pop_back();
     }
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    finalizeArgs.push_back(trackerObj);
+    #endif
     Value * const result = finalizeInstance(b, finalizeArgs);
     for (Value * stateObj : toFree) {
         b.CreateFree(stateObj);

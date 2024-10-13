@@ -179,6 +179,9 @@ Value * PipelineCompiler::callKernelInitializeFunction(KernelBuilder & b, const 
     } else {
         args.push_back(threadLocal);
     }
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    args.push_back(mKernelBasicBlockEntryTracker);
+    #endif
     FunctionType * fty = init->getFunctionType();
     for (unsigned i = 0; i < fty->getNumParams(); ++i) {
         if (LLVM_UNLIKELY(fty->getParamType(i) != args[i]->getType())) {

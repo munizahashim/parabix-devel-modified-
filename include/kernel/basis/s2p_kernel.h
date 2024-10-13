@@ -27,7 +27,6 @@ protected:
     void generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) override;
 private:
     bool mZeroMask;
-    unsigned mNumOfStreams;
 };
 
 // Equivalent to S2P, but split into stages for better balancing

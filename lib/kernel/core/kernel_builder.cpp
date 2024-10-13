@@ -47,8 +47,10 @@ KernelBuilder::ScalarRef KernelBuilder::getScalarFieldPtr(const StringRef fieldN
  * @brief getScalarField
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * KernelBuilder::getScalarField(const StringRef fieldName) {
-    auto sf = getScalarFieldPtr(fieldName);
-    return CreateLoad(sf.second, sf.first, fieldName);
+    Type * ty; Value * ptr;
+    std::tie(ptr, ty) = getScalarFieldPtr(fieldName);
+    DataLayout DL(getModule());
+    return CreateAlignedLoad(ty, ptr, getTypeSize(DL, ty), fieldName);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -104,7 +106,7 @@ StoreInst * KernelBuilder::CreateMonitoredScalarFieldStore(const StringRef field
 Value * KernelBuilder::getTerminationSignal() {
     Value * const ptr = COMPILER->getTerminationSignalPtr();
     if (ptr) {
-        return CreateIsNotNull(CreateLoad(getSizeTy(), ptr));
+        return CreateIsNotNull(CreateAlignedLoad(getSizeTy(), ptr, sizeof(size_t)));
     } else {
         return getFalse();
     }
@@ -124,7 +126,7 @@ void KernelBuilder::setTerminationSignal(Value * const value) {
 Value * KernelBuilder::getInputStreamBlockPtr(const StringRef name, Value * const streamIndex, Value * const blockOffset) {
     const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
     Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateLoad(getSizeTy(), processedPtr), floor_log2(getBitBlockWidth()));
+    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), processedPtr, sizeof(size_t)), floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
@@ -136,7 +138,7 @@ Value * KernelBuilder::getInputStreamBlockPtr(const StringRef name, Value * cons
 Value * KernelBuilder::getInputStreamPackPtr(const StringRef name, Value * const streamIndex, Value * const packIndex, Value * const blockOffset) {
     const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
     Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateLoad(getSizeTy(), processedPtr), floor_log2(getBitBlockWidth()));
+    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), processedPtr, sizeof(size_t)), floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
@@ -149,7 +151,7 @@ Value * KernelBuilder::loadInputStreamBlock(const StringRef name, Value * const 
     const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
     const auto bw = getBitBlockWidth();
     Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateLoad(getSizeTy(), processedPtr), floor_log2(bw));
+    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), processedPtr, sizeof(size_t)), floor_log2(bw));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
@@ -163,7 +165,7 @@ Value * KernelBuilder::loadInputStreamPack(const StringRef name, Value * const s
     const auto & entry = COMPILER->getBinding(BindingType::StreamInput, name);
     const auto bw = getBitBlockWidth();
     Value * const processedPtr = COMPILER->getProcessedInputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateLoad(getSizeTy(), processedPtr), floor_log2(bw));
+    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), processedPtr, sizeof(size_t)), floor_log2(bw));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
@@ -181,7 +183,7 @@ Value * KernelBuilder::getInputStreamSetCount(const StringRef name) {
 Value * KernelBuilder::getOutputStreamBlockPtr(const StringRef name, Value * streamIndex, Value * const blockOffset) {
     const auto & entry = COMPILER->getBinding(BindingType::StreamOutput, name);
     Value * const producedPtr = COMPILER->getProducedOutputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateLoad(getSizeTy(), producedPtr), floor_log2(getBitBlockWidth()));
+    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), producedPtr, sizeof(size_t)), floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
@@ -193,7 +195,7 @@ Value * KernelBuilder::getOutputStreamBlockPtr(const StringRef name, Value * str
 Value * KernelBuilder::getOutputStreamPackPtr(const StringRef name, Value * streamIndex, Value * packIndex, Value * blockOffset) {
     const auto & entry = COMPILER->getBinding(BindingType::StreamOutput, name);
     Value * const producedPtr = COMPILER->getProducedOutputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateLoad(getSizeTy(), producedPtr), floor_log2(getBitBlockWidth()));
+    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), producedPtr, sizeof(size_t)), floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
@@ -213,7 +215,7 @@ StoreInst * KernelBuilder::storeOutputStreamBlock(const StringRef name, Value * 
 
     const auto & entry = COMPILER->getBinding(BindingType::StreamOutput, name);
     Value * const producedPtr = COMPILER->getProducedOutputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateLoad(getSizeTy(), producedPtr), floor_log2(getBitBlockWidth()));
+    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), producedPtr, sizeof(size_t)), floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
@@ -236,7 +238,7 @@ StoreInst * KernelBuilder::storeOutputStreamPack(const StringRef name, Value * s
 
     const auto & entry = COMPILER->getBinding(BindingType::StreamOutput, name);
     Value * const producedPtr = COMPILER->getProducedOutputItemsPtr(entry.Index);
-    Value * blockIndex = CreateLShr(CreateLoad(getSizeTy(), producedPtr), floor_log2(getBitBlockWidth()));
+    Value * blockIndex = CreateLShr(CreateAlignedLoad(getSizeTy(), producedPtr, sizeof(size_t)), floor_log2(getBitBlockWidth()));
     if (blockOffset) {
         blockIndex = CreateAdd(blockIndex, CreateZExtOrTrunc(blockOffset, blockIndex->getType()));
     }
@@ -307,20 +309,20 @@ Value * KernelBuilder::getAccessibleItemCount(const StringRef name) const noexce
 }
 
 Value * KernelBuilder::getProcessedItemCount(const StringRef name) {
-    return CreateLoad(getSizeTy(), COMPILER->getProcessedInputItemsPtr(name));
+    return CreateAlignedLoad(getSizeTy(), COMPILER->getProcessedInputItemsPtr(name), sizeof(size_t));
 }
 
 void KernelBuilder::setProcessedItemCount(const StringRef name, Value * value) {
     assert (value->getType() == getSizeTy());
-    CreateStore(value, COMPILER->getProcessedInputItemsPtr(name));
+    CreateAlignedStore(value, COMPILER->getProcessedInputItemsPtr(name), sizeof(size_t));
 }
 
 Value * KernelBuilder::getProducedItemCount(const StringRef name) {
-    return CreateLoad(getSizeTy(), COMPILER->getProducedOutputItemsPtr(name));
+    return CreateAlignedLoad(getSizeTy(), COMPILER->getProducedOutputItemsPtr(name), sizeof(size_t));
 }
 
 void KernelBuilder::setProducedItemCount(const StringRef name, Value * value) {
-    CreateStore(value, COMPILER->getProducedOutputItemsPtr(name));
+    CreateAlignedStore(value, COMPILER->getProducedOutputItemsPtr(name), sizeof(size_t));
 }
 
 Value * KernelBuilder::getWritableOutputItems(const StringRef name) const noexcept {

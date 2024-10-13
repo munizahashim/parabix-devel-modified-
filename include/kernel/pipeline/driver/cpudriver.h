@@ -31,12 +31,12 @@ private:
     llvm::Function * addLinkFunction(llvm::Module * mod, llvm::StringRef name, llvm::FunctionType * type, void * functionPtr) const override;
 
 private:
-    llvm::TargetMachine *                                   mTarget;
-    llvm::ExecutionEngine *                                 mEngine;
     std::unique_ptr<llvm::raw_fd_ostream>                   mUnoptimizedIROutputStream;
     std::unique_ptr<llvm::raw_fd_ostream>                   mIROutputStream;
     std::unique_ptr<llvm::raw_fd_ostream>                   mASMOutputStream;
     std::unique_ptr<llvm::legacy::PassManager>              mPassManager;
     std::vector<std::pair<llvm::Function *, void *>>        mCachedFunctionMappings;
+    std::unique_ptr<llvm::ExecutionEngine>                  mEngine;
+    std::unique_ptr<llvm::TargetMachine>                    mTarget;
 };
 

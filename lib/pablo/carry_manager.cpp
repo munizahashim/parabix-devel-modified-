@@ -116,10 +116,10 @@ void CarryManager::initializeCarryData(kernel::KernelBuilder & b, PabloKernel * 
     mCarryMetadata.resize(getScopeCount(entryScope));
 
     mCarryFrameType = analyse(b, entryScope);
-    if (LLVM_UNLIKELY(mCarryFrameType->isEmptyTy())) {
-        // temporary refactoring step
-        kernel->addNonPersistentScalar(mCarryFrameType, "carries");
-    } else {
+
+
+    if (LLVM_LIKELY(!mCarryFrameType->isEmptyTy())) {
+        assert (b.getTypeSize(b.getModule()->getDataLayout(), mCarryFrameType) > 0);
         kernel->addInternalScalar(mCarryFrameType, "carries");
     }
 
@@ -218,8 +218,12 @@ void CarryManager::initializeCodeGen(kernel::KernelBuilder & b) {
     assert(!mCarryMetadata.empty());
     mCarryInfo = &mCarryMetadata[0];
     assert (!mCarryInfo->hasSummary());
-    mCurrentFrame = b.getScalarFieldPtr("carries").first;
 
+    if (LLVM_UNLIKELY(mCarryFrameType->isEmptyTy())) {
+        return;
+    }
+
+    mCurrentFrame = b.getScalarFieldPtr("carries").first;
     mCurrentFrameIndex = 0;
     mCarryScopes = 0;
     mCurrentFrameType = mCarryFrameType;
@@ -250,11 +254,11 @@ void CarryManager::finalizeCodeGen(kernel::KernelBuilder & b) {
     }
     assert (mNestedLoopCarryInMaskPhi == nullptr);
     assert (mCarryFrameStack.empty());
-    assert ("base summary value was deleted!" && mCarrySummaryStack.size() >= 1);
-    assert ("not all summaries were used!" && mCarrySummaryStack.size() == 1);
-    assert ("base summary value was overwritten with non-zero value!" && isa<Constant>(mCarrySummaryStack[0]) && cast<Constant>(mCarrySummaryStack[0])->isNullValue());
+    assert ("base summary value was deleted!" && (mCarryFrameType->isEmptyTy() || mCarrySummaryStack.size() >= 1));
+    assert ("not all summaries were used!" && (mCarryFrameType->isEmptyTy() || mCarrySummaryStack.size() == 1));
+    assert ("base summary value was overwritten with non-zero value!" && (mCarryFrameType->isEmptyTy() || (isa<Constant>(mCarrySummaryStack[0]) && cast<Constant>(mCarrySummaryStack[0])->isNullValue())));
     mCarrySummaryStack.clear();
-    assert (mCarryScopeIndex.size() == 1);
+    assert (mCarryFrameType->isEmptyTy() || mCarryScopeIndex.size() == 1);
     mCarryScopeIndex.clear();
 }
 

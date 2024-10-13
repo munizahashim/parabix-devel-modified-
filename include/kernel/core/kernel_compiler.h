@@ -15,6 +15,7 @@ class KernelCompiler {
 
     friend class PipelineCompiler;
     friend class KernelBuilder;
+    friend class Kernel;
 
 public:
 
@@ -385,6 +386,8 @@ protected:
 
     void captureStreamData(KernelBuilder & b, llvm::Constant * kernelName, llvm::Constant * streamName, llvm::Value * handle, llvm::Value * strideNum, llvm::Type * type, const MemoryOrdering ordering, llvm::Value * streamData, llvm::Value * from, llvm::Value * to) const;
 
+
+
 protected:
 
     virtual std::vector<llvm::Value *> getFinalOutputScalars(KernelBuilder & b);
@@ -426,6 +429,10 @@ protected:
     #ifdef ENABLE_PAPI
     llvm::Value *                   mPAPIEventSetId = nullptr;
     #endif
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    llvm::Value *                   mKernelBasicBlockEntryTracker = nullptr;
+    #endif
+
     Vec<llvm::Value *>              mInputIsClosed;
 
     Vec<llvm::Value *>              mProcessedInputItemPtr;

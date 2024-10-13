@@ -13,7 +13,7 @@ namespace kernel {
 
 void LineNumberGenerator::initialize(KernelBuilder & b) {
     const uint32_t BITS_PER_BYTE = 8;
-    mLineCountArrayBlockPtr = b.CreateAlignedAlloca(b.getBitBlockType(), b.getBitBlockWidth() / BITS_PER_BYTE, mSW.NUM_BLOCKS_PER_STRIDE);
+    mLineCountArrayBlockPtr = b.CreateAlignedAllocaAtEntryPoint(b.getBitBlockType(), b.getBitBlockWidth() / BITS_PER_BYTE, mSW.NUM_BLOCKS_PER_STRIDE);
 }
 
 void LineNumberGenerator::willProcessStride(KernelBuilder & b, Value * const /*strideNo*/) {

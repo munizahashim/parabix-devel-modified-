@@ -364,10 +364,10 @@ Value * IDISA_Builder::mvmd_sll(unsigned fw, Value * value, Value * shift, const
 
     Constant * const FIELD_WIDTH = ConstantInt::get(shiftTy, fw);
     shift = CreateMul(shift, FIELD_WIDTH);
-//    if (LLVM_UNLIKELY(safe && codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-//        Value * const inbounds = CreateICmpULT(shift, BLOCK_WIDTH);
-//        CreateAssert(inbounds, "poison shift value: >= vector width");
-//    }
+    if (LLVM_UNLIKELY(safe && codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+        Value * const inbounds = CreateICmpULT(shift, ConstantInt::get(shiftTy, mBitBlockWidth));
+        CreateAssert(inbounds, "poison shift value: >= vector width");
+    }
     Value * result = nullptr;
     value = CreateBitCast(value, intTy);
 //    if (safe) {
@@ -413,10 +413,10 @@ Value * IDISA_Builder::mvmd_srl(unsigned fw, Value * value, Value * shift, const
     Constant * const FIELD_WIDTH = ConstantInt::get(shiftTy, fw);
 
     shift = CreateMul(shift, FIELD_WIDTH);
-//    if (LLVM_UNLIKELY(safe && codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-//        Value * const inbounds = CreateICmpULT(shift, BLOCK_WIDTH);
-//        CreateAssert(inbounds, "poison shift value: >= vector width");
-//    }
+    if (LLVM_UNLIKELY(safe && codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+        Value * const inbounds = CreateICmpULT(shift, ConstantInt::get(shiftTy, mBitBlockWidth));
+        CreateAssert(inbounds, "poison shift value: >= vector width");
+    }
     Value * result = nullptr;
     value = CreateBitCast(value, intTy);
 //    if (safe) {
@@ -1063,10 +1063,11 @@ Value * IDISA_Builder::mvmd_dslli(unsigned fw, Value * a, Value * b, unsigned sh
         unsigned field32_shift = (shift * fw) / 32;
         unsigned bit_shift = (shift * fw) % 32;
         Value * const L = simd_slli(32, mvmd_dslli(32, a, b, field32_shift), bit_shift);
-        Value * const R = simd_srli(32, mvmd_dslli(32, a, b, field32_shift + 1), 32-bit_shift);
+        Value * const R = simd_srli(32, mvmd_dslli(32, a, b, field32_shift + 1), 32 - bit_shift);
         return fwCast(fw, CreateOr(L, R));
     }
 }
+
 
 Value * IDISA_Builder::mvmd_shuffle(unsigned fw, Value * table, Value * index_vector) {
     if (fw == mBitBlockWidth) {

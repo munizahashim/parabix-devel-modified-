@@ -24,8 +24,10 @@ using namespace boost;
 using boost::container::flat_set;
 using IDISA::FixedVectorType;
 
+
 using boost::intrusive::detail::floor_log2;
 using boost::intrusive::detail::is_pow2;
+using boost::uuids::detail::sha1;
 
 namespace kernel {
 
@@ -35,17 +37,21 @@ using RateId = ProcessingRate::KindId;
 using StreamSetPort = Kernel::StreamSetPort;
 using PortType = Kernel::PortType;
 
-const static auto INITIALIZE_SUFFIX = "_Initialize";
-const static auto INITIALIZE_THREAD_LOCAL_SUFFIX = "_InitializeThreadLocal";
-const static auto GET_EXPECTED_OUTPUT_SIZE_SUFFIX = "_GetExpectedOutputSize";
-const static auto ALLOCATE_SHARED_INTERNAL_STREAMSETS_SUFFIX = "_AllocateSharedInternalStreamSets";
-const static auto ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_SUFFIX = "_AllocateThreadLocalInternalStreamSets";
-const static auto DO_SEGMENT_SUFFIX = "_DoSegment";
-const static auto FINALIZE_THREAD_LOCAL_SUFFIX = "_FinalizeThreadLocal";
-const static auto FINALIZE_SUFFIX = "_Finalize";
+constexpr static auto INITIALIZE_SUFFIX = "_Initialize";
+constexpr static auto INITIALIZE_THREAD_LOCAL_SUFFIX = "_InitializeThreadLocal";
+constexpr static auto GET_EXPECTED_OUTPUT_SIZE_SUFFIX = "_GetExpectedOutputSize";
+constexpr static auto ALLOCATE_SHARED_INTERNAL_STREAMSETS_SUFFIX = "_AllocateSharedInternalStreamSets";
+constexpr static auto ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_SUFFIX = "_AllocateThreadLocalInternalStreamSets";
+constexpr static auto DO_SEGMENT_SUFFIX = "_DoSegment";
+constexpr static auto FINALIZE_THREAD_LOCAL_SUFFIX = "_FinalizeThreadLocal";
+constexpr static auto FINALIZE_SUFFIX = "_Finalize";
 #ifdef ENABLE_PAPI
 const static auto PAPI_INITIALIZE_EVENTSET = "_PAPIInitializeEventSet";
 #endif
+#ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+constexpr static auto KERNEL_ENTRY_POINT_TRACKER_OBJECT = "entryPointTrackerObj";
+#endif
+
 
 const static auto SHARED_SUFFIX = "_shared_state";
 const static auto THREAD_LOCAL_SUFFIX = "_thread_local";
@@ -53,6 +59,11 @@ constexpr static auto STATE_TYPE_METADATA_SUFFIX = "_state_types";
 
 #define BEGIN_SCOPED_REGION {
 #define END_SCOPED_REGION }
+
+#ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+void instrumentBasicBlockEntryPoints(KernelBuilder & b);
+#endif
+
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief isLocalBuffer
@@ -268,6 +279,7 @@ void Kernel::loadCachedKernel(KernelBuilder & b) {
 void Kernel::linkExternalMethods(KernelBuilder & b) {
     auto & driver = b.getDriver();
     Module * const m = b.getModule(); assert (m);
+    b.linkAllNecessaryExternalFunctions();
     for (const LinkedFunction & linked : mLinkedFunctions) {
         driver.addLinkFunction(m, linked.Name, linked.Type, linked.FunctionPtr);
     }
@@ -575,6 +587,9 @@ Function * Kernel::addInitializeDeclaration(KernelBuilder & b) const {
             params.push_back(binding.getType());
         }
         addAdditionalInitializationArgTypes(b, params);
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        params.push_back(b.getVoidPtrTy());
+        #endif
         FunctionType * const initType = FunctionType::get(b.getSizeTy(), params, false);
         initFunc = Function::Create(initType, GlobalValue::ExternalLinkage, funcName, m);
         initFunc->setCallingConv(CallingConv::C);
@@ -600,7 +615,9 @@ Function * Kernel::addInitializeDeclaration(KernelBuilder & b) const {
         for (const Binding & binding : mInputScalars) {
             setNextArgName(binding.getName());
         }
-
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        setNextArgName(KERNEL_ENTRY_POINT_TRACKER_OBJECT);
+        #endif
     }
     return initFunc;
 }
@@ -625,18 +642,36 @@ Function * Kernel::addExpectedOutputSizeDeclaration(KernelBuilder & b) const {
     SmallVector<char, 256> tmp;
     const auto funcName = concat(getName(), GET_EXPECTED_OUTPUT_SIZE_SUFFIX, tmp);
     Module * const m = b.getModule();
-    Function * eosFunc = m->getFunction(funcName);
-    if (LLVM_LIKELY(eosFunc == nullptr)) {
+    Function * func = m->getFunction(funcName);
+    if (LLVM_LIKELY(func == nullptr)) {
         SmallVector<Type *, 1> params;
         if (LLVM_LIKELY(isStateful())) {
             params.push_back(getSharedStateType()->getPointerTo());
         }
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        params.push_back(b.getVoidPtrTy());
+        #endif
         FunctionType * const funcType = FunctionType::get(b.getSizeTy(), params, false);
-        eosFunc = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
-        eosFunc->setCallingConv(CallingConv::C);
-        eosFunc->setDoesNotRecurse();
+        func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
+        func->setCallingConv(CallingConv::C);
+        func->setDoesNotRecurse();
+
+        auto arg = func->arg_begin();
+        auto setNextArgName = [&](const StringRef name) {
+            assert (arg != func->arg_end());
+            arg->setName(name);
+            std::advance(arg, 1);
+        };
+        if (LLVM_LIKELY(isStateful())) {
+            arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
+            setNextArgName("shared");
+        }
+        arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        setNextArgName(KERNEL_ENTRY_POINT_TRACKER_OBJECT);
+        #endif
     }
-    return eosFunc;
+    return func;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -676,6 +711,9 @@ Function * Kernel::addInitializeThreadLocalDeclaration(KernelBuilder & b) const 
                 params.push_back(getSharedStateType()->getPointerTo());
             }
             params.push_back(getThreadLocalStateType()->getPointerTo());
+            #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+            params.push_back(b.getVoidPtrTy());
+            #endif
             PointerType * const retTy = getThreadLocalStateType()->getPointerTo();
             FunctionType * const funcType = FunctionType::get(retTy, params, false);
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
@@ -701,6 +739,9 @@ Function * Kernel::addInitializeThreadLocalDeclaration(KernelBuilder & b) const 
             }
             arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
             setNextArgName("threadlocal");
+            #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+            setNextArgName(KERNEL_ENTRY_POINT_TRACKER_OBJECT);
+            #endif
             assert (arg == func->arg_end());
         }
         assert (func);
@@ -746,6 +787,9 @@ Function * Kernel::addAllocateSharedInternalStreamSetsDeclaration(KernelBuilder 
                 params.push_back(getSharedStateType()->getPointerTo());
             }
             params.push_back(b.getSizeTy());
+            #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+            params.push_back(b.getVoidPtrTy());
+            #endif
 
             FunctionType * const funcType = FunctionType::get(b.getVoidTy(), params, false);
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
@@ -770,6 +814,9 @@ Function * Kernel::addAllocateSharedInternalStreamSetsDeclaration(KernelBuilder 
                 setNextArgName("shared");
             }
             setNextArgName("expectedNumOfStrides");
+            #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+            setNextArgName(KERNEL_ENTRY_POINT_TRACKER_OBJECT);
+            #endif
             assert (arg == func->arg_end());
         }
         assert (func);
@@ -822,7 +869,9 @@ Function * Kernel::addAllocateThreadLocalInternalStreamSetsDeclaration(KernelBui
             }
             params.push_back(getThreadLocalStateType()->getPointerTo());
             params.push_back(b.getSizeTy());
-
+            #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+            params.push_back(b.getVoidPtrTy());
+            #endif
             FunctionType * const funcType = FunctionType::get(b.getVoidTy(), params, false);
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
             func->setCallingConv(CallingConv::C);
@@ -847,6 +896,9 @@ Function * Kernel::addAllocateThreadLocalInternalStreamSetsDeclaration(KernelBui
             }
             setNextArgName("threadLocal");
             setNextArgName("expectedNumOfStrides");
+            #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+            setNextArgName(KERNEL_ENTRY_POINT_TRACKER_OBJECT);
+            #endif
             assert (arg == func->arg_end());
         }
         assert (func);
@@ -962,7 +1014,10 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
         } else if (isMainPipeline || requiresItemCount(output)) {
             fields.push_back(sizeTy); // writable item count
         }
-    }
+    }    
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    fields.push_back(b.getVoidPtrTy());
+    #endif
     return fields;
 }
 
@@ -1059,8 +1114,9 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
             }
 
         }
-
-
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        setNextArgName(KERNEL_ENTRY_POINT_TRACKER_OBJECT);
+        #endif
         //assert (arg == doSegment->arg_end());
     }
     return doSegment;
@@ -1111,7 +1167,9 @@ Function * Kernel::addFinalizeThreadLocalDeclaration(KernelBuilder & b) const {
             PointerType * const threadLocalPtrTy = getThreadLocalStateType()->getPointerTo();
             params.push_back(threadLocalPtrTy);
             params.push_back(threadLocalPtrTy);
-
+            #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+            params.push_back(b.getVoidPtrTy());
+            #endif
             FunctionType * const funcType = FunctionType::get(b.getVoidTy(), params, false);
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
             func->setCallingConv(CallingConv::C);
@@ -1135,6 +1193,9 @@ Function * Kernel::addFinalizeThreadLocalDeclaration(KernelBuilder & b) const {
             }
             setNextArgName("main_thread_local");
             setNextArgName("thread_local");
+            #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+            setNextArgName(KERNEL_ENTRY_POINT_TRACKER_OBJECT);
+            #endif
             assert (arg == func->arg_end());
 
         }
@@ -1186,6 +1247,9 @@ Function * Kernel::addFinalizeDeclaration(KernelBuilder & b) const {
         if (LLVM_LIKELY(hasThreadLocal())) {
             params.push_back(getThreadLocalStateType()->getPointerTo());
         }
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        params.push_back(b.getVoidPtrTy());
+        #endif
         FunctionType * const terminateType = FunctionType::get(resultType, params, false);
         terminateFunc = Function::Create(terminateType, GlobalValue::ExternalLinkage, funcName, m);
         terminateFunc->setCallingConv(CallingConv::C);
@@ -1205,6 +1269,9 @@ Function * Kernel::addFinalizeDeclaration(KernelBuilder & b) const {
         if (LLVM_LIKELY(hasThreadLocal())) {
             (args++)->setName("threadLocal");
         }
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        (args++)->setName(KERNEL_ENTRY_POINT_TRACKER_OBJECT);
+        #endif
         assert (args == terminateFunc->arg_end());
     }
     return terminateFunc;
@@ -1234,7 +1301,6 @@ Value * Kernel::createInstance(KernelBuilder & b) const {
 Value * Kernel::initializeThreadLocalInstance(KernelBuilder & b, ArrayRef<Value *> args) const {
     Value * instance = nullptr;
     if (hasThreadLocal()) {
-        assert (args.size() == ((isStateful() ? 1u : 0u) + (hasThreadLocal() ? 1u : 0u)));
         Function * const init = getInitializeThreadLocalFunction(b);
         instance = b.CreateCall(init->getFunctionType(), init, args);
     }
@@ -1245,7 +1311,6 @@ Value * Kernel::initializeThreadLocalInstance(KernelBuilder & b, ArrayRef<Value 
  * @brief finalizeThreadLocalInstance
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::finalizeThreadLocalInstance(KernelBuilder & b, ArrayRef<Value *> args) const {
-    assert (args.size() == ((isStateful() ? 1u : 0u) + (hasThreadLocal() ? 2u : 0u)));
     Function * const init = getFinalizeThreadLocalFunction(b); assert (init);
     b.CreateCall(init->getFunctionType(), init, args);
 }
@@ -1255,7 +1320,6 @@ void Kernel::finalizeThreadLocalInstance(KernelBuilder & b, ArrayRef<Value *> ar
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * Kernel::finalizeInstance(KernelBuilder & b, ArrayRef<Value *> args) const {
     Function * const termFunc = getFinalizeFunction(b);
-    assert (args.size() == ((isStateful() ? 1u : 0u) + (hasThreadLocal() ? 1u : 0u)));
     Value * result = b.CreateCall(termFunc->getFunctionType(), termFunc, args);
     if (mOutputScalars.empty()) {
         assert (!result || result->getType()->isVoidTy());
@@ -1313,6 +1377,9 @@ Value * Kernel::constructFamilyKernels(KernelBuilder & b, InitArgs & hostArgs, P
             initArgs.push_back(entry.second);
         }
     }
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    initArgs.push_back(params.getEntryPointTracker());
+    #endif
     assert (init->getFunctionType()->getNumParams() == initArgs.size());
     b.CreateCall(init->getFunctionType(), init, initArgs);
     END_SCOPED_REGION
@@ -1383,8 +1450,10 @@ void Kernel::recursivelyConstructFamilyKernels(KernelBuilder & b, InitArgs & arg
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief runOptimizationPasses
  ** ------------------------------------------------------------------------------------------------------------- */
-void Kernel::runOptimizationPasses(KernelBuilder & /* b */) const {
-
+void Kernel::runOptimizationPasses(KernelBuilder & b) const {
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    instrumentBasicBlockEntryPoints(b);
+    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1394,17 +1463,26 @@ void Kernel::runOptimizationPasses(KernelBuilder & /* b */) const {
  ** ------------------------------------------------------------------------------------------------------------- */
 std::string Kernel::getStringHash(const StringRef str) {
 
-    uint32_t digest[5]; // 160 bits in total
-    boost::uuids::detail::sha1 sha1;
+    sha1::digest_type digest;
+
+    constexpr auto length = sizeof(sha1::digest_type);
+
+    sha1 sha1;
     sha1.process_bytes(str.data(), str.size());
     sha1.get_digest(digest);
 
     std::string buffer;
-    buffer.reserve((5 * 8) + 1);
+    buffer.reserve(length * 2 + 1);
     raw_string_ostream out(buffer);
-    for (unsigned i = 0; i < 5; ++i) {
-        out << format_hex_no_prefix(digest[i], 8);
+
+    constexpr static char hex_table[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd','e', 'f'};
+
+    const uint8_t * const d = reinterpret_cast<uint8_t *>(digest);
+    for (size_t i = 0; i < length; ++i) {
+        const auto c = d[i];
+        out << hex_table[(c & 0xF)] << hex_table[(c >> 4)];
     }
+
     out.flush();
 
     return buffer;
@@ -1571,5 +1649,71 @@ std::move(scalar_parameters), std::move(scalar_outputs),
 std::move(internal_scalars)) {
 
 }
+
+#ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+void instrumentBasicBlockEntryPoints(KernelBuilder & b) {
+
+//    Module * const M = b.getModule();
+//    Constant * const modName = b.GetString(M->getName());
+//    IntegerType * const intPtrTy = b.getIntPtrTy(M->getDataLayout());
+//    PointerType * const int8PtrTy = b.getInt8PtrTy();
+
+//    FixedArray<Type *, 4> fields;
+//    fields[0] = int8PtrTy; // mod name
+//    fields[1] = int8PtrTy; // func name
+//    fields[2] = int8PtrTy; // bb name
+//    fields[3] = intPtrTy; // offset
+//    StructType * trackerObjTy = StructType::get(b.getContext(), fields);
+//    PointerType * const trackerObjPtrTy = trackerObjTy->getPointerTo();
+
+//    FixedArray<ConstantInt *, 4> i32;
+//    for (unsigned i = 0; i < 4; ++i) {
+//        i32[i] = b.getInt32(i);
+//    }
+
+//    FixedArray<Value *, 2> index;
+//    index[0] = i32[0];
+
+//    for (Function & F : *M) {
+//        // ignore declarations
+//        if (F.empty()) continue;
+//        Constant * funcName = b.GetString(F.getName());
+//        Value * functionAddr = ConstantExpr::getPtrToInt(&F, intPtrTy);
+//        Value * trackerObj = nullptr;
+//        for (auto & B : F) {
+//            Instruction * firstNonPhi = B.getFirstNonPHIOrDbgOrLifetime();
+//            if (isa<LandingPadInst>(firstNonPhi)) {
+//                assert (!B.isEntryBlock());
+//                continue;
+//            }
+//            assert (B.getLandingPadInst() == nullptr);
+
+//            b.SetInsertPoint(firstNonPhi);
+//            Value * offset = nullptr;
+//            if (B.isEntryBlock()) {
+//                offset = functionAddr;
+//                trackerObj = nullptr;
+//                trackerObj = b.CreatePointerCast(trackerObj, trackerObjPtrTy);
+//                index[1] = i32[0];
+//                b.CreateStore(modName, b.CreateGEP(trackerObjTy, trackerObj, index));
+//                index[1] = i32[1];
+//                b.CreateStore(funcName, b.CreateGEP(trackerObjTy, trackerObj, index));
+//            } else {
+//                Constant * const ba = ConstantExpr::getPtrToInt(BlockAddress::get(&F, &B), intPtrTy);
+//                offset = b.CreateAdd(functionAddr, ba);
+//            }
+//            Constant * bbName = b.GetString(B.getName());
+//            index[1] = i32[2];
+//            b.CreateStore(b.GetString(B.getName()), b.CreateGEP(trackerObjTy, trackerObj, index));
+//            index[1] = i32[3];
+//            b.CreateStore(offset, b.CreateGEP(trackerObjTy, trackerObj, index));
+//        }
+//    }
+
+}
+
+#endif
+
+
 
 }

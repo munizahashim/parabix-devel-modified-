@@ -224,7 +224,13 @@ void PabloCompiler::examineBlock(KernelBuilder & b, const PabloBlock * const blo
                 const Var * const input = mKernel->getInput(i);
                 if (array == input) {
                     const auto & binding = mKernel->getInputStreamSetBinding(i);
-                    if (LLVM_UNLIKELY(!binding.hasLookahead() || binding.getLookahead() < la->getAmount())) {
+                    size_t maxLookAhead = 0;
+                    for (const auto & attr : binding.getAttributes()) {
+                        if (attr.getKind() == kernel::Attribute::KindId::LookAhead) {
+                            maxLookAhead = std::max(maxLookAhead, attr.amount());
+                        }
+                    }
+                    if (LLVM_UNLIKELY(maxLookAhead < la->getAmount())) {
                         std::string tmp;
                         raw_string_ostream out(tmp);
                         array->print(out);
@@ -775,7 +781,7 @@ void PabloCompiler::compileStatement(KernelBuilder & b, const Statement * const 
             const auto result_packs = sourceWidth/2;
             Type * bt = b.getBitBlockType();
             if (LLVM_LIKELY(result_packs > 1)) {
-                value = b.CreateAlloca(ArrayType::get(bt, result_packs));
+                value = b.CreateAllocaAtEntryPoint(ArrayType::get(bt, result_packs));
             }
             Constant * const ZERO = b.getInt32(0);
 
@@ -797,7 +803,7 @@ void PabloCompiler::compileStatement(KernelBuilder & b, const Statement * const 
             const auto result_packs = sourceWidth/2;
             Type * bt = b.getBitBlockType();
             if (LLVM_LIKELY(result_packs > 1)) {
-                value = b.CreateAlloca(ArrayType::get(bt, result_packs));
+                value = b.CreateAllocaAtEntryPoint(ArrayType::get(bt, result_packs));
             }
             Constant * const ZERO = b.getInt32(0);
             for (unsigned i = 0; i < result_packs; ++i) {
@@ -1016,7 +1022,7 @@ Value * PabloCompiler::compileExpression(KernelBuilder & b, const PabloAST * con
 
                 if (LLVM_UNLIKELY(typeId == TypeId::Add || typeId == TypeId::Subtract)) {
 
-                    value = b.CreateAlloca(vTy, b.getInt32(intWidth));
+                    value = b.CreateAllocaAtEntryPoint(vTy, b.getInt32(intWidth));
 
                     for (unsigned i = 0; i < intWidth; ++i) {
                         llvm::Constant * const index = b.getInt32(i);

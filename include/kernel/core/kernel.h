@@ -21,6 +21,8 @@
 #include <string>
 #include <vector>
 
+#define TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+
 namespace llvm { class IndirectBrInst; }
 namespace llvm { class PHINode; }
 
@@ -44,6 +46,7 @@ constexpr static auto KERNEL_ILLUSTRATOR_EXIT_KERNEL = "__illustrator_exit_kerne
 constexpr static auto KERNEL_ILLUSTRATOR_ENTER_LOOP = "__illustrator_enter_loop";
 constexpr static auto KERNEL_ILLUSTRATOR_ITERATE_LOOP = "__illustrator_iterate_loop";
 constexpr static auto KERNEL_ILLUSTRATOR_EXIT_LOOP = "__illustrator_exit_loop";
+
 
 class Kernel : public AttributeSet {
     friend class KernelCompiler;
@@ -114,10 +117,23 @@ public:
             mRelationshipPairMap.insert(std::pair<const Relationship *, PairEntry>(inputScalar, value));
         }
 
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        inline llvm::Value * getEntryPointTracker() const {
+            return mBasicBlockEntryTracker;
+        }
+
+        inline void setEntryPointTracker(llvm::Value * trackerObj) {
+            mBasicBlockEntryTracker = trackerObj;
+        }
+        #endif
+
     private:
         llvm::DenseMap<const Relationship *, llvm::Value *> mRelationshipMap;
         llvm::DenseMap<const Relationship *, PairEntry> mRelationshipPairMap;
         std::array<llvm::Value *, (unsigned)CommandLineScalarType::CommandLineScalarCount> mCommandLineMap{};
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        llvm::Value * mBasicBlockEntryTracker = nullptr;
+        #endif
     };
 
     struct LinkedFunction {

@@ -8,7 +8,6 @@ namespace kernel {
 void PipelineCompiler::bindAdditionalInitializationArguments(KernelBuilder & b, ArgIterator & arg, const ArgIterator & arg_end) {
     bindFamilyInitializationArguments(b, arg, arg_end);
     bindRepeatingStreamSetInitializationArguments(b, arg, arg_end);
-    assert (arg == arg_end);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -265,6 +264,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
         mTarget->addInternalScalar(StructType::get(C, traceStruct),
                                            name + STATISTICS_STRIDES_PER_SEGMENT_SUFFIX, groupId);
     }
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -321,6 +321,9 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
             }
             addFamilyCallInitializationArguments(b, i, args);
             addRepeatingStreamSetInitializationArguments(i, args);
+            #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+            args.push_back(mKernelBasicBlockEntryTracker);
+            #endif
             #ifndef NDEBUG
             for (unsigned j = 0; j != args.size(); ++j) {
                 assert (isFromCurrentFunction(b, args[j], false));
@@ -511,16 +514,19 @@ void PipelineCompiler::generateFinalizeMethod(KernelBuilder & b) {
     initializeScalarValues(b);
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
         setActiveKernel(b, i, true);
-        SmallVector<Value *, 1> params;
+        SmallVector<Value *, 1> args;
         if (LLVM_LIKELY(mKernel->isStateful())) {
             assert (mTarget->isStateful());
-            params.push_back(mKernelSharedHandle);
+            args.push_back(mKernelSharedHandle);
         }
         if (LLVM_UNLIKELY(mKernel->hasThreadLocal())) {
             assert (mTarget->hasThreadLocal());
-            params.push_back(mKernelThreadLocalHandle);
+            args.push_back(mKernelThreadLocalHandle);
         }
-        mScalarValue[i] = callKernelFinalizeFunction(b, params);
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        args.push_back(mKernelBasicBlockEntryTracker);
+        #endif
+        mScalarValue[i] = callKernelFinalizeFunction(b, args);
     }
 
     if (LLVM_UNLIKELY(mGenerateTransferredItemCountHistogram || mGenerateDeferredItemCountHistogram)) {
@@ -556,10 +562,13 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
             }
             args.push_back(mKernelCommonThreadLocalHandle); assert (mKernelCommonThreadLocalHandle);
             args.push_back(mKernelThreadLocalHandle); assert (mKernelThreadLocalHandle);
+            #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+            args.push_back(mKernelBasicBlockEntryTracker);
+            #endif
             callKernelFinalizeThreadLocalFunction(b, args);
-            if (LLVM_UNLIKELY(isKernelFamilyCall(i))) {
-              //  b.CreateFree(mKernelThreadLocalHandle);
-            }
+//            if (LLVM_UNLIKELY(isKernelFamilyCall(i))) {
+//                b.CreateFree(mKernelThreadLocalHandle);
+//            }
         }
     }
 

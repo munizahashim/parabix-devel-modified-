@@ -206,6 +206,10 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
     return false;
 #else
 
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    #error must DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION in config.h
+    #endif
+
     const Kernel * const kernelObj = getKernel(kernel);
 
     bool isExplicitlyMarkedAsStateFree = false;

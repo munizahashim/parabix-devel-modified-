@@ -60,6 +60,7 @@ void KernelCompiler::generateKernel(KernelBuilder & b) {
     // exits without restoring the original compiler state.
     auto const oc = b.getCompiler();
     b.setCompiler(this);
+    b.linkAllNecessaryExternalFunctions();
     constructStreamSetBuffers(b);
     #ifndef NDEBUG
     for (const auto & buffer : mStreamSetInputBuffers) {
@@ -195,16 +196,19 @@ inline void KernelCompiler::callGenerateInitializeMethod(KernelBuilder & b) {
     assert (getHandle() == nullptr);
     if (LLVM_LIKELY(mTarget->isStateful())) {
         setHandle(nextArg());
-        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
-            b.CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::WRITE);
-        }
     }
     initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
     for (const auto & binding : mInputScalars) {
         b.setScalarField(binding.getName(), nextArg());
     }
     bindAdditionalInitializationArguments(b, arg, arg_end);
-    assert (arg == arg_end);    
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    mKernelBasicBlockEntryTracker = nextArg();
+    #endif
+    assert (arg == arg_end);
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect) && mTarget->isStateful())) {
+        b.CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::WRITE);
+    }
     // TODO: we could permit shared managed buffers here if we passed in the buffer
     // into the init method. However, since there are no uses of this in any written
     // program, we currently prohibit it.
@@ -241,11 +245,14 @@ void KernelCompiler::callGenerateExpectedOutputSizeMethod(KernelBuilder & b) {
     };
     if (LLVM_LIKELY(mTarget->isStateful())) {
         setHandle(nextArg());
-        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
-            b.CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::WRITE);
-        }
     }
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    mKernelBasicBlockEntryTracker = nextArg();
+    #endif
     initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect) && mTarget->isStateful())) {
+        b.CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::WRITE);
+    }
     Value * const retVal = mTarget->generateExpectedOutputSizeMethod(b);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect) && mTarget->isStateful())) {
         b.CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::READ);
@@ -281,7 +288,9 @@ inline void KernelCompiler::callGenerateInitializeThreadLocalMethod(KernelBuilde
         if (LLVM_LIKELY(mTarget->isStateful())) {
             setHandle(nextArg());
         }
-
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        mKernelBasicBlockEntryTracker = nextArg();
+        #endif
         StructType * const threadLocalTy = mTarget->getThreadLocalStateType();
         Value * const providedState = b.CreatePointerCast(nextArg(), threadLocalTy->getPointerTo());
         BasicBlock * const allocThreadLocal = BasicBlock::Create(b.getContext(), "allocThreadLocalState", mCurrentMethod);
@@ -325,6 +334,9 @@ inline void KernelCompiler::callGenerateAllocateSharedInternalStreamSets(KernelB
             setHandle(nextArg());
         }
         Value * const expectedNumOfStrides = nextArg();
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        mKernelBasicBlockEntryTracker = nextArg();
+        #endif
         initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
         initializeOwnedBufferHandles(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
         mTarget->generateAllocateSharedInternalStreamSetsMethod(b, expectedNumOfStrides);
@@ -354,6 +366,9 @@ inline void KernelCompiler::callGenerateAllocateThreadLocalInternalStreamSets(Ke
         }
         setThreadLocalHandle(nextArg());
         Value * const expectedNumOfStrides = nextArg();
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        mKernelBasicBlockEntryTracker = nextArg();
+        #endif
         initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
         initializeOwnedBufferHandles(b, InitializeOptions::IncludeThreadLocalScalars);
         mTarget->generateAllocateThreadLocalInternalStreamSetsMethod(b, expectedNumOfStrides);
@@ -541,7 +556,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
             // NOTE: we create a redundant alloca to store the input param so that
             // Mem2Reg can convert it into a PHINode if the item count is updated in
             // a loop; otherwise, it will be discarded in favor of the param itself.
-            AllocaInst * const processedItems = b.CreateAllocaAtEntryPoint(sizeTy);
+            Value * const processedItems = b.CreateAllocaAtEntryPoint(sizeTy);
             b.CreateStore(processed, processedItems);
             mProcessedInputItemPtr[i] = processedItems;
         }
@@ -627,7 +642,7 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
                 Value * const ref = b.CreateLoad(sizeTy, items[port.Number]);
                 produced = b.CreateMulRational(ref, rate.getRate());
             }
-            AllocaInst * const producedItems = b.CreateAllocaAtEntryPoint(sizeTy);
+            Value * const producedItems = b.CreateAllocaAtEntryPoint(sizeTy);
             b.CreateStore(produced, producedItems);
             mProducedOutputItemPtr[i] = producedItems;
         }
@@ -669,7 +684,9 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         }
         mWritableOutputItems[i] = writable;
     }
-
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    mKernelBasicBlockEntryTracker = nextArg();
+    #endif
     assert (arg == args.end());
 
     // initialize the termination signal if this kernel can set it
@@ -799,8 +816,10 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
         } else if (isMainPipeline || requiresItemCount(output)) {
             props.push_back(mWritableOutputItems[i]);
         }
-
     }
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    props.push_back(mKernelBasicBlockEntryTracker);
+    #endif
     return props;
 }
 
@@ -815,6 +834,11 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(KernelBuilder & b) {
     mCurrentMethod = mTarget->getDoSegmentFunction(b);
     mEntryPoint = BasicBlock::Create(b.getContext(), "entry", mCurrentMethod);
     b.SetInsertPoint(mEntryPoint);
+
+//    const DataLayout & dl = b.getModule()->getDataLayout();
+//    IntegerType * intPtrTy = dl.getIntPtrType(b.getContext());
+//    Value * baseFunctionPtrInt = b.CreatePtrToInt(mCurrentMethod, intPtrTy);
+//    b.CallPrintInt(mCurrentMethod->getName().str() + "." + mEntryPoint->getName().str(), baseFunctionPtrInt);
 
     BEGIN_SCOPED_REGION
     Vec<Value *, 64> args;
@@ -858,7 +882,7 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(KernelBuilder & b) {
             // If not, re-loading it here may reduce register pressure / compilation time.
             if (mProducedOutputItemPtr[i]) {
                 assert (isFromCurrentFunction(b, mProducedOutputItemPtr[i], false));
-                produced = b.CreateLoad(sizeTy, mProducedOutputItemPtr[i]);
+                produced = b.CreateAlignedLoad(sizeTy, mProducedOutputItemPtr[i], sizeof(size_t));
             }
             assert (isFromCurrentFunction(b, produced, true));
             Value * vba = buffer->getVirtualBasePtr(b, baseAddress, produced);
@@ -870,10 +894,16 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(KernelBuilder & b) {
         }
     }
 
+    assert (b.GetInsertBlock());
+
+//    Constant * ba = BlockAddress::get(b.GetInsertBlock());
+//    Value * ptr = b.CreateAdd(baseFunctionPtrInt, ConstantExpr::getPtrToInt(ba, intPtrTy));
+//    b.CallPrintInt(b.GetInsertBlock()->getParent()->getName().str() + "." + b.GetInsertBlock()->getName().str(), ptr);
+
     // return the termination signal (if one exists)
     if (mTerminationSignalPtr) {
         assert (isFromCurrentFunction(b, mTerminationSignalPtr, true));
-        b.CreateRet(b.CreateLoad(sizeTy, mTerminationSignalPtr));
+        b.CreateRet(b.CreateAlignedLoad(sizeTy, mTerminationSignalPtr, sizeof(size_t)));
         mTerminationSignalPtr = nullptr;
     } else {
         b.CreateRetVoid();
@@ -901,6 +931,9 @@ inline void KernelCompiler::callGenerateFinalizeThreadLocalMethod(KernelBuilder 
         }
         mCommonThreadLocalHandle = nextArg();
         mThreadLocalHandle = nextArg();
+        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+        mKernelBasicBlockEntryTracker = nextArg();
+        #endif
         initializeScalarMap(b, InitializeOptions::IncludeAndAutomaticallyAccumulateThreadLocalScalars);
         mTarget->generateFinalizeThreadLocalMethod(b);
         b.CreateRetVoid();
@@ -915,14 +948,23 @@ inline void KernelCompiler::callGenerateFinalizeMethod(KernelBuilder & b) {
     mCurrentMethod = mTarget->getFinalizeFunction(b);
     mEntryPoint = BasicBlock::Create(b.getContext(), "entry", mCurrentMethod);
     b.SetInsertPoint(mEntryPoint);
-    auto args = mCurrentMethod->arg_begin();
+    auto arg = mCurrentMethod->arg_begin();
+    auto nextArg = [&]() {
+        assert (arg != mCurrentMethod->arg_end());
+        Value * const v = &*arg;
+        std::advance(arg, 1);
+        return v;
+    };
     if (LLVM_LIKELY(mTarget->isStateful())) {
-        setHandle(&*(args++));
+        setHandle(nextArg());
     }
     if (LLVM_LIKELY(mTarget->hasThreadLocal())) {
-        setThreadLocalHandle(&*(args++));
+        setThreadLocalHandle(nextArg());
     }
-    assert (args == mCurrentMethod->arg_end());
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    mKernelBasicBlockEntryTracker = nextArg();
+    #endif
+    assert (arg == mCurrentMethod->arg_end());
     initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
         b.CreateMProtect(mTarget->getSharedStateType(), mSharedHandle,CBuilder::Protect::WRITE);
@@ -967,6 +1009,8 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
     StructType * const sharedTy = mTarget->getSharedStateType();
 
     StructType * const threadLocalTy = mTarget->getThreadLocalStateType();
+
+    DataLayout DL(b.getModule());
 
     #ifndef NDEBUG
     auto verifyStateType = [](Value * const handle, StructType * const stateType) {
@@ -1041,7 +1085,6 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
 
     std::vector<unsigned> sharedIndex(sharedGroups.size() + 2, 0);
     std::vector<unsigned> threadLocalIndex(threadLocalGroups.size(), 0);
-
 
     BasicBlock * combineToMainThreadLocal = nullptr;
 
@@ -1149,10 +1192,11 @@ void KernelCompiler::initializeScalarMap(KernelBuilder & b, const InitializeOpti
 
                                 if (idx == size) {
                                     Value * const scalarPtr = b.CreateGEP(scalarType, scalar, indices);
-                                    Value * const scalarVal = b.CreateLoad(elemTy, scalarPtr);
+                                    const auto align = b.getTypeSize(DL, elemTy);
+                                    Value * const scalarVal = b.CreateAlignedLoad(elemTy, scalarPtr, align);
                                     assert (scalarVal->getType()->isIntOrIntVectorTy());
                                     Value * const mainScalarPtr = b.CreateGEP(scalarType, mainScalar, indices);
-                                    Value * mainScalarVal = b.CreateLoad(elemTy, mainScalarPtr);
+                                    Value * mainScalarVal = b.CreateAlignedLoad(elemTy, mainScalarPtr, align);
                                     assert (scalarVal->getType() == mainScalarVal->getType());
                                     switch (binding.getAccumulationRule()) {
                                         case AccumRule::Sum:
@@ -1389,6 +1433,7 @@ KernelCompiler::ScalarRef KernelCompiler::getScalarFieldPtr(KernelBuilder & b, c
         SmallVector<char, 256> tmp;
         raw_svector_ostream out(tmp);
         out << "Scalar map for " << getName() << " was not initialized prior to calling getScalarFieldPtr";
+        assert (false);
         report_fatal_error(Twine(out.str()));
     } else {
         const auto f = mScalarFieldMap.find(name);
@@ -1532,6 +1577,9 @@ void KernelCompiler::clearInternalStateAfterCodeGen() {
     mEntryPoint = nullptr;
     mIsFinal = nullptr;
     mNumOfStrides = nullptr;
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    mKernelBasicBlockEntryTracker = nullptr;
+    #endif
     mTerminationSignalPtr = nullptr;
     const auto numOfInputs = getNumOfStreamInputs();
     reset(mInputIsClosed, numOfInputs);

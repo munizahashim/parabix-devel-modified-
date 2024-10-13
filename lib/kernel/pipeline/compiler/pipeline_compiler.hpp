@@ -226,6 +226,7 @@ public:
     void readDoSegmentState(KernelBuilder & b, StructType * const threadStructTy, Value * const propertyState);
     void restoreDoSegmentState(const std::vector<llvm::Value *> & S);
 
+    void writeProcessThreadMessage(KernelBuilder & b, StringRef label, StructType * const threadStateTy, Value * const threadState) const;
     inline Value * isProcessThread(KernelBuilder & b, StructType * const threadStateTy, Value * const threadState) const;
     void updateExternalProducedItemCounts(KernelBuilder & b);
     void writeMaximumStrideLengthMetadata(KernelBuilder & b) const;
@@ -598,7 +599,7 @@ public:
 
 protected:
 
-    CompilerAllocator                         mAllocator;
+    CompilerAllocator                           mAllocator;
 
     const bool                                  CheckAssertions;
     const bool                                  mTraceProcessedProducedItemCounts;
@@ -678,6 +679,9 @@ protected:
     Value *                                     mKernelCommonThreadLocalHandle = nullptr;
     Value *                                     mSegNo = nullptr;
     Value *                                     mNumOfFixedThreads = nullptr;
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    Value *                                     mEntryPointTrackerObject = nullptr;
+    #endif
 
     PHINode *                                   mPartitionExitSegNoPhi = nullptr;
 
@@ -704,8 +708,8 @@ protected:
     Value *                                     mExpectedNumOfStridesMultiplier = nullptr;
     Value *                                     mThreadLocalSizeMultiplier = nullptr;
 
-    Vec<AllocaInst *, 16>                       mAddressableItemCountPtr;
-    Vec<AllocaInst *, 16>                       mVirtualBaseAddressPtr;
+    Vec<Value *, 16>                            mAddressableItemCountPtr;
+    Vec<Value *, 16>                            mVirtualBaseAddressPtr;
     FixedVector<PHINode *>                      mInitiallyAvailableItemsPhi;
     FixedVector<Value *>                        mKernelIsClosed;
     FixedVector<Value *>                        mLocallyAvailableItems;
