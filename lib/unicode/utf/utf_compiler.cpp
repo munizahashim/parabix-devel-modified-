@@ -1434,7 +1434,9 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, 
     if (UnifiedBasisBytes >= (lgth - code_unit + 1)) {
         Basis_Set UnifiedBasis = prepareUnifiedBasis(enclosing.range);
         Unicode_Range_Compiler range_compiler(UnifiedBasis, mSeqData[k].targets, pb);
-        range_compiler.compile(rangeCCs, enclosing);
+        PabloAST * enclosing_test = adjustPosition(enclosing.test, enclosing.testPosition, lgth, pb);
+        EnclosingInfo info{enclosing.range, enclosing_test, lgth};
+        range_compiler.compile(rangeCCs, info);
         return;
     }
 
@@ -1664,7 +1666,7 @@ void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
             llvm::errs() << "scope = " << scope << ", variable_bits = " << variable_bits << ", prefix_bits = " << prefix_bits << "\n";
         }
     }
-    mSeqData[scope].test = pb.createAdvance(mSeqData[scope].test, scope);
+    //mSeqData[scope].test = pb.createAdvance(mSeqData[scope].test, scope);
 }
 
 PabloAST * U8_Advance_Compiler::compileCodeUnit(re::CC * unitCC, unsigned unitPos, PabloBuilder & pb) {
