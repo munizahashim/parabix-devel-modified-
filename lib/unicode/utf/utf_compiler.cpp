@@ -990,8 +990,15 @@ protected:
     Target_List             mTargets;
     Basis_Set               mBasis;
     Basis_Set prepareUnifiedBasis(Range basis_range);
-    void createInitialHierarchy(CC_List & ccs);
 };
+
+Basis_Set U21_Compiler::prepareUnifiedBasis(Range basis_range) {
+    Basis_Set basis(ceil_log2(basis_range.hi));
+    for (unsigned i = 0; i < basis.size(); i++) {
+        basis[i] = mBasis[i];
+    }
+    return basis;
+}
 
 void U21_Compiler::compile(Target_List targets, CC_List ccs) {
     //  Initialize all the target vars to 0.
@@ -1008,18 +1015,6 @@ void U21_Compiler::compile(Target_List targets, CC_List ccs) {
     for (unsigned i = streamCount; i < mCodeUnitBits; i++) {
         mBasis[i] = mPB.createZeroes();
     }
-    createInitialHierarchy(ccs);
-}
-
-Basis_Set U21_Compiler::prepareUnifiedBasis(Range basis_range) {
-    Basis_Set basis(ceil_log2(basis_range.hi));
-    for (unsigned i = 0; i < basis.size(); i++) {
-        basis[i] = mBasis[i];
-    }
-    return basis;
-}
-
-void U21_Compiler::createInitialHierarchy(CC_List & ccs) {
     if (UTF_CompilationTracing) {
         llvm::errs() << "U21_Compiler\n";
     }
@@ -1039,25 +1034,24 @@ void U21_Compiler::createInitialHierarchy(CC_List & ccs) {
         EnclosingInfo ASCII_info(ASCII_Range, mPB.createNot(nonASCII));
         ASCII_compiler.compile(ccs, ASCII_info);
         auto nested = mPB.createScope();
-        mPB.createIf(combineAnd(mMask, nonASCII, mPB), nested);
+        PabloAST * test = combineAnd(mMask, nonASCII, mPB);
+        mPB.createIf(test, nested);
         Range nonASCII_Range{0x80, 0x10FFFF};
         CC_List nonASCII_ccs(ccs.size());
         extract_CCs_by_range(nonASCII_Range, ccs, nonASCII_ccs);
-        Basis_Set UnifiedBasis = prepareUnifiedBasis(nonASCII_Range);
-        Unicode_Range_Compiler range_compiler(UnifiedBasis, mTargets, nested);
-        EnclosingInfo nonASCII_info(nonASCII_Range, mMask);
+        Unicode_Range_Compiler range_compiler(mBasis, mTargets, nested);
+        EnclosingInfo nonASCII_info(nonASCII_Range, test);
         range_compiler.compile(nonASCII_ccs, nonASCII_info);
     } else {
         Range UnicodeRange{0, 0x10FFFF};
-        Basis_Set UnifiedBasis = prepareUnifiedBasis(UnicodeRange);
         if (mMask) {
             auto nested = mPB.createScope();
             mPB.createIf(mMask, nested);
-            Unicode_Range_Compiler range_compiler(UnifiedBasis, mTargets, nested);
+            Unicode_Range_Compiler range_compiler(mBasis, mTargets, nested);
             EnclosingInfo Unicode_info(UnicodeRange, mMask);
             range_compiler.compile(ccs, Unicode_info);
         } else {
-            Unicode_Range_Compiler range_compiler(UnifiedBasis, mTargets, mPB);
+            Unicode_Range_Compiler range_compiler(mBasis, mTargets, mPB);
             EnclosingInfo Unicode_info(UnicodeRange, mPB.createOnes());
             range_compiler.compile(ccs, Unicode_info);
         }
