@@ -120,7 +120,6 @@ Value * PipelineCompiler::readConsumedItemCount(KernelBuilder & b, const size_t 
 #else
 
     assert (in_degree(streamSet, mBufferGraph) > 0);
-    assert (parent(streamSet, mBufferGraph) == mKernelId);
 
     Value * itemCount = nullptr;
     if (out_degree(streamSet, mConsumerGraph) == 0) {

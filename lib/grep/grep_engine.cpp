@@ -538,12 +538,10 @@ void GrepEngine::grepPrologue(kernel::PipelineBuilder & P, StreamSet * SourceStr
         P.captureBitstream("mLineBreakStream", mLineBreakStream);
     }
     auto u8_LB = new PreDefined(mLineBreakStream);//, std::make_pair(0, 0), 1);
-
+    mExternalTable.declareExternal(u8, "$", u8_LB);
     if (UnicodeIndexing) {
         auto Unicode = mExternalTable.getStreamIndex(cc::Unicode.getCode());
         mExternalTable.declareExternal(Unicode, "$", new FilterByMaskExternal(u8, {"u8index", "$"}, u8_LB));
-    } else {
-        mExternalTable.declareExternal(u8, "$", u8_LB);
     }
 }
 
@@ -1246,11 +1244,9 @@ void * DoGrepThreadFunction(void *args) {
 
 bool GrepEngine::searchAllFiles() {
 
-    const auto t = std::min<size_t>(codegen::TaskThreads, mFileGroups.size());
+    std::vector<pthread_t> threads(codegen::TaskThreads);
 
-    std::vector<pthread_t> threads(t);
-
-    for(unsigned long i = 1; i < t; ++i) {
+    for(unsigned long i = 1; i < codegen::TaskThreads; ++i) {
         const int rc = pthread_create(&threads[i], nullptr, DoGrepThreadFunction, (void *)this);
         if (rc) {
             llvm::report_fatal_error(llvm::StringRef("Failed to create thread: code ") + std::to_string(rc));
@@ -1258,7 +1254,7 @@ bool GrepEngine::searchAllFiles() {
     }
     // Main thread also does the work;
     DoGrepThreadMethod();
-    for(unsigned i = 1; i < t; ++i) {
+    for(unsigned i = 1; i < codegen::TaskThreads; ++i) {
         void * status = nullptr;
         const int rc = pthread_join(threads[i], &status);
         if (rc) {

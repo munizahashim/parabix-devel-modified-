@@ -814,11 +814,6 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(KernelBuilder & b) {
     mEntryPoint = BasicBlock::Create(b.getContext(), "entry", mCurrentMethod);
     b.SetInsertPoint(mEntryPoint);
 
-//    const DataLayout & dl = b.getModule()->getDataLayout();
-//    IntegerType * intPtrTy = dl.getIntPtrType(b.getContext());
-//    Value * baseFunctionPtrInt = b.CreatePtrToInt(mCurrentMethod, intPtrTy);
-//    b.CallPrintInt(mCurrentMethod->getName().str() + "." + mEntryPoint->getName().str(), baseFunctionPtrInt);
-
     BEGIN_SCOPED_REGION
     Vec<Value *, 64> args;
     args.reserve(mCurrentMethod->arg_size());
@@ -872,12 +867,6 @@ inline void KernelCompiler::callGenerateDoSegmentMethod(KernelBuilder & b) {
             b.CreateStore(vba, mUpdatableOutputBaseVirtualAddressPtr[i]);
         }
     }
-
-    assert (b.GetInsertBlock());
-
-//    Constant * ba = BlockAddress::get(b.GetInsertBlock());
-//    Value * ptr = b.CreateAdd(baseFunctionPtrInt, ConstantExpr::getPtrToInt(ba, intPtrTy));
-//    b.CallPrintInt(b.GetInsertBlock()->getParent()->getName().str() + "." + b.GetInsertBlock()->getName().str(), ptr);
 
     // return the termination signal (if one exists)
     if (mTerminationSignalPtr) {

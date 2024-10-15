@@ -43,14 +43,6 @@ static constexpr auto ALIGNED_ALLOC_NAME = "std_aligned_alloc";
 #include <llvm/Analysis/AliasAnalysis.h>
 #include <sanitizer/asan_interface.h>
 #endif
-#ifdef REPLACE_ALL_ALLOCAS_WITH_MALLOCS
-#include <mutex>
-#include <boost/container/flat_map.hpp>
-#include <boost/icl/separate_interval_set.hpp>
-#include <llvm/ADT/DenseMap.h>
-#include <util/slab_allocator.h>
-using namespace boost::icl;
-#endif
 
 #if defined(__i386__)
 #define PRIdsz PRId32
@@ -91,8 +83,6 @@ using namespace boost::icl;
 #define BEGIN_SCOPED_REGION {
 #define END_SCOPED_REGION }
 
-#define ASSERTION_PASS_REPLACES_ALL_ALLOCAS_WITH_MALLOCS
-
 using namespace llvm;
 
 static int accumulatedFreeCalls = 0;
@@ -103,225 +93,6 @@ extern "C" void free_debug_wrapper(void * ptr) {
         free(ptr);
     }
 }
-
-#if 0
-
-static std::mutex __tracker_lock;
-
-using MallocSet = separate_interval_set<uintptr_t, ICL_COMPARE_INSTANCE(ICL_COMPARE_DEFAULT, uintptr_t), right_open_interval<uintptr_t>>;
-
-using elem_t = std::pair<uintptr_t, uintptr_t>;
-
-using AllocaSet = interval_set<uintptr_t, ICL_COMPARE_INSTANCE(ICL_COMPARE_DEFAULT, uintptr_t), right_open_interval<uintptr_t>>;
-
-struct AllocaSetList {
-    AllocaSet Set;
-    AllocaSetList * Next = nullptr;
-};
-
-
-using PerThreadAllocaMap = boost::container::flat_map<pthread_t, std::unique_ptr<AllocaSetList>>;
-
-static MallocSet __malloc_map;
-
-static PerThreadAllocaMap __alloca_map;
-
-extern "C" size_t __track_enter_scope() {
-
-    PerThreadAllocaMap::const_iterator perThread;
-    const auto id = pthread_self();
-    BEGIN_SCOPED_REGION
-    std::lock_guard<std::mutex> L(__tracker_lock);
-    errs() << "entering scope " << id << "\n";
-    perThread = __alloca_map.find(id);
-    if (LLVM_UNLIKELY(perThread == __alloca_map.end())) {
-        __alloca_map.emplace(id, std::make_unique<AllocaSetList>());
-        return 1;
-    }
-    END_SCOPED_REGION
-
-    AllocaSetList * A = perThread->second.get();
-    while (A->Next) {
-        A = A->Next;
-    }
-    A->Next = new AllocaSetList();
-
-
-
-    return 1;
-}
-
-extern "C" size_t __track_exit_scope() {
-
-    PerThreadAllocaMap::const_iterator perThread;
-    const auto id = pthread_self();
-    BEGIN_SCOPED_REGION
-    std::lock_guard<std::mutex> L(__tracker_lock);
-    perThread = __alloca_map.find(id);
-    assert (perThread != __alloca_map.end());
-    END_SCOPED_REGION
-
-    AllocaSetList * A = perThread->second.get();
-    AllocaSetList * N = A->Next;
-    if (N == nullptr) {
-        A->Set.clear();
-        std::lock_guard<std::mutex> L(__tracker_lock);
-        __alloca_map.erase(perThread);
-    } else {
-        while (N->Next) {
-            A = N;
-            N = N->Next;
-        }
-        assert (A && N && A->Next == N);
-        A->Next = nullptr;
-        delete N;
-    }
-
-    return 1;
-}
-
-extern "C" size_t __track_alloca(void * ptr, size_t size) {
-
-    return 0;/*
-
-    PerThreadAllocaMap::const_iterator perThread;
-
-    const auto id = pthread_self();
-
-    errs() << "track alloca scope " << id << "\n";
-
-    BEGIN_SCOPED_REGION
-    std::lock_guard<std::mutex> L(__tracker_lock);
-    perThread = __alloca_map.find(id);
-    if (LLVM_UNLIKELY(perThread == __alloca_map.end())) {
-        return 0;
-    }
-    END_SCOPED_REGION
-
-    AllocaSetList * A = perThread->second.get();
-    while (A->Next) {
-        A = A->Next;
-    }
-
-    AllocaSet & alloca_map = A->Set;
-
-    alloca_map += right_open_interval<uintptr_t>((uintptr_t)ptr, (uintptr_t)ptr + (uintptr_t)size);
-
-    return 1;*/
-}
-
-Value * __CreateTrackAlloca(CBuilder & b, Value * ptr, Value * size) {
-    Module * m = b.getModule();
-    Function * fn = m->getFunction("__track_alloca");
-    if (fn == nullptr) {
-        fn = b.LinkFunction("__track_alloca", __track_alloca);
-    }
-    FixedArray<Value *, 2> args;
-    args[0] = ptr;
-    args[1] = size;
-    return b.CreateCall(fn->getFunctionType(), fn, args);
-}
-
-#define CreateTrackAlloca(ptr, size) \
-    __CreateAssert(CreateIsNotNull(__CreateTrackAlloca(*this, ptr, size)), "Attempted to alloc an allocated address %" PRIx64, {ptr})
-
-extern "C" size_t __track_malloc(void * ptr, size_t size) {
-    std::lock_guard<std::mutex> L(__tracker_lock);
-    if (LLVM_UNLIKELY(boost::icl::intersects(__malloc_map, right_open_interval<uintptr_t>((uintptr_t)ptr, (uintptr_t)ptr + (uintptr_t)size)))) {
-        assert (false);
-        return 0;
-    }
-    __malloc_map += right_open_interval<uintptr_t>((uintptr_t)ptr, (uintptr_t)ptr + (uintptr_t)size);
-    #ifndef NDEBUG
-    auto f = __malloc_map.find((uintptr_t)ptr);
-    assert (f->lower()== (uintptr_t)ptr);
-    assert (f->upper()== (uintptr_t)ptr + (uintptr_t)size);
-    #endif
-    return 1;
-}
-
-extern "C" size_t __track_load_or_store_attempt(void * ptr, size_t size) {
-    PerThreadAllocaMap::const_iterator perThread;
-    BEGIN_SCOPED_REGION
-    std::lock_guard<std::mutex> L(__tracker_lock);
-    if (LLVM_UNLIKELY(boost::icl::contains(__malloc_map, right_open_interval<uintptr_t>((uintptr_t)ptr, (uintptr_t)ptr + (uintptr_t)size)))) {
-        return 1;
-    }
-    perThread = __alloca_map.find(pthread_self());
-    if (LLVM_UNLIKELY(perThread == __alloca_map.end())) {
-        report_fatal_error("No thread scope allocated?");
-    }
-    assert (perThread != __alloca_map.end());
-    END_SCOPED_REGION
-    AllocaSetList * A = perThread->second.get();
-    while (A) {
-        AllocaSet & alloca_map = A->Set;
-        if (LLVM_UNLIKELY(boost::icl::contains(alloca_map, right_open_interval<uintptr_t>((uintptr_t)ptr, (uintptr_t)ptr + (uintptr_t)size)))) {
-            return 1;
-        }
-        A = A->Next;
-    }
-
-    return 0;
-}
-
-extern "C" size_t __track_free(void * ptr) {
-    if (ptr) {
-        std::lock_guard<std::mutex> L(__tracker_lock);
-        auto f = boost::icl::find(__malloc_map, (uintptr_t)ptr);
-        if (f == __malloc_map.end() || f->lower() != (uintptr_t)ptr) {
-            return 0;
-        }
-        __malloc_map.erase(f);
-   }
-   return 1;
-}
-
-Value * __CreateTrackMalloc(CBuilder & b, Value * ptr, Value * size) {
-    Module * m = b.getModule();
-    Function * fn = m->getFunction("__track_malloc");
-    if (fn == nullptr) {
-        fn = b.LinkFunction("__track_malloc", __track_malloc);
-    }
-    FixedArray<Value *, 2> args;
-    args[0] = ptr;
-    args[1] = size;
-    return b.CreateCall(fn->getFunctionType(), fn, args);
-}
-
-#define CreateTrackMalloc(ptr, size) \
-    __CreateAssert(CreateIsNotNull(__CreateTrackMalloc(*this, ptr, size)), "Attempted to malloc an allocated address %" PRIx64, {ptr})
-
-Value * __CreateTrackLoadOrStoreAttempt(CBuilder & b, Value * ptr, Value * size) {
-    Module * m = b.getModule();
-    Function * fn = m->getFunction("__track_load_or_store_attempt");
-    if (fn == nullptr) {
-        fn = b.LinkFunction("__track_load_or_store_attempt", __track_load_or_store_attempt);
-    }
-    FixedArray<Value *, 2> args;
-    args[0] = ptr;
-    args[1] = size;
-    return b.CreateCall(fn->getFunctionType(), fn, args);
-}
-
-#define CreateTrackLoadOrStoreAttempt(name, ptr, size) \
-    __CreateAssert(CreateIsNotNull(__CreateTrackLoadOrStoreAttempt(*this, ptr, size)), "Illegal %" PRIx64 "-byte %s call on address %" PRIx64, {size, name, ptr})
-
-Value * __CreateTrackTree(CBuilder & b, Value * ptr) {
-    Module * m = b.getModule();
-    Function * fn = m->getFunction("__track_free");
-    if (fn == nullptr) {
-        fn = b.LinkFunction("__track_free", __track_free);
-    }
-    FixedArray<Value *, 1> args;
-    args[0] = ptr;
-    return b.CreateCall(fn->getFunctionType(), fn, args);
-}
-
-#define CreateTrackFree(ptr) \
-    __CreateAssert(CreateIsNotNull(__CreateTrackTree(*this, ptr)), "Attempted to free an unallocated address %" PRIx64, {ptr})
-
-#endif
 
 Value * CBuilder::CreateURem(Value * const number, Value * const divisor, const Twine Name) {
     if (ConstantInt * const c = dyn_cast<ConstantInt>(divisor)) {
@@ -2178,13 +1949,9 @@ void CBuilder::CheckAddress(Value * const Ptr, Value * const Size, Constant * co
     __CreateAssert(CreateOr(CreateIsNotNull(Ptr), CreateIsNull(Size)), "%s was given a null address", {Name});
 
 
-    DataLayout DL(getModule());
-    IntegerType * const intPtrTy = getIntPtrTy(DL);
-//    Value * intPtr = CreatePtrToInt(Ptr, intPtrTy);
-
-//    __CreateAssert(CreateICmpUGT(intPtr, ConstantInt::get(intPtrTy, 1000000000)), "%s is too low %" PRIx64, {Name, intPtr});
-
     if (AllocaInst * Base = resolveStackAddress(Ptr)) {
+        IntegerType * const intPtrTy = getIntPtrTy(getModule()->getDataLayout());
+
         Value * sz = getTypeSize(Base->getAllocatedType(), intPtrTy);
         if (notConstantZeroArraySize(Base)) {
             sz = CreateMul(sz, CreateZExtOrTrunc(Base->getArraySize(), intPtrTy));
@@ -2206,21 +1973,17 @@ void CBuilder::CheckAddress(Value * const Ptr, Value * const Size, Constant * co
         if (LLVM_UNLIKELY(isPoisoned == nullptr)) {
             FunctionType * const funcTy = FunctionType::get(voidPtrTy, {voidPtrTy, sizeTy}, false);
             isPoisoned = LinkFunction( "__asan_region_is_poisoned", funcTy, (void*)__asan_region_is_poisoned);
-//            isPoisoned = Function::Create(FunctionType::get(voidPtrTy, {voidPtrTy, sizeTy}, false), Function::ExternalLinkage, "__asan_region_is_poisoned", m);
             isPoisoned->setCallingConv(CallingConv::C);
             isPoisoned->setReturnDoesNotAlias();
         }
         Value * const addr = CreatePointerCast(Ptr, voidPtrTy);
         Value * const firstPoisoned = CreateCall(isPoisoned->getFunctionType(), isPoisoned, { addr, CreateTrunc(Size, sizeTy) });
         Value * const valid = CreateICmpEQ(firstPoisoned, ConstantPointerNull::get(voidPtrTy));
-//        DataLayout DL(getModule());
-//        IntegerType * const intPtrTy = cast<IntegerType>(DL.getIntPtrType(firstPoisoned->getType()));
+        IntegerType * const intPtrTy = getIntPtrTy(getModule()->getDataLayout());
         Value * const startInt = CreatePtrToInt(Ptr, intPtrTy);
         Value * const firstPoisonedInt = CreatePtrToInt(firstPoisoned, intPtrTy);
         Value * const offset = CreateSub(firstPoisonedInt, startInt);
         __CreateAssert(valid, "%s was given an unallocated %" PRIuMAX "-byte memory address 0x%" PRIxPTR " (first poisoned=%" PRIuMAX ")", {Name, Size, Ptr, offset});
-//    } else {
-//        report_fatal_error("No Addr Sanitizer?");
 //    }
     #endif
 }
@@ -2314,59 +2077,6 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
         for (auto & B : F) { 
             for (auto i = B.begin(); i != B.end(); ) {
                 Instruction & inst = *i;
-
-//                if (isa<AllocaInst>(inst)) {
-//                    AllocaInst & A = cast<AllocaInst>(inst);
-//                    Type * type = A.getAllocatedType();
-
-//                    uintptr_t size = 0;
-//                    const DataLayout & DL = M.getDataLayout();
-//                    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
-//                    size = DL.getTypeAllocSize(type);
-//                    #elif LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(16, 0, 0)
-//                    size = DL.getTypeAllocSize(type).getFixedSize();
-//                    #else
-//                    size = DL.getTypeAllocSize(type).getFixedValue();
-//                    #endif
-
-//                    if (LLVM_UNLIKELY(size == 0)) {
-//                        SmallVector<char, 512> tmp;
-//                        raw_svector_ostream msg(tmp);
-//                        msg << "Warning: use of 0-length type ";
-//                        type->print(msg);
-//                        msg << " in alloca " << F.getName() << " : ";
-//                        inst.print(msg);
-//                        msg << "\n";
-//                        report_fatal_error(msg.str());
-//                    }
-
-
-
-//                    #ifdef ASSERTION_PASS_REPLACES_ALL_ALLOCAS_WITH_MALLOCS
-//                    Function * fAlignedAlloc = M.getFunction(ALIGNED_ALLOC_NAME); assert (fAlignedAlloc);
-//                    FixedArray<Value *, 2> args;
-//                    IntegerType * intTy = IntegerType::get(M.getContext(), sizeof(size_t) * 8);
-//                    args[0] = ConstantInt::get(intTy, A.getAlign().value());
-//                    args[1] = ConstantInt::get(intTy, size);
-//                    Value * mallocedVal = CallInst::Create(fAlignedAlloc->getFunctionType(), fAlignedAlloc, args, "", &A);
-
-////                    errs() << " replacing " << F.getName() << " : ";
-////                    inst.print(errs());
-////                    errs() << "   with  ";
-////                    mallocedVal->print(errs());
-////                    errs() << "\n";
-
-//                    mallocedVal = CastInst::CreatePointerCast(mallocedVal, A.getType(), "", &A);
-//                    assert (A.getNumUses() > 0);
-//                    A.replaceAllUsesWith(mallocedVal);
-//                    assert (A.getNumUses() == 0);
-//                    i = A.eraseFromParent();
-//                    continue;
-//                    #endif
-//                }
-
-
-
                 if (LLVM_UNLIKELY(isa<CallInst>(inst))) {
                     CallInst & ci = cast<CallInst>(inst);
                     auto isIndirectCall = [&]() {
