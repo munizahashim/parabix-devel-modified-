@@ -51,7 +51,7 @@ public:
     ~ExternalStreamTable();
 private:
     std::vector<StreamIndexInfo> mStreamIndices;
-    std::vector<std::map<std::string, std::unique_ptr<ExternalStreamObject>>> mExternalMap;
+    std::vector<std::map<std::string, ExternalStreamObject *>> mExternalMap; // <-- memory leak
     ParabixIllustrator * mIllustrator;
 };
 

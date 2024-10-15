@@ -594,21 +594,6 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         return v;
     };
     SmallVector<Value *, 16> segmentArgs(doSegment->arg_size());
-
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    PointerType * const int8PtrTy = b.getInt8PtrTy();
-    IntegerType * const intPtrTy = b.getIntPtrTy(m->getDataLayout());
-    FixedArray<Type *, 4> fields;
-    fields[0] = int8PtrTy; // mod name
-    fields[1] = int8PtrTy; // func name
-    fields[2] = int8PtrTy; // bb name
-    fields[3] = intPtrTy; // offset
-    StructType * trackerObjTy = StructType::get(b.getContext(), fields);
-    Value * const trackerObj = b.CreateAlignedMalloc(b.getTypeSize(trackerObjTy), sizeof(void*));
-    #endif
-
-
-
     auto segmentArgCount = suppliedArgs;
 
     if (LLVM_UNLIKELY(numOfStreamSets > 0)) {
@@ -652,17 +637,10 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
             segmentArgs[segmentArgCount++] = b.CreateLoad(int64Ty, itemPtr);
         }
     }
-
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    segmentArgs[segmentArgCount++] = trackerObj;
-    #endif
     assert (segmentArgCount == doSegment->arg_size());
 
     Value * sharedHandle = nullptr;
     NestedStateObjs toFree;
-//    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-//    toFree.push_back(trackerObj);
-//    #endif
     ParamMap paramMap;
 
     // construct any repeating streamsets and add them to the map
@@ -732,10 +710,6 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         paramMap.set(scalar, value);
     }
 
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    paramMap.setEntryPointTracker(trackerObj);
-    #endif
-
     InitArgs args;
     sharedHandle = constructFamilyKernels(b, args, paramMap, toFree);
     assert (isStateful() || sharedHandle == nullptr);
@@ -751,9 +725,6 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
             args.push_back(sharedHandle);
         }
         args.push_back(ConstantPointerNull::get(getThreadLocalStateType()->getPointerTo()));
-        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-        args.push_back(trackerObj);
-        #endif
         threadLocalHandle = initializeThreadLocalInstance(b, args);
         segmentArgs[argCount++] = threadLocalHandle;
         toFree.push_back(threadLocalHandle);
@@ -775,9 +746,6 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
         }
         // pass in the desired number of segments
         allocArgs.push_back(sz_ONE);
-        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-        allocArgs.push_back(trackerObj);
-        #endif
         b.CreateCall(allocShared->getFunctionType(), allocShared, allocArgs);
         if (LLVM_LIKELY(hasThreadLocal())) {
             Function * const allocThreadLocal = getAllocateThreadLocalInternalStreamSetsFunction(b);
@@ -787,9 +755,6 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
             }
             allocArgs.push_back(threadLocalHandle);
             allocArgs.push_back(sz_ONE);
-            #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-            allocArgs.push_back(trackerObj);
-            #endif
             b.CreateCall(allocThreadLocal->getFunctionType(), allocThreadLocal, allocArgs);
         }
     }
@@ -847,18 +812,9 @@ Function * PipelineKernel::addOrDeclareMainFunction(KernelBuilder & b, const Mai
     if (LLVM_LIKELY(hasThreadLocal())) {
         finalizeArgs.push_back(threadLocalHandle);
         finalizeArgs.push_back(threadLocalHandle);
-        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-        finalizeArgs.push_back(trackerObj);
-        #endif
         finalizeThreadLocalInstance(b, finalizeArgs);
-        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-        finalizeArgs.pop_back();
-        #endif
         finalizeArgs.pop_back();
     }
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    finalizeArgs.push_back(trackerObj);
-    #endif
     Value * const result = finalizeInstance(b, finalizeArgs);
     for (Value * stateObj : toFree) {
         b.CreateFree(stateObj);

@@ -41,7 +41,7 @@ void MMapSourceKernel::generatLinkExternalFunctions(KernelBuilder & b) {
     b.LinkFunction("munmap", munmap);
 }
 
-void MMapSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, const unsigned stride, KernelBuilder & b) {
+void MMapSourceKernel::generateInitializeMethod(KernelBuilder & b, const unsigned codeUnitWidth, const unsigned stride) {
 
     BasicBlock * const emptyFile = b.CreateBasicBlock("emptyFile");
     BasicBlock * const nonEmptyFile = b.CreateBasicBlock("NonEmptyFile");
@@ -79,7 +79,7 @@ void MMapSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, co
 }
 
 
-void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, const unsigned stride, KernelBuilder & b) {
+void MMapSourceKernel::generateDoSegmentMethod(KernelBuilder & b, const unsigned codeUnitWidth, const unsigned stride) {
 
     BasicBlock * const dropPages = b.CreateBasicBlock("dropPages");
     BasicBlock * const checkRemaining = b.CreateBasicBlock("checkRemaining");
@@ -151,7 +151,7 @@ void MMapSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     b.CreateCall(MAdviseFunc, args);
 
 }
-void MMapSourceKernel::freeBuffer(const unsigned codeUnitWidth, KernelBuilder & b) {
+void MMapSourceKernel::freeBuffer(KernelBuilder & b, const unsigned codeUnitWidth) {
     Value * const fileItems = b.getScalarField("fileItems");
     Constant * const CODE_UNIT_BYTES = b.getSize(codeUnitWidth / 8);
     Value * const fileSize = b.CreateMul(fileItems, CODE_UNIT_BYTES);
@@ -164,7 +164,7 @@ void MMapSourceKernel::freeBuffer(const unsigned codeUnitWidth, KernelBuilder & 
     b.CreateCall(MUnmapFunc, args);
 }
 
-Value * MMapSourceKernel::generateExpectedOutputSizeMethod(const unsigned codeUnitWidth, KernelBuilder & b) {
+Value * MMapSourceKernel::generateExpectedOutputSizeMethod(KernelBuilder & b, const unsigned codeUnitWidth) {
     return b.getScalarField("fileItems");
 }
 
@@ -190,7 +190,7 @@ inline IntTy round_up_to(const IntTy x, const IntTy y) {
     return (x + y - 1) & -y;
 }
 
-void ReadSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, const unsigned stride, KernelBuilder & b) {
+void ReadSourceKernel::generateInitializeMethod(KernelBuilder & b, const unsigned codeUnitWidth, const unsigned stride) {
     const auto codeUnitSize = codeUnitWidth / 8;
     const auto pageSize = getPageSize();
     const auto minSize = stride * 4 * codeUnitSize;
@@ -209,7 +209,7 @@ void ReadSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, co
     b.setCapacity("sourceBuffer", bufferItems);
 }
 
-void ReadSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, const unsigned stride, KernelBuilder & b) {
+void ReadSourceKernel::generateDoSegmentMethod(KernelBuilder & b, const unsigned codeUnitWidth, const unsigned stride) {
 
     Value * const numOfStrides = b.getNumOfStrides();
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
@@ -353,14 +353,14 @@ void ReadSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     b.SetInsertPoint(readExit);
 }
 
-Value * ReadSourceKernel::generateExpectedOutputSizeMethod(const unsigned codeUnitWidth, KernelBuilder & b) {
+Value * ReadSourceKernel::generateExpectedOutputSizeMethod(KernelBuilder & b, const unsigned codeUnitWidth) {
     Value * const fd = b.getScalarField("fileDescriptor");
     Function * const fileSizeFn = b.getModule()->getFunction("file_size"); assert (fileSizeFn);
     FunctionType * fTy = fileSizeFn->getFunctionType();
     return b.CreateZExtOrTrunc(b.CreateCall(fTy, fileSizeFn, fd), b.getSizeTy());
 }
 
-void ReadSourceKernel::freeBuffer(const unsigned codeUnitWidth, KernelBuilder & b) {
+void ReadSourceKernel::freeBuffer(KernelBuilder & b, const unsigned codeUnitWidth) {
     Module * m = b.getModule();
     ConstantInt * const codeUnitBytes = b.getSize(codeUnitWidth / 8);
     Value * const buffer = b.getScalarField("buffer");
@@ -418,13 +418,13 @@ void FDSourceKernel::generateInitializeMethod(KernelBuilder & b) {
     b.CreateUnlikelyCondBr(emptyFile, initializeRead, initializeMMap);
 
     b.SetInsertPoint(initializeMMap);
-    MMapSourceKernel::generateInitializeMethod(mCodeUnitWidth, mStride, b);
+    MMapSourceKernel::generateInitializeMethod(b, mCodeUnitWidth, mStride);
     b.CreateBr(initializeDone);
 
     b.SetInsertPoint(initializeRead);
     // Ensure that readSource logic is used throughout.
     b.setScalarField("useMMap", ConstantInt::getNullValue(useMMap->getType()));
-    ReadSourceKernel::generateInitializeMethod(mCodeUnitWidth, mStride,b);
+    ReadSourceKernel::generateInitializeMethod(b, mCodeUnitWidth, mStride);
     b.CreateBr(initializeDone);
 
     b.SetInsertPoint(initializeDone);
@@ -437,10 +437,10 @@ void FDSourceKernel::generateDoSegmentMethod(KernelBuilder & b) {
     Value * const useMMap = b.CreateIsNotNull(b.getScalarField("useMMap"));
     b.CreateCondBr(useMMap, DoSegmentMMap, DoSegmentRead);
     b.SetInsertPoint(DoSegmentMMap);
-    MMapSourceKernel::generateDoSegmentMethod(mCodeUnitWidth, mStride, b);
+    MMapSourceKernel::generateDoSegmentMethod(b, mCodeUnitWidth, mStride);
     b.CreateBr(DoSegmentDone);
     b.SetInsertPoint(DoSegmentRead);
-    ReadSourceKernel::generateDoSegmentMethod(mCodeUnitWidth, mStride, b);
+    ReadSourceKernel::generateDoSegmentMethod(b, mCodeUnitWidth, mStride);
     b.CreateBr(DoSegmentDone);
     b.SetInsertPoint(DoSegmentDone);
 }
@@ -452,10 +452,10 @@ Value * FDSourceKernel::generateExpectedOutputSizeMethod(KernelBuilder & b) {
     Value * const useMMap = b.CreateIsNotNull(b.getScalarField("useMMap"));
     b.CreateCondBr(useMMap, finalizeMMap, finalizeRead);
     b.SetInsertPoint(finalizeMMap);
-    Value * mmapVal = MMapSourceKernel::generateExpectedOutputSizeMethod(mCodeUnitWidth, b);
+    Value * mmapVal = MMapSourceKernel::generateExpectedOutputSizeMethod(b, mCodeUnitWidth);
     b.CreateBr(finalizeDone);
     b.SetInsertPoint(finalizeRead);
-    Value * readVal = ReadSourceKernel::generateExpectedOutputSizeMethod(mCodeUnitWidth, b);
+    Value * readVal = ReadSourceKernel::generateExpectedOutputSizeMethod(b, mCodeUnitWidth);
     b.CreateBr(finalizeDone);
     b.SetInsertPoint(finalizeDone);
     PHINode * const resultPhi = b.CreatePHI(b.getSizeTy(), 2);
@@ -471,10 +471,10 @@ void FDSourceKernel::generateFinalizeMethod(KernelBuilder & b) {
     Value * const useMMap = b.CreateIsNotNull(b.getScalarField("useMMap"));
     b.CreateCondBr(useMMap, finalizeMMap, finalizeRead);
     b.SetInsertPoint(finalizeMMap);
-    MMapSourceKernel::freeBuffer(mCodeUnitWidth, b);
+    MMapSourceKernel::freeBuffer(b, mCodeUnitWidth);
     b.CreateBr(finalizeDone);
     b.SetInsertPoint(finalizeRead);
-    ReadSourceKernel::freeBuffer(mCodeUnitWidth, b);
+    ReadSourceKernel::freeBuffer(b, mCodeUnitWidth);
     b.CreateBr(finalizeDone);
     b.SetInsertPoint(finalizeDone);
 }

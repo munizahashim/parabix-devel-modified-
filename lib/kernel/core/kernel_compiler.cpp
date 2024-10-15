@@ -202,9 +202,6 @@ inline void KernelCompiler::callGenerateInitializeMethod(KernelBuilder & b) {
         b.setScalarField(binding.getName(), nextArg());
     }
     bindAdditionalInitializationArguments(b, arg, arg_end);
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    mKernelBasicBlockEntryTracker = nextArg();
-    #endif
     assert (arg == arg_end);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect) && mTarget->isStateful())) {
         b.CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::WRITE);
@@ -246,9 +243,6 @@ void KernelCompiler::callGenerateExpectedOutputSizeMethod(KernelBuilder & b) {
     if (LLVM_LIKELY(mTarget->isStateful())) {
         setHandle(nextArg());
     }
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    mKernelBasicBlockEntryTracker = nextArg();
-    #endif
     initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect) && mTarget->isStateful())) {
         b.CreateMProtect(mTarget->getSharedStateType(), mSharedHandle, CBuilder::Protect::WRITE);
@@ -288,9 +282,6 @@ inline void KernelCompiler::callGenerateInitializeThreadLocalMethod(KernelBuilde
         if (LLVM_LIKELY(mTarget->isStateful())) {
             setHandle(nextArg());
         }
-        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-        mKernelBasicBlockEntryTracker = nextArg();
-        #endif
         StructType * const threadLocalTy = mTarget->getThreadLocalStateType();
         Value * const providedState = b.CreatePointerCast(nextArg(), threadLocalTy->getPointerTo());
         BasicBlock * const allocThreadLocal = BasicBlock::Create(b.getContext(), "allocThreadLocalState", mCurrentMethod);
@@ -334,9 +325,6 @@ inline void KernelCompiler::callGenerateAllocateSharedInternalStreamSets(KernelB
             setHandle(nextArg());
         }
         Value * const expectedNumOfStrides = nextArg();
-        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-        mKernelBasicBlockEntryTracker = nextArg();
-        #endif
         initializeScalarMap(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
         initializeOwnedBufferHandles(b, InitializeOptions::DoNotIncludeThreadLocalScalars);
         mTarget->generateAllocateSharedInternalStreamSetsMethod(b, expectedNumOfStrides);
@@ -366,9 +354,6 @@ inline void KernelCompiler::callGenerateAllocateThreadLocalInternalStreamSets(Ke
         }
         setThreadLocalHandle(nextArg());
         Value * const expectedNumOfStrides = nextArg();
-        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-        mKernelBasicBlockEntryTracker = nextArg();
-        #endif
         initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
         initializeOwnedBufferHandles(b, InitializeOptions::IncludeThreadLocalScalars);
         mTarget->generateAllocateThreadLocalInternalStreamSetsMethod(b, expectedNumOfStrides);
@@ -684,9 +669,6 @@ void KernelCompiler::setDoSegmentProperties(KernelBuilder & b, const ArrayRef<Va
         }
         mWritableOutputItems[i] = writable;
     }
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    mKernelBasicBlockEntryTracker = nextArg();
-    #endif
     assert (arg == args.end());
 
     // initialize the termination signal if this kernel can set it
@@ -817,9 +799,6 @@ std::vector<Value *> KernelCompiler::getDoSegmentProperties(KernelBuilder & b) c
             props.push_back(mWritableOutputItems[i]);
         }
     }
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    props.push_back(mKernelBasicBlockEntryTracker);
-    #endif
     return props;
 }
 
@@ -931,9 +910,6 @@ inline void KernelCompiler::callGenerateFinalizeThreadLocalMethod(KernelBuilder 
         }
         mCommonThreadLocalHandle = nextArg();
         mThreadLocalHandle = nextArg();
-        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-        mKernelBasicBlockEntryTracker = nextArg();
-        #endif
         initializeScalarMap(b, InitializeOptions::IncludeAndAutomaticallyAccumulateThreadLocalScalars);
         mTarget->generateFinalizeThreadLocalMethod(b);
         b.CreateRetVoid();
@@ -961,9 +937,6 @@ inline void KernelCompiler::callGenerateFinalizeMethod(KernelBuilder & b) {
     if (LLVM_LIKELY(mTarget->hasThreadLocal())) {
         setThreadLocalHandle(nextArg());
     }
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    mKernelBasicBlockEntryTracker = nextArg();
-    #endif
     assert (arg == mCurrentMethod->arg_end());
     initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableMProtect))) {
@@ -1577,9 +1550,6 @@ void KernelCompiler::clearInternalStateAfterCodeGen() {
     mEntryPoint = nullptr;
     mIsFinal = nullptr;
     mNumOfStrides = nullptr;
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    mKernelBasicBlockEntryTracker = nullptr;
-    #endif
     mTerminationSignalPtr = nullptr;
     const auto numOfInputs = getNumOfStreamInputs();
     reset(mInputIsClosed, numOfInputs);

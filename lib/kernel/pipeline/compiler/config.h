@@ -57,5 +57,3 @@
 // #define PIN_THREADS_TO_INDIVIDUAL_CORES
 
 // #define USE_LOOKBEHIND_FOR_LAST_VALUE // must match pipeline/internal/popcount_kernel.h
-
-#define USE_PTHREAD_SIGMASK_FOR_ASSERTS

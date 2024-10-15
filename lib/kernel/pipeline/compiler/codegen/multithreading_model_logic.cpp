@@ -2,14 +2,6 @@
 #include <pthread.h>
 #include <llvm/IR/Verifier.h>
 
-#undef USE_PTHREAD_SIGMASK_FOR_ASSERTS
-
-#ifdef USE_PTHREAD_SIGMASK_FOR_ASSERTS
-#include <signal.h>
-//#include <mutex>
-#include <cxxabi.h>
-#endif
-
 enum PipelineStateObjectField : unsigned {
     SHARED_STATE_PARAM
     , THREAD_LOCAL_PARAM
@@ -22,9 +14,6 @@ enum PipelineStateObjectField : unsigned {
     , CURRENT_THREAD_ID
     , CURRENT_THREAD_STATUS_FLAG
     , TERMINATION_SIGNAL
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    , ENTRY_POINT_TRACKING_OBJECT
-    #endif
     // -------------------
     , THREAD_STRUCT_SIZE
 };
@@ -38,63 +27,6 @@ StringRef concat(StringRef A, StringRef B, SmallVector<char, 256> & tmp) {
     C.toVector(tmp);
     return StringRef(tmp.data(), tmp.size());
 }
-
-#ifdef USE_PTHREAD_SIGMASK_FOR_ASSERTS
-//struct __segfault_handler_thread_state {
-//    const char * CurrentFunctionName;
-//    size_t CurrentLineNum;
-//};
-
-//static std::mutex _state_lock;
-//static boost::container::flat_map<pthread_t, __segfault_handler_thread_state> _state;
-
-inline void __add_to_sigmask_state() {
-//    const pthread_t id = pthread_self();
-//    std::lock_guard<std::mutex> L(_state_lock);
-
-}
-
-
-extern "C"
-BOOST_NOINLINE
-void ___segfault_exception_handler(const int code) {
-    if (code == SIGSEGV) {
-//        sigset_t sigs;
-//        sigemptyset(&sigs);
-//        sigaddset(&sigs, SIGSEGV);
-//        sigprocmask(SIG_UNBLOCK, &sigs, NULL);
-
-        const pthread_t id = pthread_self();
-        SmallVector<char, 256> tmp;
-        raw_svector_ostream msg(tmp);
-        msg << "Segmentation fault on thread ";
-        msg.write_hex((uintptr_t)id);
-        throw std::runtime_error (msg.str().begin()) ;
-    }
-}
-
-extern "C"
-BOOST_NOINLINE
-void ___init_segfault_exception_handler() {
-    __add_to_sigmask_state();
-    signal(SIGSEGV, ___segfault_exception_handler);
-}
-
-extern "C"
-BOOST_NOINLINE
-void ___block_segfault_exception() {
-    __add_to_sigmask_state();
-    sigset_t set;
-    sigemptyset(&set);
-    sigaddset(&set, SIGSEGV);
-    sigprocmask(SIG_BLOCK, &set, nullptr);
-    if (pthread_sigmask(SIG_BLOCK, &set, nullptr)) {
-        report_fatal_error("pthread_sigmask failed\n");
-    }
-}
-
-
-#endif
 
 namespace kernel {
 
@@ -165,12 +97,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         numOfComputeKernels = (LastKernel - FirstKernel + 1);
     }
 
-    #ifndef USE_PTHREAD_SIGMASK_FOR_ASSERTS
-    constexpr auto CatchSegFault = false;
-    #else
-    const auto CatchSegFault = true; // CheckAssertions
-    #endif
-
     // TODO: redesign to avoid the unnecessary store?
 
     Value * maximumNumOfThreads = b.CreateUMin(b.getScalarField(MAXIMUM_NUM_OF_THREADS), b.getSize(numOfComputeKernels));
@@ -185,15 +111,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
     } else {
         minimumNumOfThreads = maximumNumOfThreads;
     }
-
-    #ifdef USE_PTHREAD_SIGMASK_FOR_ASSERTS
-    if (LLVM_UNLIKELY(CatchSegFault)) {
-        Function * const initSegFaultExHandlerFn = m->getFunction("___init_segfault_exception_handler");
-//        FixedArray<Value *, 1> args;
-//        args[0] = maximumNumOfThreads;
-        b.CreateCall(initSegFaultExHandlerFn->getFunctionType(), initSegFaultExHandlerFn);
-    }
-    #endif
 
     Value * const threadStateArray = b.CreateAlignedMalloc(threadStructTy, maximumNumOfThreads, 0, b.getCacheAlignment());
     assert (threadStateArray->getType() == threadStructTy->getPointerTo());
@@ -224,29 +141,12 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
 
     Value * const cThreadState = b.CreateGEP(threadStructTy, threadStateArray, threadIndex);
     Value * cThreadLocal = nullptr;
-
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    PointerType * const int8PtrTy = b.getInt8PtrTy();
-    FixedArray<Type *, 4> fields;
-    fields[0] = int8PtrTy; // mod name
-    fields[1] = int8PtrTy; // func name
-    fields[2] = int8PtrTy; // bb name
-    fields[3] = intPtrTy; // offset
-    StructType * trackerObjTy = StructType::get(b.getContext(), fields);
-    Constant * trackerObjTySz = b.getSize(b.getTypeSize(DL, trackerObjTy));
-    Value * const trackerObj = b.CreateAlignedMalloc(trackerObjTySz, sizeof(void*));
-    assert (trackerObj->getType() == b.getVoidPtrTy());
-    #endif
-
     if (LLVM_LIKELY(mTarget->hasThreadLocal())) {
         SmallVector<Value *, 2> args;
         if (initialSharedState) {
             args.push_back(initialSharedState);
         }
         args.push_back(ConstantPointerNull::get(cast<PointerType>(initialThreadLocal->getType())));
-        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-        args.push_back(trackerObj);
-        #endif
         cThreadLocal = mTarget->initializeThreadLocalInstance(b, args);
         if (LLVM_LIKELY(mTarget->allocatesInternalStreamSets())) {
             Function * const allocInternal = mTarget->getAllocateThreadLocalInternalStreamSetsFunction(b, false);
@@ -256,9 +156,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
             }
             allocArgs.push_back(cThreadLocal);
             allocArgs.push_back(sz_ONE);
-            #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-            allocArgs.push_back(trackerObj);
-            #endif
             b.CreateCall(allocInternal->getFunctionType(), allocInternal, allocArgs);
         }
     }
@@ -269,9 +166,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         initialSegNum = b.CreateSub(threadIndex, sz_ONE);
         maxComputeThreads = b.CreateSub(maxComputeThreads, sz_ONE);
     }
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    mEntryPointTrackerObject = trackerObj;
-    #endif
     writeThreadStructObject(b, threadStructTy, cThreadState, initialSharedState, cThreadLocal, storedState, initialSegNum, maxComputeThreads);
     Value * const nextThreadIndex = b.CreateAdd(threadIndex, sz_ONE);
     BasicBlock * constructNextThread = nullptr;
@@ -312,9 +206,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
     // execute the process thread
     Value * const processState = threadStateArray;
     Value * const maxProcessThreads = AllowIOProcessThread ? sz_ONE : maximumNumOfThreads;
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    mEntryPointTrackerObject = mKernelBasicBlockEntryTracker;
-    #endif
     writeThreadStructObject(b, threadStructTy, processState, initialSharedState, initialThreadLocal, storedState, sz_ZERO, maxProcessThreads);
     fieldIndex[0] = i32_ZERO;
     fieldIndex[1] = b.getInt32(CURRENT_THREAD_ID);
@@ -514,26 +405,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         assert (isFromCurrentFunction(b, getHandle(), !mTarget->isStateful()));
         assert (isFromCurrentFunction(b, getThreadLocalHandle(), !mTarget->hasThreadLocal()));
         initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
-
-//        #ifdef USE_PTHREAD_SIGMASK_FOR_ASSERTS
-//        if (LLVM_UNLIKELY(CatchSegFault)) {
-//            Function * const blockSegFaultExFn = m->getFunction("___block_segfault_exception");
-//            if (AllowIOProcessThread) {
-//                assert (!mIsNestedPipeline);
-//                if (!generateProcessThread) {
-//                    b.CreateCall(blockSegFaultExFn->getFunctionType(), blockSegFaultExFn);
-//                }
-//            } else {
-//                BasicBlock * const skipUnblockSegFault  = b.CreateBasicBlock("ExitThread");
-//                BasicBlock * const unblockSegFault  = b.CreateBasicBlock("ExitProcessFunction");
-//                b.CreateCondBr(isProcessThread(b, threadStructTy, threadStruct), unblockSegFault, skipUnblockSegFault);
-//                b.SetInsertPoint(skipUnblockSegFault);
-//                b.CreateCall(blockSegFaultExFn->getFunctionType(), blockSegFaultExFn);
-//                b.CreateBr(unblockSegFault);
-//                b.SetInsertPoint(unblockSegFault);
-//            }
-//        }
-//        #endif
 
         Value * minimumThreads = nullptr;
         Value * maximumThreads = nullptr;
@@ -1019,13 +890,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
     }
 
     Value * const jThreadState = b.CreateGEP(threadStructTy, threadStateArray, joinThreadIndex);
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    FixedArray<Value *, 2> indices2;
-    indices2[0] = i32_ZERO;
-    indices2[1] = b.getInt32(ENTRY_POINT_TRACKING_OBJECT);
-    mEntryPointTrackerObject = b.CreateLoad(b.getVoidPtrTy(), b.CreateInBoundsGEP(threadStructTy, jThreadState, indices2));
-    #endif
-
     if (LLVM_LIKELY(mTarget->hasThreadLocal())) {
         fieldIndex[1] = b.getInt32(THREAD_LOCAL_PARAM);
         Type * const handlePtrTy = getThreadLocalHandle()->getType();
@@ -1036,16 +900,10 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         }
         threadLocalArgs.push_back(initialThreadLocal);
         threadLocalArgs.push_back(jThreadLocal);
-        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-        threadLocalArgs.push_back(mEntryPointTrackerObject);
-        #endif
         mTarget->finalizeThreadLocalInstance(b, threadLocalArgs);
         b.CreateFree(jThreadLocal);
         threadLocalArgs.pop_back();
     }
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    b.CreateFree(mEntryPointTrackerObject);
-    #endif
     Value * finalTerminationSignal = nullptr;
     if (LLVM_LIKELY(PipelineHasTerminationSignal)) {
         Value * const terminatedSignal = readTerminationSignalFromLocalState(b, threadStructTy, jThreadState);
@@ -1195,10 +1053,6 @@ StructType * PipelineCompiler::getThreadStuctType(KernelBuilder & b, const std::
     } else {
         fields[TERMINATION_SIGNAL] = emptyTy;
     }
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    fields[ENTRY_POINT_TRACKING_OBJECT] = b.getVoidPtrTy();
-    #endif
-
 
     // add padding to force this struct to be cache-line-aligned
     uint64_t structSize = 0UL;
@@ -1257,11 +1111,6 @@ void PipelineCompiler::writeThreadStructObject(KernelBuilder & b,
 
         b.CreateStore(numOfThreads, b.CreateInBoundsGEP(threadStateTy, threadState, indices2));
     }
-
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    indices2[1] = b.getInt32(ENTRY_POINT_TRACKING_OBJECT);
-    b.CreateStore(mEntryPointTrackerObject, b.CreateInBoundsGEP(threadStateTy, threadState, indices2));
-    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1296,10 +1145,6 @@ void PipelineCompiler::readThreadStructObject(KernelBuilder & b, StructType * co
         indices2[1] = b.getInt32(FIXED_NUMBER_OF_THREADS);
         mNumOfFixedThreads = b.CreateLoad(sizeTy, b.CreateInBoundsGEP(threadStateTy, threadState, indices2));
     }
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    indices2[1] = b.getInt32(ENTRY_POINT_TRACKING_OBJECT);
-    mEntryPointTrackerObject = b.CreateLoad(b.getVoidPtrTy(), b.CreateInBoundsGEP(threadStateTy, threadState, indices2));
-    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1373,13 +1218,6 @@ void PipelineCompiler::linkPThreadLibrary(KernelBuilder & b) {
     FunctionType * pthreadExitFnTy = FunctionType::get(b.getVoidTy(), pthreadExitArgs, false);
     b.LinkFunction("pthread_exit", pthreadExitFnTy, (void*)pthread_exit); // ->addAttribute(0, llvm::Attribute::AttrKind::NoReturn);
     END_SCOPED_REGION
-
-
-    #ifdef USE_PTHREAD_SIGMASK_FOR_ASSERTS
-    b.LinkFunction("___init_segfault_exception_handler",___init_segfault_exception_handler);
-    b.LinkFunction("___block_segfault_exception",___block_segfault_exception);
-    #endif
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -1393,9 +1231,6 @@ void PipelineCompiler::generateSingleThreadKernelMethod(KernelBuilder & b) {
         mSegNo = b.getSize(0);
     }
     mNumOfFixedThreads = b.getSize(1);
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    mEntryPointTrackerObject = mKernelBasicBlockEntryTracker;
-    #endif
     #ifdef ENABLE_PAPI
     if (NumOfPAPIEvents) {
         if (LLVM_UNLIKELY(!mIsNestedPipeline)) {

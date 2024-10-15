@@ -94,22 +94,14 @@ void ExternalStreamTable::declareExternal(StreamIndexCode c, std::string externa
     auto & E = mExternalMap[c];
     auto f = E.find(externalName);
     if (LLVM_UNLIKELY(f != E.end())) {
-        //if (grep::ShowExternals) {
-            errs() << "  redeclaration of " << externalName << "\n";
-        // }
-        assert (false);
-        report_fatal_error(Twine{"redeclaration of external ", externalName});
-
-
-//        ExternalStreamObject * obj = f->second.release();
-//        delete obj;
-
-
-//        const auto curr = f->second;
-//        if (LLVM_LIKELY(curr != ext)) {
-//            delete curr;
-//            f->second = ext;
-//        }
+        if (grep::ShowExternals) {
+            errs() << "  redeclaration!  Discarding previous declaration.\n";
+        }
+        const auto curr = f->second;
+        if (LLVM_LIKELY(curr != ext)) {
+            delete curr;
+            f->second = ext;
+        }
     } else {
         E.emplace(externalName, ext);
     }
@@ -121,7 +113,7 @@ ExternalStreamObject * ExternalStreamTable::lookup(StreamIndexCode c, std::strin
         report_fatal_error(StringRef("Cannot get external stream object ") +
                            mStreamIndices[c].name + "_" + ssname);
     }
-    return f->second.get();
+    return f->second;
 }
 
 bool ExternalStreamTable::isDeclared(StreamIndexCode c, std::string ssname) {

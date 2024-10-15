@@ -679,16 +679,10 @@ protected:
     Value *                                     mKernelCommonThreadLocalHandle = nullptr;
     Value *                                     mSegNo = nullptr;
     Value *                                     mNumOfFixedThreads = nullptr;
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    Value *                                     mEntryPointTrackerObject = nullptr;
-    #endif
-
     PHINode *                                   mPartitionExitSegNoPhi = nullptr;
-
     PHINode *                                   mMadeProgressInLastSegment = nullptr;
     Value *                                     mPipelineProgress = nullptr;
     Value *                                     mThreadLocalMemorySizePtr = nullptr;
-
     BasicBlock *                                mKernelLoopStart = nullptr;
     BasicBlock *                                mKernelLoopEntry = nullptr;
     BasicBlock *                                mKernelCheckOutputSpace = nullptr;

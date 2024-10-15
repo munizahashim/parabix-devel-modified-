@@ -429,9 +429,6 @@ protected:
     #ifdef ENABLE_PAPI
     llvm::Value *                   mPAPIEventSetId = nullptr;
     #endif
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    llvm::Value *                   mKernelBasicBlockEntryTracker = nullptr;
-    #endif
 
     Vec<llvm::Value *>              mInputIsClosed;
 

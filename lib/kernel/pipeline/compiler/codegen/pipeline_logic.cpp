@@ -321,9 +321,6 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
             }
             addFamilyCallInitializationArguments(b, i, args);
             addRepeatingStreamSetInitializationArguments(i, args);
-            #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-            args.push_back(mKernelBasicBlockEntryTracker);
-            #endif
             #ifndef NDEBUG
             for (unsigned j = 0; j != args.size(); ++j) {
                 assert (isFromCurrentFunction(b, args[j], false));
@@ -523,9 +520,6 @@ void PipelineCompiler::generateFinalizeMethod(KernelBuilder & b) {
             assert (mTarget->hasThreadLocal());
             args.push_back(mKernelThreadLocalHandle);
         }
-        #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-        args.push_back(mKernelBasicBlockEntryTracker);
-        #endif
         mScalarValue[i] = callKernelFinalizeFunction(b, args);
     }
 
@@ -562,9 +556,6 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
             }
             args.push_back(mKernelCommonThreadLocalHandle); assert (mKernelCommonThreadLocalHandle);
             args.push_back(mKernelThreadLocalHandle); assert (mKernelThreadLocalHandle);
-            #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-            args.push_back(mKernelBasicBlockEntryTracker);
-            #endif
             callKernelFinalizeThreadLocalFunction(b, args);
 //            if (LLVM_UNLIKELY(isKernelFamilyCall(i))) {
 //                b.CreateFree(mKernelThreadLocalHandle);
