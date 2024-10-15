@@ -1652,7 +1652,7 @@ void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
             if (sfx_bits < 6) {
                 mScopeBasis[sfx].resize(6);
                 for (unsigned i = sfx_bits; i < 6; i++) {
-                    mScopeBasis[sfx][i] = pb.createAdvance(mScopeBasis[0][i], sfx);
+                    mScopeBasis[sfx][i] = pb.createAdvance(mScopeBasis[sfx-1][i], 1);
                 }
             }
         }
@@ -1665,11 +1665,8 @@ void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
             prefix_bits = variable_bits - scope * 6;
             mScopeBasis[scope].resize(prefix_bits);
             for (unsigned i = 0; i < prefix_bits; i++) {
-                mScopeBasis[scope][i] = pb.createAdvance(mScopeBasis[0][i], scope);
+                mScopeBasis[scope][i] = pb.createAdvance(mScopeBasis[scope-1][i], 1);
             }
-        }
-        if (UTF_CompilationTracing) {
-            llvm::errs() << "scope = " << scope << ", variable_bits = " << variable_bits << ", prefix_bits = " << prefix_bits << "\n";
         }
     }
     //mSeqData[scope].test = pb.createAdvance(mSeqData[scope].test, scope);
