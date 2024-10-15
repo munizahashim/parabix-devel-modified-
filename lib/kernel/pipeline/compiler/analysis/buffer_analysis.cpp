@@ -837,7 +837,9 @@ void PipelineAnalysis::buildZeroInputGraph() {
 
         const auto l = entries.size();
 
-        for (auto m = num_vertices(G) - n; m < l; ++m) {
+        assert (num_vertices(G) >= n);
+
+        for (size_t k = num_vertices(G) - n; k < l; ++k) {
             add_vertex(G);
         }
 

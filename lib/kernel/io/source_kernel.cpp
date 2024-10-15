@@ -49,7 +49,6 @@ void MMapSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, co
     IntegerType * const sizeTy = b.getSizeTy();
     Value * const fd = b.getScalarField("fileDescriptor");
     PointerType * const codeUnitPtrTy = b.getIntNTy(codeUnitWidth)->getPointerTo();
-    b.setScalarField("ancillaryBuffer", ConstantPointerNull::get(codeUnitPtrTy));
     Function * const fileSizeFn = b.getModule()->getFunction("file_size"); assert (fileSizeFn);
     FunctionType * fTy = fileSizeFn->getFunctionType();
     Value * fileSize = b.CreateZExtOrTrunc(b.CreateCall(fTy, fileSizeFn, fd), sizeTy);
@@ -205,7 +204,6 @@ void ReadSourceKernel::generateInitializeMethod(const unsigned codeUnitWidth, co
     Value * const buffer = b.CreatePointerCast(b.CreateCall(makeBuffer, makeArgs), codeUnitPtrTy);
     b.setBaseAddress("sourceBuffer", buffer);
     b.setScalarField("buffer", buffer);
-    b.setScalarField("ancillaryBuffer", ConstantPointerNull::get(codeUnitPtrTy));
     ConstantInt * const bufferItems = b.getSize(desiredSize / codeUnitSize);
     b.setScalarField("effectiveCapacity", bufferItems);
     b.setCapacity("sourceBuffer", bufferItems);
@@ -355,6 +353,13 @@ void ReadSourceKernel::generateDoSegmentMethod(const unsigned codeUnitWidth, con
     b.SetInsertPoint(readExit);
 }
 
+Value * ReadSourceKernel::generateExpectedOutputSizeMethod(const unsigned codeUnitWidth, KernelBuilder & b) {
+    Value * const fd = b.getScalarField("fileDescriptor");
+    Function * const fileSizeFn = b.getModule()->getFunction("file_size"); assert (fileSizeFn);
+    FunctionType * fTy = fileSizeFn->getFunctionType();
+    return b.CreateZExtOrTrunc(b.CreateCall(fTy, fileSizeFn, fd), b.getSizeTy());
+}
+
 void ReadSourceKernel::freeBuffer(const unsigned codeUnitWidth, KernelBuilder & b) {
     Module * m = b.getModule();
     ConstantInt * const codeUnitBytes = b.getSize(codeUnitWidth / 8);
@@ -366,18 +371,19 @@ void ReadSourceKernel::freeBuffer(const unsigned codeUnitWidth, KernelBuilder & 
     destroyArgs[1] = b.CreateMul(capacity, codeUnitBytes);
     destroyArgs[2] = b.getSize(0);
     b.CreateCall(destroyBuffer, destroyArgs);
+}
+
+void ReadSourceKernel::finalizeThreadLocalMethod(KernelBuilder & b, const unsigned codeUnitWidth) {
+    Module * m = b.getModule();
+    ConstantInt * const codeUnitBytes = b.getSize(codeUnitWidth / 8);
+    Function * destroyBuffer = m->getFunction(__DESTROY_CIRCULAR_BUFFER);
+    FixedArray<Value *, 3> destroyArgs;
     Value * const priorBuffer = b.getScalarField("ancillaryBuffer");
     Value * const priorCapacity = b.getScalarField("ancillaryCapacity");
     destroyArgs[0] = b.CreatePointerCast(priorBuffer, b.getInt8PtrTy());
     destroyArgs[1] = b.CreateMul(priorCapacity, codeUnitBytes);
+    destroyArgs[2] = b.getSize(0);
     b.CreateCall(destroyBuffer, destroyArgs);
-}
-
-Value * ReadSourceKernel::generateExpectedOutputSizeMethod(const unsigned codeUnitWidth, KernelBuilder & b) {
-    Value * const fd = b.getScalarField("fileDescriptor");
-    Function * const fileSizeFn = b.getModule()->getFunction("file_size"); assert (fileSizeFn);
-    FunctionType * fTy = fileSizeFn->getFunctionType();
-    return b.CreateZExtOrTrunc(b.CreateCall(fTy, fileSizeFn, fd), b.getSizeTy());
 }
 
 void ReadSourceKernel::linkExternalMethods(KernelBuilder & b) {
@@ -385,21 +391,6 @@ void ReadSourceKernel::linkExternalMethods(KernelBuilder & b) {
 }
 
 /// Hybrid MMap/Read source kernel
-
-void FDSourceKernel::generateFinalizeMethod(KernelBuilder & b) {
-    BasicBlock * finalizeRead = b.CreateBasicBlock("finalizeRead");
-    BasicBlock * finalizeMMap = b.CreateBasicBlock("finalizeMMap");
-    BasicBlock * finalizeDone = b.CreateBasicBlock("finalizeDone");
-    Value * const useMMap = b.CreateIsNotNull(b.getScalarField("useMMap"));
-    b.CreateCondBr(useMMap, finalizeMMap, finalizeRead);
-    b.SetInsertPoint(finalizeMMap);
-    MMapSourceKernel::freeBuffer(mCodeUnitWidth, b);
-    b.CreateBr(finalizeDone);
-    b.SetInsertPoint(finalizeRead);
-    ReadSourceKernel::freeBuffer(mCodeUnitWidth, b);
-    b.CreateBr(finalizeDone);
-    b.SetInsertPoint(finalizeDone);
-}
 
 void FDSourceKernel::generateInitializeMethod(KernelBuilder & b) {
     BasicBlock * initializeRead = b.CreateBasicBlock("initializeRead");
@@ -473,6 +464,31 @@ Value * FDSourceKernel::generateExpectedOutputSizeMethod(KernelBuilder & b) {
     return resultPhi;
 }
 
+void FDSourceKernel::generateFinalizeMethod(KernelBuilder & b) {
+    BasicBlock * finalizeRead = b.CreateBasicBlock("finalizeRead");
+    BasicBlock * finalizeMMap = b.CreateBasicBlock("finalizeMMap");
+    BasicBlock * finalizeDone = b.CreateBasicBlock("finalizeDone");
+    Value * const useMMap = b.CreateIsNotNull(b.getScalarField("useMMap"));
+    b.CreateCondBr(useMMap, finalizeMMap, finalizeRead);
+    b.SetInsertPoint(finalizeMMap);
+    MMapSourceKernel::freeBuffer(mCodeUnitWidth, b);
+    b.CreateBr(finalizeDone);
+    b.SetInsertPoint(finalizeRead);
+    ReadSourceKernel::freeBuffer(mCodeUnitWidth, b);
+    b.CreateBr(finalizeDone);
+    b.SetInsertPoint(finalizeDone);
+}
+
+void FDSourceKernel::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
+    BasicBlock * finalizeRead = b.CreateBasicBlock("finalizeRead");
+    BasicBlock * finalizeDone = b.CreateBasicBlock("finalizeDone");
+    Value * const useMMap = b.CreateIsNotNull(b.getScalarField("useMMap"));
+    b.CreateCondBr(useMMap, finalizeDone, finalizeRead);
+    b.SetInsertPoint(finalizeRead);
+    ReadSourceKernel::finalizeThreadLocalMethod(b, mCodeUnitWidth);
+    b.CreateBr(finalizeDone);
+    b.SetInsertPoint(finalizeDone);
+}
 
 void FDSourceKernel::linkExternalMethods(KernelBuilder & b) {
     MMapSourceKernel::generatLinkExternalFunctions(b);
@@ -549,7 +565,6 @@ MMapSourceKernel::MMapSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const 
 , mCodeUnitWidth(outputStream->getFieldWidth()) {
     PointerType * const codeUnitPtrTy = ts.getIntNTy(mCodeUnitWidth)->getPointerTo();
     addInternalScalar(codeUnitPtrTy, "buffer");
-    addInternalScalar(codeUnitPtrTy, "ancillaryBuffer");
     addAttribute(MustExplicitlyTerminate());
     addAttribute(SideEffecting());
     setStride(codegen::SegmentSize);
@@ -570,10 +585,10 @@ ReadSourceKernel::ReadSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const 
 , mCodeUnitWidth(outputStream->getFieldWidth()) {
     PointerType * const codeUnitPtrTy = ts.getIntNTy(mCodeUnitWidth)->getPointerTo();
     addInternalScalar(codeUnitPtrTy, "buffer");
-    addInternalScalar(codeUnitPtrTy, "ancillaryBuffer");
+    addThreadLocalScalar(codeUnitPtrTy, "ancillaryBuffer");
     IntegerType * const sizeTy = ts.getSizeTy();
     addInternalScalar(sizeTy, "effectiveCapacity");
-    addInternalScalar(sizeTy, "ancillaryCapacity");
+    addThreadLocalScalar(sizeTy, "ancillaryCapacity");
     addAttribute(MustExplicitlyTerminate());
     addAttribute(SideEffecting());
     setStride(codegen::SegmentSize);
@@ -597,10 +612,10 @@ FDSourceKernel::FDSourceKernel(LLVMTypeSystemInterface & ts, Scalar * const useM
 , mCodeUnitWidth(outputStream->getFieldWidth()) {
     PointerType * const codeUnitPtrTy = ts.getIntNTy(mCodeUnitWidth)->getPointerTo();
     addInternalScalar(codeUnitPtrTy, "buffer");
-    addInternalScalar(codeUnitPtrTy, "ancillaryBuffer");
+    addThreadLocalScalar(codeUnitPtrTy, "ancillaryBuffer");
     IntegerType * const sizeTy = ts.getSizeTy();
     addInternalScalar(sizeTy, "effectiveCapacity");
-    addInternalScalar(sizeTy, "ancillaryCapacity");
+    addThreadLocalScalar(sizeTy, "ancillaryCapacity");
     addAttribute(MustExplicitlyTerminate());
     addAttribute(SideEffecting());
     setStride(codegen::SegmentSize);

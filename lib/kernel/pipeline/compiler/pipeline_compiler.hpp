@@ -214,7 +214,7 @@ public:
 
     LLVM_READNONE StructType * getThreadStuctType(KernelBuilder & b, const std::vector<Value *> & props) const;
     void writeThreadStructObject(KernelBuilder & b, StructType * const threadStateTy, Value * threadState, Value * const shared, Value * const threadLocal, const std::vector<Value *> & props, Value * const threadNum, Value * const numOfThreads) const;
-    void readThreadStuctObject(KernelBuilder & b, StructType * const threadStateTy, Value * threadState);
+    void readThreadStructObject(KernelBuilder & b, StructType * const threadStateTy, Value * threadState);
     void deallocateThreadState(KernelBuilder & b, Value * const threadState);
 
     void allocateThreadLocalState(KernelBuilder & b, Value * const localState, Value * const threadId = nullptr);

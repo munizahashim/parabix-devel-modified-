@@ -666,7 +666,6 @@ Function * Kernel::addExpectedOutputSizeDeclaration(KernelBuilder & b) const {
             arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
             setNextArgName("shared");
         }
-        arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
         #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
         setNextArgName(KERNEL_ENTRY_POINT_TRACKER_OBJECT);
         #endif

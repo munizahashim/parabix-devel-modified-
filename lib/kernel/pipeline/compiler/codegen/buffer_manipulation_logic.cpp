@@ -143,16 +143,17 @@ void PipelineCompiler::getZeroExtendedInputVirtualBaseAddresses(KernelBuilder & 
  * @brief addZeroInputStructProperties
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::addZeroInputStructProperties(KernelBuilder & b) const {
-
-    const auto n = num_vertices(mZeroInputGraph) - ((LastKernel - FirstKernel) + 1);
-    if (n > 0) {
-        PointerType * const int8PtrTy = b.getInt8PtrTy();
-        IntegerType * const sizeTy = b.getSizeTy();
+    const auto m = num_vertices(mZeroInputGraph);
+    if (m > LastKernel) {
         FixedArray<Type *, 2> fields;
-        fields[0] = int8PtrTy;
-        fields[1] = sizeTy;
+        fields[0] = b.getInt8PtrTy();
+        fields[1] = b.getSizeTy();
         StructType * const truncTy = StructType::get(b.getContext(), fields);
+        const auto n = m - LastKernel;
         ArrayType * const arTy = ArrayType::get(truncTy, n);
+        #ifndef NDEBUG
+
+        #endif
         mTarget->addThreadLocalScalar(arTy, ZERO_INPUT_BUFFER_STRUCT, getCacheLineGroupId(PipelineOutput));
     }
 
@@ -168,6 +169,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
     if (n == 0) {
         return;
     }
+    assert (num_vertices(mZeroInputGraph) > LastKernel);
 
     Constant * const sz_ZERO = b.getSize(0);
     Constant * const sz_ONE = b.getSize(1);

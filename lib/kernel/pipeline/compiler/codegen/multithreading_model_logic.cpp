@@ -248,7 +248,6 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         args.push_back(trackerObj);
         #endif
         cThreadLocal = mTarget->initializeThreadLocalInstance(b, args);
-        
         if (LLVM_LIKELY(mTarget->allocatesInternalStreamSets())) {
             Function * const allocInternal = mTarget->getAllocateThreadLocalInternalStreamSetsFunction(b, false);
             SmallVector<Value *, 3> allocArgs;
@@ -270,11 +269,10 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         initialSegNum = b.CreateSub(threadIndex, sz_ONE);
         maxComputeThreads = b.CreateSub(maxComputeThreads, sz_ONE);
     }
-    writeThreadStructObject(b, threadStructTy, cThreadState, initialSharedState, cThreadLocal, storedState, initialSegNum, maxComputeThreads);
     #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    fieldIndex[1] = b.getInt32(ENTRY_POINT_TRACKING_OBJECT);
-    b.CreateStore(trackerObj, b.CreateGEP(threadStructTy, cThreadState, fieldIndex));
+    mEntryPointTrackerObject = trackerObj;
     #endif
+    writeThreadStructObject(b, threadStructTy, cThreadState, initialSharedState, cThreadLocal, storedState, initialSegNum, maxComputeThreads);
     Value * const nextThreadIndex = b.CreateAdd(threadIndex, sz_ONE);
     BasicBlock * constructNextThread = nullptr;
     if (mUseDynamicMultithreading) {
@@ -314,14 +312,13 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
     // execute the process thread
     Value * const processState = threadStateArray;
     Value * const maxProcessThreads = AllowIOProcessThread ? sz_ONE : maximumNumOfThreads;
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    mEntryPointTrackerObject = mKernelBasicBlockEntryTracker;
+    #endif
     writeThreadStructObject(b, threadStructTy, processState, initialSharedState, initialThreadLocal, storedState, sz_ZERO, maxProcessThreads);
     fieldIndex[0] = i32_ZERO;
     fieldIndex[1] = b.getInt32(CURRENT_THREAD_ID);
     b.CreateStore(ConstantInt::getNullValue(pThreadTy), b.CreateInBoundsGEP(threadStructTy, threadStateArray, fieldIndex));
-    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    fieldIndex[1] = b.getInt32(ENTRY_POINT_TRACKING_OBJECT);
-    b.CreateStore(mKernelBasicBlockEntryTracker, b.CreateGEP(threadStructTy, threadStateArray, fieldIndex));
-    #endif
     // store where we'll resume compiling the DoSegment method
     const auto resumePoint = b.saveIP();
 
@@ -374,7 +371,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         auto args = csFunc->arg_begin();
         Value * const threadStruct = &*args++;
         assert (threadStruct->getType() == threadStructPtrTy);
-        readThreadStuctObject(b, threadStructTy, threadStruct);
+        readThreadStructObject(b, threadStructTy, threadStruct);
         assert (isFromCurrentFunction(b, getHandle(), !mTarget->isStateful()));
 
 //        Value * baseFunctionPtrInt = b.CreatePtrToInt(csFunc, intPtrTy);
@@ -513,7 +510,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
 
         b.SetInsertPoint(BasicBlock::Create(m->getContext(), "entry", threadFunc));
         Value * const threadStruct = b.CreatePointerCast(arg, threadStructPtrTy);
-        readThreadStuctObject(b, threadStructTy, threadStruct);
+        readThreadStructObject(b, threadStructTy, threadStruct);
         assert (isFromCurrentFunction(b, getHandle(), !mTarget->isStateful()));
         assert (isFromCurrentFunction(b, getThreadLocalHandle(), !mTarget->hasThreadLocal()));
         initializeScalarMap(b, InitializeOptions::IncludeThreadLocalScalars);
@@ -1022,11 +1019,13 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
     }
 
     Value * const jThreadState = b.CreateGEP(threadStructTy, threadStateArray, joinThreadIndex);
-
     #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-    fieldIndex[1] = b.getInt32(ENTRY_POINT_TRACKING_OBJECT);
-    Value * const threadTrackerObj = b.CreateLoad(voidPtrTy, b.CreateGEP(threadStructTy, jThreadState, fieldIndex));
+    FixedArray<Value *, 2> indices2;
+    indices2[0] = i32_ZERO;
+    indices2[1] = b.getInt32(ENTRY_POINT_TRACKING_OBJECT);
+    mEntryPointTrackerObject = b.CreateLoad(b.getVoidPtrTy(), b.CreateInBoundsGEP(threadStructTy, jThreadState, indices2));
     #endif
+
     if (LLVM_LIKELY(mTarget->hasThreadLocal())) {
         fieldIndex[1] = b.getInt32(THREAD_LOCAL_PARAM);
         Type * const handlePtrTy = getThreadLocalHandle()->getType();
@@ -1038,15 +1037,15 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         threadLocalArgs.push_back(initialThreadLocal);
         threadLocalArgs.push_back(jThreadLocal);
         #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-        threadLocalArgs.push_back(threadTrackerObj);
+        threadLocalArgs.push_back(mEntryPointTrackerObject);
         #endif
         mTarget->finalizeThreadLocalInstance(b, threadLocalArgs);
         b.CreateFree(jThreadLocal);
         threadLocalArgs.pop_back();
     }
-//    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
-//    b.CreateFree(threadTrackerObj);
-//    #endif
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    b.CreateFree(mEntryPointTrackerObject);
+    #endif
     Value * finalTerminationSignal = nullptr;
     if (LLVM_LIKELY(PipelineHasTerminationSignal)) {
         Value * const terminatedSignal = readTerminationSignalFromLocalState(b, threadStructTy, jThreadState);
@@ -1072,6 +1071,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         finalTerminationSignalPhi->addIncoming(firstTerminationSignal, joinThreadEntry);
         finalTerminationSignalPhi->addIncoming(finalTerminationSignal, joinThreadExit);
     }
+
     if (LLVM_UNLIKELY(anyDebugOptionIsSet)) {
         PHINode * phi = b.CreatePHI(firstSegNo->getType(), 2);
         phi->addIncoming(firstSegNo, joinThreadEntry);
@@ -1254,14 +1254,20 @@ void PipelineCompiler::writeThreadStructObject(KernelBuilder & b,
         indices2[1] = b.getInt32(INITIAL_SEG_NUMBER);
         b.CreateStore(threadNum, b.CreateInBoundsGEP(threadStateTy, threadState, indices2));
         indices2[1] = b.getInt32(FIXED_NUMBER_OF_THREADS);
+
         b.CreateStore(numOfThreads, b.CreateInBoundsGEP(threadStateTy, threadState, indices2));
     }
+
+    #ifdef TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+    indices2[1] = b.getInt32(ENTRY_POINT_TRACKING_OBJECT);
+    b.CreateStore(mEntryPointTrackerObject, b.CreateInBoundsGEP(threadStateTy, threadState, indices2));
+    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief readThreadStuctObject
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineCompiler::readThreadStuctObject(KernelBuilder & b, StructType * const threadStateTy, Value * threadState) {
+void PipelineCompiler::readThreadStructObject(KernelBuilder & b, StructType * const threadStateTy, Value * threadState) {
     Constant * const i32_ZERO = b.getInt32(0);
     IntegerType * const sizeTy = b.getSizeTy();
     FixedArray<Value *, 2> indices2;

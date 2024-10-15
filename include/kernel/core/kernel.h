@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-#define TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
+// #define TRACK_ALL_BASIC_BLOCK_ENTRY_POINTS
 
 namespace llvm { class IndirectBrInst; }
 namespace llvm { class PHINode; }
