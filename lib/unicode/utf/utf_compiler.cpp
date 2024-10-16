@@ -1067,11 +1067,6 @@ struct SeqData {
     Range                           actualRange;
     Range                           testRange;
     re::CC *                        byte1CC;
-    std::vector<UCD::UnicodeSet>    fullPrefixSetPerCC;
-    UCD::UnicodeSet                 fullPrefixSet_allCCs;
-    UCD::UnicodeSet                 fullPrefixSet_someCCs;
-    UCD::UnicodeSet                 lowCostPrefixSet;
-    UCD::UnicodeSet                 highCostPrefixSet;
     PabloAST *                      test;
     PabloAST *                      combinedTest;
     PabloAST *                      suffixTest;
@@ -1197,38 +1192,6 @@ void U8_Compiler::lengthAnalysis(CC_List & ccs) {
         extract_CCs_by_range(UTF8_Range[k], ccs, mSeqData[k].seqCCs);
         mSeqData[k].actualRange = CC_Set_Range(mSeqData[k].seqCCs);
         mSeqData[k].byte1CC = codeUnitCC(mSeqData[k].seqCCs, 1);
-        for (const auto r : *mSeqData[k].byte1CC) {
-            for (auto pfx = lo_codepoint(r); pfx <= hi_codepoint(r); pfx++) {
-                codepoint_t lo = mEncoder.minCodePointWithPrefix(pfx);
-                codepoint_t hi = mEncoder.maxCodePointWithPrefix(pfx);
-                UCD::UnicodeSet pfxSet(lo, hi);
-                bool mixed = false;
-                for (unsigned i = 0; i < ccs.size(); i++) {
-                    if (!pfxSet.intersects(*mSeqData[k].seqCCs[i])) {
-                        continue;
-                    } else if (!pfxSet.subset(*mSeqData[k].seqCCs[i])) {
-                        mixed = true;
-                    } 
-                    if (UTF_CompilationTracing) {
-                        llvm::errs() << "lengthAnalysis [";
-                        llvm::errs().write_hex(lo);
-                        llvm::errs() << ", ";
-                        llvm::errs().write_hex(hi);
-                        llvm::errs() << "], mixed = " << mixed << "\n";
-                    }
-                }
-                if (mixed) {
-                    CC_List partitionCCs(ccs.size());
-                    Range pfxRange{lo, hi};
-                    extract_CCs_by_range(pfxRange, ccs, partitionCCs);
-                    if (costModel(partitionCCs, 1) > IfEmbeddingCostThreshhold) {
-                        mSeqData[k].highCostPrefixSet.insert(pfx);
-                    } else {
-                        mSeqData[k].lowCostPrefixSet.insert(pfx);
-                    }
-                }
-            }
-        }
         mSeqData[k].test = nullptr;
         mSeqData[k].combinedTest = nullptr;
         mSeqData[k].suffixTest = nullptr;
@@ -1370,39 +1333,11 @@ void U8_Compiler::prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb) 
         //auto nested = pb.createScope();
         //pb.createIf(mSeqData[k].test, nested);
         prepareScope(k, pb);
-        //
-        for (auto it : mSeqData[k].lowCostPrefixSet) {
-            auto lo_pfx = lo_codepoint(it);
-            auto hi_pfx = hi_codepoint(it);
-            if (UTF_CompilationTracing) {
-                llvm::errs() << "lowCostPrefixSet for [";
-                llvm::errs().write_hex(lo_pfx);
-                llvm::errs() << ", ";
-                llvm::errs().write_hex(hi_pfx);
-                llvm::errs() << "]\n";
-            }
-            PabloAST * t = compileCodeUnit(re::makeCC(lo_pfx, hi_pfx, &Byte), 1, pb);
-            mSeqData[k].test = t;
-            Range testRange{mEncoder.minCodePointWithPrefix(lo_pfx), mEncoder.maxCodePointWithPrefix(hi_pfx)};
-            EnclosingInfo rangeInfo(testRange, t);
-            compileRange(k, rangeInfo, pb);
-        }
-        for (auto it : mSeqData[k].highCostPrefixSet) {
-            for (auto pfx = lo_codepoint(it); pfx <= hi_codepoint(it); pfx++) {
-                if (UTF_CompilationTracing) {
-                    llvm::errs() << "highCostPrefixSet for [";
-                    llvm::errs().write_hex(pfx);
-                    llvm::errs() << "]\n";
-                }
-                PabloAST * t = compileCodeUnit(re::makeCC(pfx, &Byte), 1, pb);
-                mSeqData[k].test = t;
-                auto nested = pb.createScope();
-                pb.createIf(mSeqData[k].test, nested);
-                Range testRange{mEncoder.minCodePointWithPrefix(pfx), mEncoder.maxCodePointWithPrefix(pfx)};
-                EnclosingInfo rangeInfo(testRange, t);
-                compileRange(k, rangeInfo, nested);
-            }
-        }
+        auto lo_pfx = mSeqData[k].byte1CC->min_codepoint();
+        auto hi_pfx = mSeqData[k].byte1CC->max_codepoint();
+        Range tested{mEncoder.minCodePointWithPrefix(lo_pfx), mEncoder.maxCodePointWithPrefix(hi_pfx)};
+        EnclosingInfo rangeInfo(tested, t);
+        compileRange(k, rangeInfo, pb);
     }
     for (unsigned i = 0; i < mSeqData[k].seqCCs.size(); i++) {
         PabloAST * CC_test = pb.createAnd(mSeqData[k].targets[i], mSeqData[k].suffixTest);
@@ -1479,7 +1414,9 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, 
                     extract_CCs_by_range(unitRange, rangeCCs, subrangeCCs);
                     if (costModel(subrangeCCs, code_unit) < IfEmbeddingCostThreshhold) {
                         PabloAST * t = compileCodeUnit(re::makeCC(unit, &Byte), code_unit, pb);
-                        t = pb.createAnd(enclosing_test, t);
+                        if ((code_unit > 1) || (mMask != nullptr)) {
+                            t = pb.createAnd(enclosing_test, t);
+                        }
                         EnclosingInfo unitInfo(unitRange, t, code_unit);
                         compileFromCodeUnit(k, unitInfo, code_unit + 1, pb);
                     } else {
@@ -1499,7 +1436,9 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, 
             }
             auto nested = pb.createScope();
             PabloAST * t = compileCodeUnit(re::makeCC(e.first, &Byte), code_unit, pb);
-            t = pb.createAnd(enclosing_test, t);
+            if ((code_unit > 1) || (mMask != nullptr)) {
+                t = pb.createAnd(enclosing_test, t, "Rg_" + e.second.hex_string());
+            }
             pb.createIf(t, nested);
             EnclosingInfo highCostInfo(e.second, t, code_unit);
             compileFromCodeUnit(k, highCostInfo, code_unit + 1, nested);
@@ -1620,7 +1559,7 @@ unsigned U8_Advance_Compiler::costModel(CC_List & ccs, unsigned from_pos) {
         costSoFar += logic_cost;
         if (from_pos < lgth) {
             unsigned cc_range = cc->max_codepoint() - cc->min_codepoint();
-            unsigned final_shifts = cc_range/6;
+            unsigned final_shifts = cc_range/64;
             unsigned shift_cost = final_shifts * ShiftCostFactor;
             costSoFar += shift_cost;
         }
