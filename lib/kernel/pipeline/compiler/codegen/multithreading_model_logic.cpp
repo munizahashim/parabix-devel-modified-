@@ -477,11 +477,9 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
         SmallVector<Value *, 3> args(2);
         args[0] = threadStruct;
         args[1] = mSegNo; assert (mSegNo);
-        FunctionType * funcType = csDoSegmentComputeFuncType;
         if (generateProcessThread && AllowIOProcessThread) {
             assert (doSegmentProcessThreadFunc != doSegmentComputeThreadFunc);
             args.push_back(mUseDynamicMultithreading ? activeThreadsPhi : mNumOfFixedThreads);
-            funcType = csDoSegmentProcessFuncType;
         }
 
         Function * const doSegFunc = generateProcessThread ? doSegmentProcessThreadFunc : doSegmentComputeThreadFunc;

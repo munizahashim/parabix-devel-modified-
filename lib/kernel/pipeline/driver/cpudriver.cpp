@@ -66,12 +66,12 @@ using AttrId = kernel::Attribute::KindId;
 ATTRIBUTE_NO_SANITIZE_ADDRESS
 CPUDriver::CPUDriver(std::string && moduleName)
 : BaseDriver(std::move(moduleName))
-, mTarget(nullptr)
-, mEngine(nullptr)
 , mUnoptimizedIROutputStream{}
 , mIROutputStream{}
 , mASMOutputStream{}
-, mPassManager{} {
+, mPassManager{}
+, mEngine(nullptr)
+, mTarget(nullptr) {
 
     InitializeNativeTarget();
     InitializeNativeTargetAsmPrinter();

@@ -895,6 +895,7 @@ void PipelineAnalysis::generateInitialPipelineGraph(KernelBuilder & b) {
         B.addConsumerCalls(PortType::Input, C);
     }
 
+    #ifndef NDEBUG
     for (auto v : make_iterator_range(vertices(B.G))) {
         const auto & vi = B.G[v];
         if (vi.Type == RelationshipNode::IsBinding) {
@@ -903,6 +904,7 @@ void PipelineAnalysis::generateInitialPipelineGraph(KernelBuilder & b) {
             assert (B.G[f].Reason != ReasonType::Reference);
         }
     }
+    #endif
 
     // Pipeline optimizations
     if (LLVM_UNLIKELY(!codegen::EnableIllustrator)) {
