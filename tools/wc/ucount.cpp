@@ -49,6 +49,7 @@ using namespace kernel;
 static cl::OptionCategory ucFlags("Command Flags", "ucount options");
 
 static cl::opt<std::string> CC_expr(cl::Positional, cl::desc("<Unicode character class expression>"), cl::Required, cl::cat(ucFlags));
+static cl::opt<bool> CountOnly("c", cl::desc("CountOnly flag for compatibility with greptest"), cl::cat(ucFlags));
 static cl::list<std::string> inputFiles(cl::Positional, cl::desc("<input file ...>"), cl::OneOrMore, cl::cat(ucFlags));
 
 static cl::opt<bool> Lookahead("lookahead", cl::desc("Use UTF Compiler lookahead mode"), cl::cat(ucFlags));
@@ -57,6 +58,10 @@ static cl::opt<bool> U21("u21", cl::desc("Use Unicode 21 bits"), cl::cat(ucFlags
 std::vector<fs::path> allFiles;
 
 typedef uint64_t (*UCountFunctionType)(uint32_t fd);
+
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
 UCountFunctionType pipelineGen(CPUDriver & driver, re::Name * CC_name) {
 
@@ -72,6 +77,7 @@ UCountFunctionType pipelineGen(CPUDriver & driver, re::Name * CC_name) {
 
     //  Create a set of 8 parallel streams of 1-bit units (bits).
     StreamSet * BasisBits = P.CreateStreamSet(8, 1);
+    SHOW_BIXNUM(BasisBits);
 
     //  Transpose the ByteSteam into parallel bit stream form.
     P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
@@ -99,6 +105,7 @@ UCountFunctionType pipelineGen(CPUDriver & driver, re::Name * CC_name) {
     propertyStreamMap.emplace(nameString, CCstream);
     pablo::BitMovementMode mode = Lookahead ? pablo::BitMovementMode::LookAhead : pablo::BitMovementMode::Advance;
     P.CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(CC_name, BasisBits, CCstream, mode);
+    SHOW_STREAM(CCstream);
 
     P.CreateKernelCall<PopcountKernel>(CCstream, P.getOutputScalar("countResult"));
 
@@ -164,19 +171,22 @@ int main(int argc, char *argv[]) {
         totalCount += theCounts[i];
     }
     
-    const int defaultDisplayColumnWidth = 7;
-    int displayColumnWidth = std::to_string(totalCount).size() + 1;
-    if (displayColumnWidth < defaultDisplayColumnWidth) displayColumnWidth = defaultDisplayColumnWidth;
-
-    for (unsigned i = 0; i < fileCount; ++i) {
-        std::cout << std::setw(displayColumnWidth);
-        std::cout << theCounts[i] << std::setw(displayColumnWidth);
-        std::cout << " " << allFiles[i].string() << std::endl;
-    }
-    if (inputFiles.size() > 1) {
-        std::cout << std::setw(displayColumnWidth-1);
-        std::cout << totalCount;
-        std::cout << " total" << std::endl;
+    if (CountOnly) {
+        std::cout << totalCount << "\n";
+    } else {
+        const int defaultDisplayColumnWidth = 7;
+        int displayColumnWidth = std::to_string(totalCount).size() + 1;
+        if (displayColumnWidth < defaultDisplayColumnWidth) displayColumnWidth = defaultDisplayColumnWidth;
+        for (unsigned i = 0; i < fileCount; ++i) {
+            std::cout << std::setw(displayColumnWidth);
+            std::cout << theCounts[i] << std::setw(displayColumnWidth);
+            std::cout << " " << allFiles[i].string() << std::endl;
+        }
+        if (inputFiles.size() > 1) {
+            std::cout << std::setw(displayColumnWidth-1);
+            std::cout << totalCount;
+            std::cout << " total" << std::endl;
+        }
     }
 
     return 0;
