@@ -31,12 +31,12 @@ Value * IDISA_AVX_Builder::hsimd_signmask(unsigned fw, Value * a) {
     if (mBitBlockWidth == 256) {
         if (fw == 64) {
             Function * signmask_f64func = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx_movmsk_pd_256);
-            Type * bitBlock_f64type = FixedVectorType::get(getDoubleTy(), mBitBlockWidth/64);
+            Type * bitBlock_f64type = FixedVectorType::get(getDoubleTy(), 256 / 64);
             Value * a_as_pd = CreateBitCast(a, bitBlock_f64type);
             return CreateCall(signmask_f64func->getFunctionType(), signmask_f64func, a_as_pd);
         } else if (fw == 32) {
             Function * signmask_f32func = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx_movmsk_ps_256);
-            Type * bitBlock_f32type = FixedVectorType::get(getFloatTy(), mBitBlockWidth/32);
+            Type * bitBlock_f32type = FixedVectorType::get(getFloatTy(), 256 / 32);
             Value * a_as_ps = CreateBitCast(a, bitBlock_f32type);
             return CreateCall(signmask_f32func->getFunctionType(), signmask_f32func, a_as_ps);
         }
@@ -287,13 +287,13 @@ Value * IDISA_AVX2_Builder::hsimd_packss(unsigned fw, Value * a, Value * b) {
     return IDISA_Builder::hsimd_packus(fw, a, b);
 }
 
-
 std::pair<Value *, Value *> IDISA_AVX2_Builder::bitblock_add_with_carry(Value * e1, Value * e2, Value * carryin) {
     // using LONG_ADD
     Type * carryTy = carryin->getType();
     if (carryTy == mBitBlockType) {
         carryin = mvmd_extract(32, carryin, 0);
-    } else {
+    } else if (carryTy->getIntegerBitWidth() < 32) {
+        assert (carryTy->isIntegerTy());
         carryin = CreateZExt(carryin, getInt32Ty());
     }
     Value * carrygen = simd_and(e1, e2);
@@ -308,9 +308,11 @@ std::pair<Value *, Value *> IDISA_AVX2_Builder::bitblock_add_with_carry(Value * 
     Value * increments = esimd_bitspread(64,incrementMask);
     Value * sum = simd_add(64, digitsum, increments);
     Value * carry_out = CreateLShr(incrementMask, mBitBlockWidth / 64);
+    assert (carry_out->getType()->getIntegerBitWidth() == 32);
     if (carryTy == mBitBlockType) {
-        carry_out = bitCast(CreateZExt(carry_out, getIntNTy(mBitBlockWidth)));
-    } else if (carryTy != carry_out->getType() && carryTy->isIntegerTy()) {
+        carry_out = CreateZExtOrTrunc(carry_out, mBitBlockType->getElementType());
+        carry_out = CreateInsertElement(ConstantVector::getNullValue(mBitBlockType), carry_out, getInt32(0));
+    } else if (carryTy != carry_out->getType()) {
         carry_out = CreateZExtOrTrunc(carry_out, carryTy);
     }
     return std::pair<Value *, Value *>{carry_out, bitCast(sum)};
@@ -405,8 +407,7 @@ std::pair<Value *, Value *> IDISA_AVX2_Builder::bitblock_indexed_advance(Value *
             }
             Value * carryOut = mvmd_insert(bitWidth, allZeroes(), carry, 0);
             return std::pair<Value *, Value *>{bitCast(carryOut), bitCast(result)};
-        }
-        else if (shiftAmount <= mBitBlockWidth) {
+        } else if (shiftAmount <= mBitBlockWidth) {
             // The shift amount is always greater than the popcount of the individual
             // elements that we deal with.   This simplifies some of the logic.
             Value * carry = CreateBitCast(shiftIn, iBitBlock);
@@ -421,8 +422,7 @@ std::pair<Value *, Value *> IDISA_AVX2_Builder::bitblock_indexed_advance(Value *
                 carry = CreateOr(carry, CreateShl(CreateZExt(bits, iBitBlock), CreateZExt(CreateSub(shiftVal, ix_popcnt), iBitBlock)));
             }
             return std::pair<Value *, Value *>{bitCast(carry), bitCast(result)};
-        }
-        else {
+        } else {
             // The shift amount is greater than the total popcount.   We will consume popcount
             // bits from the shiftIn value only, and produce a carry out value of the selected bits.
             // elements that we deal with.   This simplifies some of the logic.
@@ -463,29 +463,30 @@ Value * IDISA_AVX2_Builder::hsimd_signmask(unsigned fw, Value * a) {
 Value * IDISA_AVX2_Builder::mvmd_srl(unsigned fw, Value * a, Value * shift, const bool safe) {
     // Intrinsic::x86_avx2_permd) allows an efficient implementation for field width 32.
     // Translate larger field widths to 32 bits.
-    if (fw > 32) {
-        return fwCast(fw, mvmd_srl(32, a, CreateMul(shift, ConstantInt::get(shift->getType(), fw/32)), safe));
-    }
-    if ((mBitBlockWidth == 256) && (fw == 32)) {
-        Function * permuteFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx2_permd);
-        const unsigned fieldCount = mBitBlockWidth/fw;
-        Type * fieldTy = getIntNTy(fw);
-        SmallVector<Constant *, 16> indexes(fieldCount);
-        for (unsigned int i = 0; i < fieldCount; i++) {
-            indexes[i] = ConstantInt::get(fieldTy, i);
+    if (LLVM_LIKELY(mBitBlockWidth == 256)) {
+        if (fw > 32) {
+            return fwCast(fw, mvmd_srl(32, a, CreateMul(shift, ConstantInt::get(shift->getType(), fw/32)), safe));
+        } else if (fw == 32) {
+            Function * permuteFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx2_permd);
+            const unsigned fieldCount = mBitBlockWidth/fw;
+            Type * fieldTy = getIntNTy(fw);
+            SmallVector<Constant *, 16> indexes(fieldCount);
+            for (unsigned int i = 0; i < fieldCount; i++) {
+                indexes[i] = ConstantInt::get(fieldTy, i);
+            }
+            Constant * indexVec = ConstantVector::get(indexes);
+            Constant * fieldCountSplat = getSplat(fieldCount, ConstantInt::get(fieldTy, fieldCount));
+            Value * shiftSplat = simd_fill(fw, CreateZExtOrTrunc(shift, fieldTy));
+            Value * permuteVec = CreateAdd(indexVec, shiftSplat);
+            // Zero out fields that are above the max.
+            permuteVec = simd_and(permuteVec, simd_ult(fw, permuteVec, fieldCountSplat));
+            // Insert a zero value at position 0 (OK for shifts > 0)
+            Value * a0 = mvmd_insert(fw, a, Constant::getNullValue(fieldTy), 0);
+            Value * shifted = CreateCall(permuteFunc->getFunctionType(), permuteFunc, {a0, permuteVec});
+            return fwCast(32, simd_if(1, simd_eq(fw, shiftSplat, allZeroes()), a, shifted));
         }
-        Constant * indexVec = ConstantVector::get(indexes);
-        Constant * fieldCountSplat = getSplat(fieldCount, ConstantInt::get(fieldTy, fieldCount));
-        Value * shiftSplat = simd_fill(fw, CreateZExtOrTrunc(shift, fieldTy));
-        Value * permuteVec = CreateAdd(indexVec, shiftSplat);
-        // Zero out fields that are above the max.
-        permuteVec = simd_and(permuteVec, simd_ult(fw, permuteVec, fieldCountSplat));
-        // Insert a zero value at position 0 (OK for shifts > 0)
-        Value * a0 = mvmd_insert(fw, a, Constant::getNullValue(fieldTy), 0);
-        Value * shifted = CreateCall(permuteFunc->getFunctionType(), permuteFunc, {a0, permuteVec});
-        return fwCast(32, simd_if(1, simd_eq(fw, shiftSplat, allZeroes()), a, shifted));
     }
-    return IDISA_Builder::mvmd_srl(fw, a, shift, safe);
+    return IDISA_AVX_Builder::mvmd_srl(fw, a, shift, safe);
 }
 
 Value * IDISA_AVX2_Builder::mvmd_sll(unsigned fw, Value * a, Value * shift, const bool safe) {

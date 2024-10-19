@@ -257,7 +257,7 @@ protected:
     const unsigned              mLaneWidth;
     const unsigned              MAX_NATIVE_SIMD_SHIFT;
     const unsigned              MIN_NATIVE_SIMD_SHIFT;
-    FixedVectorType * const    mBitBlockType;
+    FixedVectorType * const     mBitBlockType;
     llvm::Constant * const      mZeroInitializer;
     llvm::Constant * const      mOneInitializer;
     llvm::Constant *            mPrintRegisterFunction;

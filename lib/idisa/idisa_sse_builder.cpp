@@ -130,52 +130,63 @@ Value * IDISA_SSE2_Builder::hsimd_signmask(unsigned fw, Value * a) {
     return IDISA_SSE_Builder::hsimd_signmask(fw, a);
 }
 
+#if 0
+
 #define SHIFT_FIELDWIDTH 64
 //#define LEAVE_CARRY_UNNORMALIZED
 
-#define CAST_SHIFT_OUT(shiftout) \
-    shiftTy == mBitBlockType ? bitCast(shiftout) : CreateTrunc(CreateBitCast(shiftout, getIntNTy(mBitBlockWidth)), shiftTy)
-
 // full shift producing {shiftout, shifted}
-std::pair<Value *, Value *> IDISA_SSE2_Builder::bitblock_advance(Value * a, Value * shiftin, unsigned shift) {
+std::pair<Value *, Value *> IDISA_SSE2_Builder::bitblock_advance(Value * const a, Value * shiftin, const unsigned shift) {
     Value * shifted = nullptr;
     Value * shiftout = nullptr;
     Type * shiftTy = shiftin->getType();
     assert (a->getType() == mBitBlockType);
+    assert (mBitBlockType->getElementType()->getIntegerBitWidth() == SHIFT_FIELDWIDTH);
     if (LLVM_UNLIKELY(shift == 0)) {
         return std::pair<Value *, Value *>(Constant::getNullValue(shiftTy), a);
     }
-    Value * si = shiftin;
     if (shiftTy != mBitBlockType) {
-        si = bitCast(CreateZExt(shiftin, getIntNTy(mBitBlockWidth)));
+        assert (shiftTy->isIntegerTy());
+        if (LLVM_LIKELY(shiftTy->getIntegerBitWidth() < SHIFT_FIELDWIDTH)) {
+            shiftin = CreateZExt(shiftin, getIntNTy(SHIFT_FIELDWIDTH));
+        }
+        shiftin = CreateInsertElement(ConstantVector::getNullValue(a->getType()), shiftin, getInt32(0));
     }
+    assert (shiftin->getType() == mBitBlockType);
+
+    auto getShiftout = [&](Value * v) {
+        if (v->getType() != shiftTy) {
+            v = CreateExtractElement(v, getInt32(0));
+            if (LLVM_LIKELY(shiftTy->getIntegerBitWidth() < SHIFT_FIELDWIDTH)) {
+                v = CreateTrunc(v, shiftTy);
+            }
+        }
+        return v;
+    };
+
     if (LLVM_UNLIKELY(shift == mBitBlockWidth)) {
-        assert (si->getType() == mBitBlockType);
-        return std::pair<Value *, Value *>(CreateBitCast(a, shiftTy), si);
+        return std::pair<Value *, Value *>(getShiftout(a), shiftin);
     }
 #ifndef LEAVE_CARRY_UNNORMALIZED
     if (LLVM_UNLIKELY((shift % 8) == 0)) { // Use a single whole-byte shift, if possible.
-        shifted = bitCast(simd_or(mvmd_slli(8, a, shift / 8), si));
+        shifted = CreateOr(bitCast(mvmd_slli(8, a, shift / 8)), shiftin);
         shiftout = bitCast(mvmd_srli(8, a, (mBitBlockWidth - shift) / 8));
-        assert (shifted->getType() == mBitBlockType);
-        return std::pair<Value *, Value *>(CAST_SHIFT_OUT(shiftout), shifted);
-    }
-    Value * shiftback = simd_srli(SHIFT_FIELDWIDTH, a, SHIFT_FIELDWIDTH - (shift % SHIFT_FIELDWIDTH));
-    Value * shiftfwd = simd_slli(SHIFT_FIELDWIDTH, a, shift % SHIFT_FIELDWIDTH);
-    if (LLVM_LIKELY(shift < SHIFT_FIELDWIDTH)) {
-        shiftout = mvmd_srli(SHIFT_FIELDWIDTH, shiftback, mBitBlockWidth/SHIFT_FIELDWIDTH - 1);
-        shifted = simd_or(simd_or(shiftfwd, si), mvmd_slli(SHIFT_FIELDWIDTH, shiftback, 1));
-    }
-    else {
-        shiftout = simd_or(shiftback, mvmd_srli(SHIFT_FIELDWIDTH, shiftfwd, 1));
-        shifted = simd_or(si, mvmd_slli(SHIFT_FIELDWIDTH, shiftfwd, (mBitBlockWidth - shift) / SHIFT_FIELDWIDTH));
-        if (shift < mBitBlockWidth - SHIFT_FIELDWIDTH) {
-            shiftout = mvmd_srli(SHIFT_FIELDWIDTH, shiftout, (mBitBlockWidth - shift) / SHIFT_FIELDWIDTH);
-            shifted = simd_or(shifted, mvmd_slli(SHIFT_FIELDWIDTH, shiftback, shift/SHIFT_FIELDWIDTH + 1));
+    } else {
+        Value * shiftback = simd_srli(SHIFT_FIELDWIDTH, a, SHIFT_FIELDWIDTH - (shift % SHIFT_FIELDWIDTH));
+        Value * shiftfwd = simd_slli(SHIFT_FIELDWIDTH, a, shift % SHIFT_FIELDWIDTH);
+        if (LLVM_LIKELY(shift < SHIFT_FIELDWIDTH)) {
+            shiftout = mvmd_srli(SHIFT_FIELDWIDTH, shiftback, mBitBlockWidth/SHIFT_FIELDWIDTH - 1);
+            shifted = CreateOr(CreateOr(shiftfwd, shiftin), mvmd_slli(SHIFT_FIELDWIDTH, shiftback, 1));
+        } else {
+            shiftout = CreateOr(shiftback, mvmd_srli(SHIFT_FIELDWIDTH, shiftfwd, 1));
+            shifted = CreateOr(shiftin, mvmd_slli(SHIFT_FIELDWIDTH, shiftfwd, (mBitBlockWidth - shift) / SHIFT_FIELDWIDTH));
+            if ((shift + SHIFT_FIELDWIDTH) < mBitBlockWidth) {
+                shiftout = mvmd_srli(SHIFT_FIELDWIDTH, shiftout, (mBitBlockWidth - shift) / SHIFT_FIELDWIDTH);
+                shifted = CreateOr(shifted, mvmd_slli(SHIFT_FIELDWIDTH, shiftback, shift/SHIFT_FIELDWIDTH + 1));
+            }
         }
     }
-#endif
-#ifdef LEAVE_CARRY_UNNORMALIZED
+#else
     shiftout = a;
     if (LLVM_UNLIKELY((shift % 8) == 0)) { // Use a single whole-byte shift, if possible.
         shifted = mvmd_dslli(8, a, shiftin, (mBitBlockWidth - shift) / 8);
@@ -189,9 +200,12 @@ std::pair<Value *, Value *> IDISA_SSE2_Builder::bitblock_advance(Value * a, Valu
     }
 #endif
     assert (shifted->getType() == mBitBlockType);
-    return std::pair<Value *, Value *>(CAST_SHIFT_OUT(shiftout), shifted);
+    assert (shiftout->getType() == mBitBlockType);
+    return std::pair<Value *, Value *>(getShiftout(shiftout), shifted);
 }
-    
+
+#endif
+
 Value * IDISA_SSE2_Builder::mvmd_shuffle(unsigned fw, Value * a, Value * index_vector) {
     if ((mBitBlockWidth == 128) && (fw == 64)) {
         // First create a vector with exchanged values of the 2 fields.

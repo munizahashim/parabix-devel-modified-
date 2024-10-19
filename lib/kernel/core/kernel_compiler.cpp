@@ -1751,4 +1751,39 @@ KernelCompiler::~KernelCompiler() {
 
 }
 
+
+//struct AggressiveCSEPass : public ModulePass {
+//    static char ID;
+//    AggressiveCSEPass() : ModulePass(ID) { }
+
+//    void getAnalysisUsage(AnalysisUsage & AU) const override {
+//        AU.addRequired<DominatorTreeWrapperPass>();
+//    }
+
+//    virtual bool runOnModule(Module &M) override;
+//};
+
+//ModulePass * createAggressiveCSEPass() {
+//    return new AggressiveCSEPass();
+//}
+
+//char AggressiveCSEPass::ID = 0;
+
+//bool AggressiveCSEPass::runOnModule(Module & M) {
+
+//    for (Function & F : M) {
+
+//        // ignore declarations
+//        if (F.empty()) continue;
+
+//        DominatorTree & DT = getAnalysis<DominatorTreeWrapperPass>(F).getDomTree();
+
+
+//        DT.dominates()
+
+
+//    }
+
+//}
+
 }
