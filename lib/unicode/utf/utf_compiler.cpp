@@ -1448,19 +1448,44 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, 
             }
             unit_range_base = unit_range_top + 1;  // for next unit in loop
         }
-        for (unsigned i = 0; i < high_cost_units.size(); i++) {
-            if (UTF_CompilationTracing) {
-                llvm::errs() << "  high cost unit = " << high_cost_units[i] << "\n";
-                llvm::errs() << "  range = " << high_cost_ranges[i].hex_string() << "\n";
+        if (!high_cost_units.empty()) {
+            unsigned partitions = PartitioningFactor;
+            if (unit_CC->count() > high_cost_units.size()) partitions -= 1;
+            if (high_cost_units.size() < partitions) partitions = high_cost_units.size();
+            unsigned units_processed = 0;
+            for (unsigned i = 0; i < partitions; i++) {
+                unsigned units_this_partition = (high_cost_units.size() - units_processed)/(partitions - i);
+                unsigned units_processed_next = units_processed + units_this_partition;
+                if (UTF_CompilationTracing) {
+                    llvm::errs() << "compileFromCodeUnit partition = " << i;
+                    llvm::errs() << "  units_processed = " << units_processed;
+                    llvm::errs() << "  units_this_partition = " << units_this_partition << "\n";
+                }
+                re::CC * partitionCC = re::makeCC(&Byte);
+                for (unsigned j = 0; j < units_this_partition; j++) {
+                    partitionCC = re::makeCC(partitionCC, re::makeCC(high_cost_units[units_processed + j], &Byte));
+                }
+                auto nested = pb.createScope();
+                PabloAST * t = compileCodeUnit(k, partitionCC, code_unit, pb);
+                Range partition{high_cost_ranges[units_processed].lo, high_cost_ranges[units_processed_next - 1].hi};
+                if ((code_unit > 1) || (mMask != nullptr)) {
+                    t = pb.createAnd(enclosing_test, t, "Rg_" + partition.hex_string());
+                }
+                pb.createIf(t, nested);
+                for (unsigned j = 0; j < units_this_partition; j++) {
+                    Range unitRange = high_cost_ranges[units_processed + j];
+                    if (units_this_partition > 1) {
+                        re::CC * unitCC = re::makeCC(high_cost_units[units_processed + j], &Byte);
+                        t = compileCodeUnit(k, unitCC, code_unit, nested);
+                        if ((code_unit > 1) || (mMask != nullptr)) {
+                            t = nested.createAnd(enclosing_test, t, "Rg_" + unitRange.hex_string());
+                        }
+                    }
+                    EnclosingInfo unitInfo(unitRange, t, code_unit);
+                    compileFromCodeUnit(k, unitInfo, code_unit + 1, nested);
+                }
+                units_processed = units_processed_next;
             }
-            auto nested = pb.createScope();
-            PabloAST * t = compileCodeUnit(k, re::makeCC(high_cost_units[i], &Byte), code_unit, pb);
-            if ((code_unit > 1) || (mMask != nullptr)) {
-                t = pb.createAnd(enclosing_test, t, "Rg_" + high_cost_ranges[i].hex_string());
-            }
-            pb.createIf(t, nested);
-            EnclosingInfo highCostInfo(high_cost_ranges[i], t, code_unit);
-            compileFromCodeUnit(k, highCostInfo, code_unit + 1, nested);
         }
     }
 }
@@ -1576,7 +1601,7 @@ unsigned U8_Advance_Compiler::costModel(CC_List & ccs, unsigned from_pos) {
         unsigned ranges = cc->size();
         unsigned logic_cost = ranges * (lgth - from_pos + 1) * BinaryLogicCostPerByte;
         costSoFar += logic_cost;
-        if (from_pos < lgth) {
+        if ((from_pos < lgth) && !AdvanceBasis) {
             unsigned cc_range = cc->max_codepoint() - cc->min_codepoint();
             unsigned final_shifts = cc_range/64;
             unsigned shift_cost = final_shifts * ShiftCostFactor;
