@@ -1105,7 +1105,6 @@ protected:
     void prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb);
     CC_List prepareFullBlockSets(U8_Seq_Kind k, CC_List ccs, PabloAST * enclosing_test, unsigned code_unit, PabloBuilder & pb);
     void compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, unsigned code_unit, PabloBuilder & pb);
-    virtual void compileRange(U8_Seq_Kind k, EnclosingInfo & enclosing, PabloBuilder & pb);
     PabloAST * compilePrefix(re::CC * prefixCC, PabloBuilder & pb);
     virtual PabloAST * compileCodeUnit(U8_Seq_Kind k, re::CC * unitCC, unsigned pos, PabloBuilder & pb) = 0;
     virtual void prepareSuffix(unsigned scope, PabloBuilder & pb) = 0;
@@ -1351,24 +1350,11 @@ void U8_Compiler::prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb) 
         auto hi_pfx = mSeqData[k].byte1CC->max_codepoint();
         Range tested{mEncoder.minCodePointWithPrefix(lo_pfx), mEncoder.maxCodePointWithPrefix(hi_pfx)};
         EnclosingInfo rangeInfo(tested, t);
-        compileRange(k, rangeInfo, pb);
+        compileFromCodeUnit(k, rangeInfo, 1, pb);
     }
     for (unsigned i = 0; i < mSeqData[k].seqCCs.size(); i++) {
         PabloAST * CC_test = pb.createAnd(mSeqData[k].targets[i], mSeqData[k].suffixTest);
         pb.createAssign(mTargets[i], pb.createOr(mTargets[i], CC_test));
-    }
-}
-
-void U8_Compiler::compileRange(U8_Seq_Kind k, EnclosingInfo & rangeInfo, PabloBuilder & pb) {
-    CC_List rangeCCs(mSeqData[k].seqCCs.size());
-    extract_CCs_by_range(rangeInfo.range, mSeqData[k].seqCCs, rangeCCs);
-    unsigned len = k+1;
-    if (UnifiedBasisBytes >= len) {
-        Basis_Set UnifiedBasis = prepareUnifiedBasis(rangeInfo.range);
-        Unicode_Range_Compiler range_compiler(UnifiedBasis, mSeqData[k].targets, pb);
-        range_compiler.compile(rangeCCs, rangeInfo);
-    } else {
-        compileFromCodeUnit(k, rangeInfo, 1, pb);
     }
 }
 
@@ -1380,7 +1366,7 @@ void U8_Compiler::compileRange(U8_Seq_Kind k, EnclosingInfo & rangeInfo, PabloBu
 void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, unsigned code_unit, PabloBuilder & pb) {
     unsigned lgth = mEncoder.encoded_length(enclosing.range.hi);
     assert(mEncoder.maxCodePointWithCommonCodeUnits(enclosing.range.lo, code_unit - 1) >= enclosing.range.hi &&
-           "compileAtCodeUnit called with range having code unit difference prior to code_unit pos");
+           "compileFromCodeUnit called with range having code unit difference prior to code_unit pos");
     CC_List rangeCCs(mSeqData[k].seqCCs.size());
     extract_CCs_by_range(enclosing.range, mSeqData[k].seqCCs, rangeCCs);
     if (UnifiedBasisBytes >= (lgth - code_unit + 1)) {
@@ -1450,7 +1436,7 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, 
         }
         if (!high_cost_units.empty()) {
             unsigned partitions = PartitioningFactor;
-            if (unit_CC->count() > high_cost_units.size()) partitions -= 1;
+            //if (unit_CC->count() > high_cost_units.size()) partitions -= 1;
             if (high_cost_units.size() < partitions) partitions = high_cost_units.size();
             unsigned units_processed = 0;
             for (unsigned i = 0; i < partitions; i++) {
@@ -1478,7 +1464,7 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, 
                         re::CC * unitCC = re::makeCC(high_cost_units[units_processed + j], &Byte);
                         t = compileCodeUnit(k, unitCC, code_unit, nested);
                         if ((code_unit > 1) || (mMask != nullptr)) {
-                            t = nested.createAnd(enclosing_test, t, "Rg_" + unitRange.hex_string());
+                            t = nested.createAnd(enclosing_test, t, "Subrg_" + unitRange.hex_string());
                         }
                     }
                     EnclosingInfo unitInfo(unitRange, t, code_unit);
@@ -1512,7 +1498,6 @@ protected:
     PabloAST * adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) override;
     PabloAST * compileCodeUnit(U8_Seq_Kind k, re::CC * unitCC, unsigned pos, PabloBuilder & pb) override;
     Basis_Set prepareUnifiedBasis(Range basis_range) override;
-    void compileRange(U8_Seq_Kind k, EnclosingInfo & enclosing, PabloBuilder & pb) override;
 };
 
 U8_Lookahead_Compiler::U8_Lookahead_Compiler(pablo::Var * v, PabloBuilder & pb, pablo::PabloAST * mask) :
@@ -1625,7 +1610,7 @@ void U8_Advance_Compiler::prepareSuffix(unsigned scope, PabloBuilder & pb) {
     }
 }
 
-const unsigned suffixDataBits = 8;
+const unsigned suffixDataBits = 6;
 
 void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
     mScopePosition = scope;
@@ -1654,11 +1639,12 @@ void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
             }
         }
     } else if (AdvanceBasis) {
+        const unsigned suffixBits = 8;
         for (unsigned sfx = 1; sfx <= scope; sfx++) {
             unsigned sfx_bits = mScopeBasis[sfx].size();
-            if (sfx_bits < suffixDataBits) {
-                mScopeBasis[sfx].resize(suffixDataBits);
-                for (unsigned i = sfx_bits; i < suffixDataBits; i++) {
+            if (sfx_bits < suffixBits) {
+                mScopeBasis[sfx].resize(suffixBits);
+                for (unsigned i = sfx_bits; i < suffixBits; i++) {
                     mScopeBasis[sfx][i] = pb.createAdvance(mScopeBasis[sfx-1][i], 1);
                 }
             }
@@ -1715,10 +1701,6 @@ Basis_Set U8_Advance_Compiler::prepareUnifiedBasis(Range cc_range) {
         }
     }
     return UnifiedBasis;
-}
-
-void U8_Advance_Compiler::compileRange(U8_Seq_Kind k, EnclosingInfo & rangeInfo, PabloBuilder & pb) {
-    compileFromCodeUnit(k, rangeInfo, 1, pb);
 }
 
 UTF_Compiler::UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb,
