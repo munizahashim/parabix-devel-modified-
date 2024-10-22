@@ -348,6 +348,9 @@ std::string && annotateKernelNameWithPabloDebugFlags(std::string && name) {
     default:
         llvm_unreachable("Illegal PabloCarryMode");
     }
+    if (PabloUseLLVMOptimizationPasses) {
+        name += "+LLVM-opt";
+    }
     return std::move(name);
 }
 
@@ -357,31 +360,33 @@ std::string && annotateKernelNameWithPabloDebugFlags(std::string && name) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PabloKernel::runOptimizationPasses(KernelBuilder & b) const {
 
-    FunctionAnalysisManager FAM;
-    FAM.registerPass([&] { return PassInstrumentationAnalysis(); });
-    FAM.registerPass([&] { return AssumptionAnalysis(); });
-    FAM.registerPass([&] { return TargetIRAnalysis(); });
-    FAM.registerPass([&] { return TargetLibraryAnalysis(); });
-    FAM.registerPass([&] { return DominatorTreeAnalysis(); });
-    FAM.registerPass([&] { return AAManager(); });
-    FAM.registerPass([&] { return MemorySSAAnalysis(); });
-    FAM.registerPass([&] { return LoopAnalysis(); });
-    FAM.registerPass([&] { return OptimizationRemarkEmitterAnalysis(); });
+    if (PabloUseLLVMOptimizationPasses) {
+        FunctionAnalysisManager FAM;
+        FAM.registerPass([&] { return PassInstrumentationAnalysis(); });
+        FAM.registerPass([&] { return AssumptionAnalysis(); });
+        FAM.registerPass([&] { return TargetIRAnalysis(); });
+        FAM.registerPass([&] { return TargetLibraryAnalysis(); });
+        FAM.registerPass([&] { return DominatorTreeAnalysis(); });
+        FAM.registerPass([&] { return AAManager(); });
+        FAM.registerPass([&] { return MemorySSAAnalysis(); });
+        FAM.registerPass([&] { return LoopAnalysis(); });
+        FAM.registerPass([&] { return OptimizationRemarkEmitterAnalysis(); });
 
- //   FAM.registerPass([&] { return ModuleAnalysisManagerFunctionProxy(); });
+     //   FAM.registerPass([&] { return ModuleAnalysisManagerFunctionProxy(); });
 
 
 
-    FunctionPassManager FPM;
-    FPM.addPass(EarlyCSEPass());
-//    FPM.addPass(InstCombinePass());
-    FPM.addPass(AggressiveInstCombinePass());
-    FPM.addPass(NewGVNPass());
-    FPM.addPass(DCEPass());
-    Module * M = b.getModule();
-    for (Function & F : *M) {
-        if (F.empty()) continue;
-        FPM.run(F, FAM);
+        FunctionPassManager FPM;
+        FPM.addPass(EarlyCSEPass());
+    //    FPM.addPass(InstCombinePass());
+        FPM.addPass(AggressiveInstCombinePass());
+        FPM.addPass(NewGVNPass());
+        FPM.addPass(DCEPass());
+        Module * M = b.getModule();
+        for (Function & F : *M) {
+            if (F.empty()) continue;
+            FPM.run(F, FAM);
+        }
     }
     Kernel::runOptimizationPasses(b);
 }

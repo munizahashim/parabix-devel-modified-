@@ -75,6 +75,11 @@ static cl::opt<std::string, true> PabloIllustrateBitstreamOption("pablo-illustra
                                                          cl::desc("RegEx describing Pablo statement names to illustrate"), cl::value_desc("regex"), cl::cat(PabloOptions));
 
 
+bool PabloUseLLVMOptimizationPasses = false;
+static cl::opt<bool, true> optPabloUseLLVMOptimizationPasses("pablo-llvm-optimization-passes", cl::location(PabloUseLLVMOptimizationPasses), cl::ValueOptional, cl::init(false),
+                                                         cl::desc("Run aggressive LLVM optimization passes on compiled Pablo code"),  cl::cat(PabloOptions));
+
+
 bool DebugOptionIsSet(const PabloDebugFlags flag) {return DebugOptions.isSet(flag);}
     
 bool CompileOptionIsSet(const PabloCompilationFlags flag) {return PabloOptimizationsOptions.isSet(flag);}

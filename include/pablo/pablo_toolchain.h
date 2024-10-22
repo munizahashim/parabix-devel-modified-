@@ -49,6 +49,8 @@ extern std::string PabloIllustrateBitstreamRegEx;
 
 const llvm::cl::OptionCategory * pablo_toolchain_flags();
 
+extern bool PabloUseLLVMOptimizationPasses;
+
 bool DebugOptionIsSet(const PabloDebugFlags flag);
 
 bool CompileOptionIsSet(const PabloCompilationFlags flag);

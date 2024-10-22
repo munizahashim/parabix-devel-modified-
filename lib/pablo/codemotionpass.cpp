@@ -9,10 +9,16 @@
 #ifndef NDEBUG
 #include <pablo/pabloverifier.hpp>
 #endif
+#include <pablo/printer_pablos.h>
+
+#define BEGIN_SCOPED_REGION {
+#define END_SCOPED_REGION }
 
 using namespace llvm;
 
 namespace pablo {
+
+using TypeId = PabloAST::ClassTypeId;
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief ScopeSet
@@ -43,7 +49,7 @@ struct CodeMotionPassContainer {
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief depthOf
      ** ------------------------------------------------------------------------------------------------------------- */
-    static int depthOf(PabloBlock * scope) {
+    static int depthOf(const PabloBlock * scope) {
         int depth = 0;
         while (scope) {
             ++depth;
@@ -182,6 +188,78 @@ struct CodeMotionPassContainer {
             }
         }
     }
+
+#if 0
+
+    /** ------------------------------------------------------------------------------------------------------------- *
+     * @brief hoistPostDominatedExpensiveOperations
+     ** ------------------------------------------------------------------------------------------------------------- */
+    void hoistPostDominatedExpensiveOperations(If * const conditional) {
+
+        auto isExpensiveOp = [](const Statement * stmt) -> bool {
+            switch (stmt->getClassTypeId()) {
+                case TypeId::Advance:
+                case TypeId::IndexedAdvance:
+                case TypeId::ScanThru:
+                case TypeId::AdvanceThenScanThru:
+                case TypeId::ScanTo:
+                case TypeId::AdvanceThenScanTo:
+                case TypeId::Lookahead:
+                case TypeId::MatchStar:
+                case TypeId::EveryNth:
+                    return true;
+                default:
+                    return false;
+            }
+        };
+
+
+        SmallVector<Statement *, 8> hoistable;
+
+        PabloBlock * const nestedBody = conditional->getBody();
+        const auto currentScopeDepth = depthOf(nestedBody);
+        for (Statement * stmt : *nestedBody) {
+            if (isExpensiveOp(stmt)) {
+                assert (stmt->getNumOperands() == 2);
+                const PabloAST * const expr = stmt->getOperand(0);
+                for (const PabloAST * other : expr->users()) {
+                    if (other->getClassTypeId() == stmt->getClassTypeId()) {
+                        if (other == stmt) {
+                            continue;
+                        }
+                        if (cast<Statement>(other)->getOperand(0) != expr) {
+                            continue;
+                        }
+                        if (cast<Statement>(other)->getOperand(1) != stmt->getOperand(1)) {
+                            continue;
+                        }
+                        // We've now found two equivalent expensive statements. At this stage of the
+                        // optimization process, neither should dominate the other. Although they're
+                        // likely to be in independent nested branches, if one post-dominates the other,
+                        // we can safely hoist the post-dominated statement above current if statement.
+                        // This might not be desirable if the distance is too great, however,
+
+                        const PabloBlock * scope = cast<Statement>(other)->getParent();
+                        const auto otherScopeDepth = depthOf(scope);
+                        if (currentScopeDepth < otherScopeDepth) {
+                            auto depth = otherScopeDepth;
+                            while (depth > currentScopeDepth) {
+                                assert (scope != nestedBody);
+                                scope = scope->getPredecessor();
+                                --depth;
+                            }
+                            // is post dominated
+                            if (scope == nestedBody) {
+                                hoistable.push_back(stmt);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+#endif
 
     /** ------------------------------------------------------------------------------------------------------------- *
      * @brief hoistLoopInvariants

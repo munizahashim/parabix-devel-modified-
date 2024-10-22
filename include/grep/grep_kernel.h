@@ -37,7 +37,7 @@ struct StreamIndexInfo {
 
 class ExternalStreamTable {
 public:
-    ExternalStreamTable() : mIllustrator(nullptr) {}
+    ExternalStreamTable() = default;
     StreamIndexCode declareStreamIndex(std::string indexName, StreamIndexCode base = 0, std::string indexStreamName = "");
     StreamIndexCode getStreamIndex(std::string indexName);
     void declareExternal(StreamIndexCode c, std::string externalName, ExternalStreamObject * ext);
@@ -47,12 +47,10 @@ public:
     StreamSet * getStreamSet(PipelineBuilder & b, StreamIndexCode c, std::string externalName);
     void resetExternals();  // Reset all externals to unresolved.
     void resolveExternals(PipelineBuilder &b);
-    void setIllustrator(ParabixIllustrator * illustrator) {mIllustrator = illustrator;}
     ~ExternalStreamTable();
 private:
     std::vector<StreamIndexInfo> mStreamIndices;
     std::vector<std::map<std::string, ExternalStreamObject *>> mExternalMap; // <-- memory leak
-    ParabixIllustrator * mIllustrator;
 };
 
 using ExternalMapRef = ExternalStreamTable *;

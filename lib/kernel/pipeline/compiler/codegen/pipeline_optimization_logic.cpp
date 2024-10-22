@@ -1,13 +1,18 @@
 #include "../pipeline_compiler.hpp"
-#include <llvm/Transforms/Scalar.h>
-#include <llvm/Transforms/Utils/Local.h>
-#include <llvm/Transforms/IPO.h>
-// #include <llvm/Transforms/Scalar/DCE.h>
-#include <llvm/IR/LegacyPassManager.h>
+#include <llvm/IR/PassManager.h>
+#include <llvm/Transforms/Scalar/DCE.h>
+#include <llvm/Transforms/Scalar/SimplifyCFG.h>
+#include <llvm/Transforms/Scalar/EarlyCSE.h>
 #ifndef NDEBUG
 #include <llvm/IR/Verifier.h>
 #endif
 #include <llvm/Transforms/Scalar/MemCpyOptimizer.h>
+#include <llvm/Transforms/Utils/Local.h>
+#include <llvm/Analysis/AssumptionCache.h>
+#include <llvm/Analysis/TargetTransformInfo.h>
+#include <llvm/Analysis/TargetLibraryInfo.h>
+#include <llvm/Analysis/AliasAnalysis.h>
+#include <llvm/Analysis/MemorySSA.h>
 
 namespace kernel {
 
@@ -40,12 +45,10 @@ void PipelineCompiler::replacePhiCatchWithCurrentBlock(KernelBuilder & b, BasicB
 
     if (!toReplace->empty()) {
         Instruction * toMove = &toReplace->front();
-//        auto & list = to->getInstList();
         while (toMove) {
             Instruction * const next = toMove->getNextNode();
             toMove->removeFromParent();
             toMove->insertAfter(&to->back());
-//            list.push_back(toMove);
             toMove = next;
         }
     }
@@ -65,7 +68,6 @@ void PipelineCompiler::runOptimizationPasses(KernelBuilder & b) {
     // detect any possible errors prior to optimizing it.
 
     Module * const m = b.getModule();
-    auto pm = std::make_unique<legacy::PassManager>();
 
     #ifndef NDEBUG
     SmallVector<char, 256> tmp;
@@ -73,29 +75,33 @@ void PipelineCompiler::runOptimizationPasses(KernelBuilder & b) {
     bool BrokenDebugInfo = false;
     if (LLVM_UNLIKELY(verifyModule(*m, &msg, &BrokenDebugInfo))) {
         m->print(errs(), nullptr);
-//        pm->add(createCFGOnlyPrinterLegacyPassPass());
-//        pm->run(*m);
         report_fatal_error(StringRef(msg.str()));
     }
     #endif
     simplifyPhiNodes(m);
 
-    pm->add(createDeadCodeEliminationPass());        // Eliminate any trivially dead code
-    pm->add(createCFGSimplificationPass());          // Remove dead basic blocks and unnecessary branch statements / phi nodes
-    pm->add(createEarlyCSEPass());
-    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(17, 0, 0)
-    // TODO: look into using the newer pass manager system
-    // pm->add(new MemCpyOptPass());
-    #else
-    pm->add(createMemCpyOptPass());
-    #endif
-    // pm->add(createHotColdSplittingPass());
-    pm->run(*m);
+    FunctionAnalysisManager FAM;
+    FAM.registerPass([&] { return PassInstrumentationAnalysis(); });
+    FAM.registerPass([&] { return AssumptionAnalysis(); });
+    FAM.registerPass([&] { return TargetIRAnalysis(); });
+    FAM.registerPass([&] { return TargetLibraryAnalysis(); });
+    FAM.registerPass([&] { return DominatorTreeAnalysis(); });
+    FAM.registerPass([&] { return AAManager(); });
+    FAM.registerPass([&] { return MemorySSAAnalysis(); });
+
+    FunctionPassManager FPM;
+    FPM.addPass(DCEPass()); // Eliminate any trivially dead code
+    FPM.addPass(SimplifyCFGPass());
+    FPM.addPass(EarlyCSEPass());
+    FPM.addPass(MemCpyOptPass());
+
+    Module * M = b.getModule();
+    for (Function & F : *M) {
+        if (F.empty()) continue;
+        FPM.run(F, FAM);
+    }
 
     simplifyPhiNodes(m);
-
-
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

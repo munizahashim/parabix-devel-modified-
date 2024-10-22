@@ -251,6 +251,7 @@ public:
             case TypeId::Xor:
             case TypeId::Advance:
             case TypeId::ScanThru:
+            case TypeId::Lookahead:
             case TypeId::MatchStar:
             case TypeId::Assign:
             case TypeId::PackL:
