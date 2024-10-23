@@ -1369,7 +1369,7 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, 
            "compileFromCodeUnit called with range having code unit difference prior to code_unit pos");
     CC_List rangeCCs(mSeqData[k].seqCCs.size());
     extract_CCs_by_range(enclosing.range, mSeqData[k].seqCCs, rangeCCs);
-    if (UnifiedBasisBytes >= (lgth - code_unit + 1)) {
+    if ((UnifiedBasisBytes + code_unit - 1) >= lgth) {
         Basis_Set UnifiedBasis = prepareUnifiedBasis(enclosing.range);
         Unicode_Range_Compiler range_compiler(UnifiedBasis, mSeqData[k].targets, pb);
         PabloAST * enclosing_test = adjustPosition(enclosing.test, enclosing.testPosition, lgth, pb);
@@ -1403,75 +1403,60 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, 
         for (unsigned i = 1; i < rangeCCs.size(); i++) {
             unionCC = re::makeCC(unionCC, rangeCCs[i]);
         }
-        std::map<unsigned, Range> high_cost_map;
-        std::vector<unsigned> high_cost_units;
-        std::vector<Range> high_cost_ranges;
         codepoint_t lo = unionCC->min_codepoint();
         codepoint_t unit_range_base = mEncoder.minCodePointWithCommonCodeUnits(lo, code_unit);
         re::CC * unit_CC = codeUnitCC(unionCC, code_unit);
         auto lo_unit = unit_CC->min_codepoint();
         auto hi_unit = unit_CC->max_codepoint();
+        unsigned units_to_process = unit_CC->count();
+        unsigned partitions = PartitioningFactor;
+        if (units_to_process < partitions) partitions = units_to_process;
+        
+        bool nesting = (partitions > 1) && (costModel(rangeCCs, code_unit) > IfEmbeddingCostThreshhold);
+        
+        codepoint_t partition_base = unit_range_base;
+        unsigned units_this_partition = 0;
+        unsigned unit_count = 0;
+        re::CC * partitionCC = nullptr;
         for (unsigned unit = lo_unit; unit <= hi_unit; unit++) {
-            if (UTF_CompilationTracing) {
-                llvm::errs() << "unit = " << unit << "\n";
-            }
             codepoint_t unit_range_top = mEncoder.maxCodePointWithCommonCodeUnits(unit_range_base, code_unit);
             if (unit_CC->contains(unit)) {
-                Range unitRange{unit_range_base, unit_range_top};
-                CC_List subrangeCCs(rangeCCs.size());
-                extract_CCs_by_range(unitRange, rangeCCs, subrangeCCs);
-                if (costModel(subrangeCCs, code_unit) < IfEmbeddingCostThreshhold) {
-                    PabloAST * t = compileCodeUnit(k, re::makeCC(unit, &Byte), code_unit, pb);
+                if (unit_count == 0) {
+                    partition_base = unit_range_base;
+                    units_this_partition = units_to_process/partitions;
+                    partitionCC = re::makeCC(&Byte);
+                }
+                partitionCC = re::makeCC(partitionCC, re::makeCC(unit, &Byte));
+                unit_count++;
+                if (unit_count == units_this_partition) {
+                    Range partitionRange{partition_base, unit_range_top};
+                    PabloAST * t = compileCodeUnit(k, partitionCC, code_unit, pb);
                     if ((code_unit > 1) || (mMask != nullptr)) {
-                        t = pb.createAnd(enclosing_test, t);
+                        t = pb.createAnd(enclosing_test, t, "rg_" + partitionRange.hex_string());
                     }
-                    EnclosingInfo unitInfo(unitRange, t, code_unit);
-                    compileFromCodeUnit(k, unitInfo, code_unit + 1, pb);
-                } else {
-                    high_cost_units.push_back(unit);
-                    high_cost_ranges.push_back(unitRange);
+                    EnclosingInfo partitionInfo(partitionRange, t, code_unit);
+                    if (nesting) {
+                        auto nested = pb.createScope();
+                        pb.createIf(t, nested);
+                        if (units_this_partition == 1) {
+                            compileFromCodeUnit(k, partitionInfo, code_unit + 1, nested);
+                        } else {
+                            compileFromCodeUnit(k, partitionInfo, code_unit, nested);
+                        }
+                    } else {
+                        if (units_this_partition == 1) {
+                            compileFromCodeUnit(k, partitionInfo, code_unit + 1, pb);
+                        } else {
+                            compileFromCodeUnit(k, partitionInfo, code_unit, pb);
+                        }
+                    }
+                    // Partition is done; reset for next partition.
+                    unit_count = 0;
+                    units_to_process -= units_this_partition;
+                    partitions--;
                 }
             }
             unit_range_base = unit_range_top + 1;  // for next unit in loop
-        }
-        if (!high_cost_units.empty()) {
-            unsigned partitions = PartitioningFactor;
-            //if (unit_CC->count() > high_cost_units.size()) partitions -= 1;
-            if (high_cost_units.size() < partitions) partitions = high_cost_units.size();
-            unsigned units_processed = 0;
-            for (unsigned i = 0; i < partitions; i++) {
-                unsigned units_this_partition = (high_cost_units.size() - units_processed)/(partitions - i);
-                unsigned units_processed_next = units_processed + units_this_partition;
-                if (UTF_CompilationTracing) {
-                    llvm::errs() << "compileFromCodeUnit partition = " << i;
-                    llvm::errs() << "  units_processed = " << units_processed;
-                    llvm::errs() << "  units_this_partition = " << units_this_partition << "\n";
-                }
-                re::CC * partitionCC = re::makeCC(&Byte);
-                for (unsigned j = 0; j < units_this_partition; j++) {
-                    partitionCC = re::makeCC(partitionCC, re::makeCC(high_cost_units[units_processed + j], &Byte));
-                }
-                auto nested = pb.createScope();
-                PabloAST * t = compileCodeUnit(k, partitionCC, code_unit, pb);
-                Range partition{high_cost_ranges[units_processed].lo, high_cost_ranges[units_processed_next - 1].hi};
-                if ((code_unit > 1) || (mMask != nullptr)) {
-                    t = pb.createAnd(enclosing_test, t, "Rg_" + partition.hex_string());
-                }
-                pb.createIf(t, nested);
-                for (unsigned j = 0; j < units_this_partition; j++) {
-                    Range unitRange = high_cost_ranges[units_processed + j];
-                    if (units_this_partition > 1) {
-                        re::CC * unitCC = re::makeCC(high_cost_units[units_processed + j], &Byte);
-                        t = compileCodeUnit(k, unitCC, code_unit, nested);
-                        if ((code_unit > 1) || (mMask != nullptr)) {
-                            t = nested.createAnd(enclosing_test, t, "Subrg_" + unitRange.hex_string());
-                        }
-                    }
-                    EnclosingInfo unitInfo(unitRange, t, code_unit);
-                    compileFromCodeUnit(k, unitInfo, code_unit + 1, nested);
-                }
-                units_processed = units_processed_next;
-            }
         }
     }
 }
@@ -1631,8 +1616,8 @@ void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
         Range testRange{test_lo, test_hi};
         unsigned variable_bits = testRange.significant_bits();
         unsigned prefix_bits = 0;
-        if (variable_bits > scope * 6) {
-            prefix_bits = variable_bits - scope * 6;
+        if (variable_bits > scope * suffixDataBits) {
+            prefix_bits = variable_bits - scope * suffixDataBits;
             mScopeBasis[scope].resize(prefix_bits);
             for (unsigned i = 0; i < prefix_bits; i++) {
                 mScopeBasis[scope][i] = pb.createAdvance(mScopeBasis[scope-1][i], 1);
