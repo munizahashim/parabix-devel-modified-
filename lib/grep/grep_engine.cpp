@@ -962,7 +962,7 @@ void EmitMatchesEngine::grepPipeline(kernel::PipelineBuilder & E, StreamSet * By
 
         StreamSet * Filtered = E.CreateStreamSet(1, 8);
         if (UseByteFilterByMask) {
-            FilterByMask(E, MatchedLineSpans, ByteStream, Filtered, 0, 64, true);
+            FilterByMask(E, MatchedLineSpans, ByteStream, Filtered, 0, 64);
         } else {
             E.CreateKernelCall<MatchFilterKernel>(MatchedLineStarts, mLineBreakStream, ByteStream, Filtered);
         }

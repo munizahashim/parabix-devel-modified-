@@ -53,13 +53,9 @@ static cl::OptionCategory ufFlags("Command Flags", "ufilter options");
 static cl::opt<std::string> CC_expr(cl::Positional, cl::desc("<Unicode character class expression>"), cl::Required, cl::cat(ufFlags));
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"),  cl::cat(ufFlags));
 
-static cl::opt<bool> UseDefaultFilter("default-filter", cl::desc("Use the default byte filter by mask via S2P-FilterByMaks-P2S"), cl::cat(ufFlags));
-
 #define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
 #define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
-
-
 
 typedef void (*UFiltertFunctionType)(uint32_t fd);
 
@@ -102,12 +98,8 @@ UFiltertFunctionType pipelineGen(CPUDriver & driver, re::Name * CC_name) {
 
     StreamSet * const FilteredBytes = P.CreateStreamSet(1, 8);
 
-    if (UseDefaultFilter) {
-        FilterByMask(P, CCspans, ByteStream, FilteredBytes, 0, 64, true);
-    } else {
-        // Replace the following with a custom ByteFilterByMask operation.
-        FilterByMask(P, CCspans, ByteStream, FilteredBytes, 0, 64, true);
-    }
+    FilterByMask(P, CCspans, ByteStream, FilteredBytes, 0, 64);
+
     SHOW_BYTES(FilteredBytes);
 
     P.CreateKernelCall<StdOutKernel>(FilteredBytes);

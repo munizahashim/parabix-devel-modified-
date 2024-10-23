@@ -82,7 +82,7 @@ void ScanMatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
     Value * lineCountArrayWordPtr = nullptr;
     if (mLineNumbering) {
         initialLineNum = b.getScalarField("LineNum");
-        lineCountArrayBlockPtr = b.CreateAlignedAlloca(blockTy,
+        lineCountArrayBlockPtr = b.CreateAlignedAllocaAtEntryPoint(blockTy,
                                                         b.getBitBlockWidth()/BITS_PER_BYTE,
                                                         sz_BLOCKS_PER_STRIDE);
         // Bitcast the lineNumberArrayptr to access by scanWord number
@@ -356,7 +356,7 @@ void ScanBatchKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const n
     Value * lineCountArrayWordPtr = nullptr;
     if (mLineNumbering) {
         initialLineNum = b.getScalarField("LineNum");
-        lineCountArrayBlockPtr = b.CreateAlignedAlloca(blockTy,
+        lineCountArrayBlockPtr = b.CreateAlignedAllocaAtEntryPoint(blockTy,
                                                         b.getBitBlockWidth()/BITS_PER_BYTE,
                                                         sz_BLOCKS_PER_STRIDE);
         // Bitcast the lineNumberArrayptr to access by scanWord number
@@ -728,7 +728,7 @@ void MatchCoordinatesKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     Value * lineCountArrayWordPtr = nullptr;
     if (mLineNumbering) {
         initialLineNum = b.getScalarField("LineNum");
-        lineCountArrayBlockPtr = b.CreateAlignedAlloca(blockTy,
+        lineCountArrayBlockPtr = b.CreateAlignedAllocaAtEntryPoint(blockTy,
                                                         b.getBitBlockWidth()/BITS_PER_BYTE,
                                                         sz_BLOCKS_PER_STRIDE);
         // Bitcast the lineNumberArrayptr to access by scanWord number
@@ -959,7 +959,7 @@ void BatchCoordinatesKernel::generateMultiBlockLogic(KernelBuilder & b, Value * 
     Value * lineCountArrayWordPtr = nullptr;
     if (mLineNumbering) {
         initialLineNum = b.getScalarField("pendingLineNum");
-        lineCountArrayBlockPtr = b.CreateAlignedAlloca(blockTy,
+        lineCountArrayBlockPtr = b.CreateAlignedAllocaAtEntryPoint(blockTy,
                                                         b.getBitBlockWidth()/BITS_PER_BYTE,
                                                         sz_BLOCKS_PER_STRIDE);
         // Bitcast the lineNumberArrayptr to access by scanWord number

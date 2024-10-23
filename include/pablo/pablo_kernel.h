@@ -192,6 +192,8 @@ private:
 
     void generateFinalizeMethod(KernelBuilder & b) final;
 
+    void runOptimizationPasses(KernelBuilder & b) const final;
+
 private:
 
     Allocator                        mAllocator;

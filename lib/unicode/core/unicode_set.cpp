@@ -66,13 +66,21 @@ inline UnicodeSet::length_t lengthOf(const run_t & run) {
 template<typename T>
 inline void copy_(T * dst, const T * src, const size_t n) {
 //    static_assert(std::is_trivially_copyable<T>::value, "cannot safely call memcpy on type");
-    std::memcpy(static_cast<void *>(dst), static_cast<const void *>(src), n * sizeof(T));
+    assert (src || n == 0);
+    assert (dst);
+    if (n) {
+       std::memcpy(static_cast<void *>(dst), static_cast<const void *>(src), n * sizeof(T));
+    }
 }
 
 template<typename T>
 inline void move_(T * dst, const T * src, const size_t n) {
 //    static_assert(std::is_trivially_copyable<T>::value, "cannot safely call mem on type");
-    std::memmove(static_cast<void *>(dst), static_cast<const void *>(src), n * sizeof(T));
+    assert (src || n == 0);
+    assert (dst);
+    if (n) {
+        std::memmove(static_cast<void *>(dst), static_cast<const void *>(src), n * sizeof(T));
+    }
 }
 
 template<typename T>

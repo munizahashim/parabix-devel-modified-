@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <cstdarg>
+#include <cstdlib>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -32,11 +33,15 @@ using boost::intrusive::detail::floor_log2;
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
 #include <llvm/Support/Alignment.h>
 #endif
+#include <unistd.h>
 
 static constexpr unsigned NON_HUGE_PAGE_SIZE = 4096;
 
+static constexpr auto ALIGNED_ALLOC_NAME = "std_aligned_alloc";
+
 #ifdef HAS_ADDRESS_SANITIZER
 #include <llvm/Analysis/AliasAnalysis.h>
+#include <sanitizer/asan_interface.h>
 #endif
 
 #if defined(__i386__)
@@ -74,6 +79,9 @@ static constexpr unsigned NON_HUGE_PAGE_SIZE = 4096;
 #else
     using FixedVectorType = llvm::FixedVectorType;
 #endif
+
+#define BEGIN_SCOPED_REGION {
+#define END_SCOPED_REGION }
 
 using namespace llvm;
 
@@ -417,6 +425,9 @@ CallInst * CBuilder::CallPrintInt(StringRef name, Value * const value, const STD
     return CreateCall(FT, printRegister, {getInt32(static_cast<uint32_t>(fd)), GetString(name), num});
 }
 
+
+
+
 Value * CBuilder::CreateMalloc(Value * size) {
     Module * const m = getModule();
     IntegerType * const sizeTy = getSizeTy();
@@ -465,7 +476,7 @@ Value * CBuilder::CreateCacheAlignedMalloc(Value * const size) {
 Value * CBuilder::CreateAlignedMalloc(Type * const type, Value * const ArraySize, const unsigned addressSpace, const unsigned alignment) {
 
     IntegerType * const sizeTy = getSizeTy();
-
+    assert (type);
     Value * size = getTypeSize(type);
     if (ArraySize) {
         size = CreateMul(size, CreateZExtOrTrunc(ArraySize, sizeTy));
@@ -481,7 +492,6 @@ Value * CBuilder::CreateAlignedMalloc(Value * size, const unsigned alignment) {
     }
     Module * const m = getModule();
     IntegerType * const sizeTy = getSizeTy();
-    PointerType * const voidPtrTy = getVoidPtrTy();
     ConstantInt * const align = ConstantInt::get(sizeTy, alignment);
     size = CreateZExtOrTrunc(size, sizeTy);
 
@@ -495,32 +505,9 @@ Value * CBuilder::CreateAlignedMalloc(Value * size, const unsigned alignment) {
                        "CreateAlignedMalloc: allocation size (%" PRIu64 ") must be an "
                        "integral multiple of alignment (%" PRIu64 ").", {size, align});
     }
-    Value * ptr = nullptr;
-    if (hasAlignedAlloc()) {
-        FunctionType * const fty = FunctionType::get(voidPtrTy, {sizeTy, sizeTy}, false);
-        Function * f = m->getFunction("aligned_alloc");
-        if (LLVM_UNLIKELY(f == nullptr)) {
-            f = Function::Create(fty, Function::ExternalLinkage, "aligned_alloc", m);
-            f->setCallingConv(CallingConv::C);
-            f->setReturnDoesNotAlias();
-        }
-        ptr = CreateCall(fty, f, {align, size});
-    } else if (hasPosixMemalign()) {
-        FunctionType * const fty = FunctionType::get(getInt32Ty(), {voidPtrTy->getPointerTo(), sizeTy, sizeTy}, false);
-        Function * f = m->getFunction("posix_memalign");
-        if (LLVM_UNLIKELY(f == nullptr)) {
-            f = Function::Create(fty, Function::ExternalLinkage, "posix_memalign", m);
-            f->setCallingConv(CallingConv::C);
-        }
-        Value * handle = CreateAlloca(voidPtrTy);
-        CallInst * const success = CreateCall(fty, f, {handle, align, size});
-        if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-            __CreateAssert(CreateIsNull(success), "CreateAlignedMalloc: posix_memalign reported bad allocation (%d)", {success});
-        }
-        ptr = IRBuilder<>::CreateLoad(voidPtrTy, handle);
-    } else {
-        report_fatal_error("stdlib.h does not contain either aligned_alloc or posix_memalign");
-    }
+
+    Function * fAlignedAlloc = m->getFunction(ALIGNED_ALLOC_NAME); assert (fAlignedAlloc);
+    Value * ptr = CreateCall(fAlignedAlloc->getFunctionType(), fAlignedAlloc, {align, size});
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         __CreateAssert(CreateIsNotNull(ptr), "CreateAlignedMalloc: returned null when attempting "
                                              "to allocate %" PRIu64 " bytes at %" PRIu64 " alignment (out of memory?)",
@@ -528,15 +515,6 @@ Value * CBuilder::CreateAlignedMalloc(Value * size, const unsigned alignment) {
     }
     CreateMemZero(ptr, size, alignment);
     return ptr;
-}
-
-inline bool CBuilder::hasAlignedAlloc() const {
-    return mDriver && mDriver->hasExternalFunction("aligned_alloc");
-}
-
-
-inline bool CBuilder::hasPosixMemalign() const {
-    return mDriver && mDriver->hasExternalFunction("posix_memalign");
 }
 
 Value * CBuilder::CreateRealloc(Type * const type, Value * const base, Value * const ArraySize) {
@@ -559,15 +537,18 @@ Value * CBuilder::CreateRealloc(Value * const base, Value * const size) {
         f = Function::Create(fty, Function::ExternalLinkage, "realloc", m);
         f->setCallingConv(CallingConv::C);
         f->setReturnDoesNotAlias();
-    }
-    CallInst * const ci = CreateCall(fty, f, {CreatePointerCast(base, voidPtrTy), CreateZExtOrTrunc(size, sizeTy)});
-    return CreatePointerCast(ci, base->getType());
+    }    
+    Value * basePtr = CreatePointerCast(base, voidPtrTy);
+    CallInst * const ci = CreateCall(fty, f, {basePtr, CreateZExtOrTrunc(size, sizeTy)});
+    Value * ptr = CreatePointerCast(ci, base->getType());
+    return ptr;
 }
 
 void CBuilder::CreateFree(Value * const ptr) {
     assert (ptr->getType()->isPointerTy());
     Module * const m = getModule();
     Type * const voidPtrTy =  getVoidPtrTy();
+    Value * castPtr = CreatePointerCast(ptr, voidPtrTy);
     if (codegen::FreeCallBisectLimit >= 0) {
         FunctionType * fty = FunctionType::get(getVoidTy(), {voidPtrTy}, false);
         Function * dispatcher = m->getFunction("free_debug_wrapper");
@@ -575,7 +556,7 @@ void CBuilder::CreateFree(Value * const ptr) {
             dispatcher = Function::Create(fty, Function::ExternalLinkage, "free_debug_wrapper", m);
             dispatcher->setCallingConv(CallingConv::C);
             assert (dispatcher);
-            CreateCall(fty, dispatcher, CreatePointerCast(ptr, voidPtrTy));
+            CreateCall(fty, dispatcher, castPtr);
         }
     } else {
         FunctionType * fty = FunctionType::get(getVoidTy(), {voidPtrTy}, false);
@@ -584,7 +565,7 @@ void CBuilder::CreateFree(Value * const ptr) {
             f = Function::Create(fty, Function::ExternalLinkage, "free", m);
             f->setCallingConv(CallingConv::C);
         }
-        CreateCall(fty, f, CreatePointerCast(ptr, voidPtrTy));
+        CreateCall(fty, f, castPtr);
     }
 }
 
@@ -684,7 +665,7 @@ Value * CBuilder::CreateFTruncate(Value * const fd, Value * size) {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         DataLayout DL(m);
         Value * success = CreateICmpNE(retVal, ConstantInt::get(getInt32Ty(), -1ULL));
-        CreateAssert(success, "CreateFTruncate: failed to truncate fd");
+        __CreateAssert(success, "CreateFTruncate: failed to truncate fd", {});
     }
     return retVal;
 }
@@ -781,6 +762,7 @@ Value * CBuilder::CreateMUnmap(Value * addr, Value * len) {
         munmapFunc = Function::Create(fty, Function::ExternalLinkage, "munmap", m);
     }
     len = CreateZExtOrTrunc(len, sizeTy);
+    addr = CreatePointerCast(addr, voidPtrTy);
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
         DataLayout DL(getModule());
         IntegerType * const intPtrTy = getIntPtrTy(DL);
@@ -791,7 +773,6 @@ Value * CBuilder::CreateMUnmap(Value * addr, Value * len) {
         Value * const boundCheck = CreateICmpULT(addrValue, CreateSub(ConstantInt::getAllOnesValue(intPtrTy), CreateZExtOrTrunc(len, intPtrTy)));
         CreateAssert(boundCheck, "CreateMUnmap: addresses in [addr, addr+len) are outside the valid address space range");
     }
-    addr = CreatePointerCast(addr, voidPtrTy);
     return CreateCall(fty, munmapFunc, {addr, len});
 }
 
@@ -1362,24 +1343,6 @@ void CBuilder::CreateExit(const int exitCode) {
     CreateCall(exit->getFunctionType(), exit, getInt32(exitCode));
 }
 
-AllocaInst * CBuilder::CreateAllocaAtEntryPoint(Type * Ty, Value * ArraySize, const Twine Name) {
-
-    auto BB = GetInsertBlock();
-    auto F = BB->getParent();
-    auto entryBlock = F->begin();
-    if (LLVM_UNLIKELY(entryBlock == F->end())) {
-        report_fatal_error("CreateAllocaAtEntryPoint cannot create a value in an empty function");
-    }
-    auto const first = entryBlock->getFirstNonPHIOrDbgOrLifetime();
-    const auto & DL = F->getParent()->getDataLayout();
-    const auto addrSize = DL.getAllocaAddrSpace();
-    if (LLVM_UNLIKELY(first == nullptr)) {
-        return new AllocaInst(Ty, addrSize, ArraySize, Name, &*entryBlock);
-    } else {
-        return new AllocaInst(Ty, addrSize, ArraySize, Name, first);
-    }
-}
-
 BasicBlock * CBuilder::CreateBasicBlock(const StringRef name, BasicBlock * insertBefore) {
     return BasicBlock::Create(getContext(), name, GetInsertBlock()->getParent(), insertBefore);
 }
@@ -1710,10 +1673,51 @@ CallInst * CBuilder::CreateMemCmp(Value * Ptr1, Value * Ptr2, Value * Num) {
     return CreateCall(f->getFunctionType(), f, {Ptr1, Ptr2, Num});
 }
 
+AllocaInst * CBuilder::CreateAllocaAtEntryPoint(Type * Ty, Value * ArraySize, const Twine Name) {
+
+    auto BB = GetInsertBlock();
+    auto F = BB->getParent();
+    auto entryBlock = F->begin();
+    if (LLVM_UNLIKELY(entryBlock == F->end())) {
+        report_fatal_error("CreateAllocaAtEntryPoint cannot create a value in an empty function");
+    }
+    const auto & DL = F->getParent()->getDataLayout();
+    const auto addrSize = DL.getAllocaAddrSpace();
+    auto const first = entryBlock->getFirstNonPHIOrDbgOrLifetime();
+    AllocaInst * alloca = nullptr;
+    if (LLVM_UNLIKELY(first == nullptr)) {
+        alloca = new AllocaInst(Ty, addrSize, ArraySize, Name, &*entryBlock);
+    } else {
+        alloca = new AllocaInst(Ty, addrSize, ArraySize, Name, first);
+    }
+    return alloca;
+}
+
+
 AllocaInst * CBuilder::CreateAlignedAlloca(Type * const Ty, const unsigned Align, Value * const ArraySize) {
-    AllocaInst * const alloc = CreateAlloca(Ty, ArraySize);
-    alloc->setAlignment(AlignType{Align});
-    return alloc;
+    AllocaInst * const alloca = IRBuilder<>::CreateAlloca(Ty, ArraySize);
+    alloca->setAlignment(AlignType{Align});
+    return alloca;
+}
+
+AllocaInst * CBuilder::CreateAlignedAllocaAtEntryPoint(llvm::Type * const Ty, const unsigned alignment, llvm::Value * const ArraySize) {
+    auto BB = GetInsertBlock();
+    auto F = BB->getParent();
+    auto entryBlock = F->begin();
+    if (LLVM_UNLIKELY(entryBlock == F->end())) {
+        report_fatal_error("CreateAllocaAtEntryPoint cannot create a value in an empty function");
+    }
+    const auto & DL = F->getParent()->getDataLayout();
+    const auto addrSize = DL.getAllocaAddrSpace();
+    auto const first = entryBlock->getFirstNonPHIOrDbgOrLifetime();
+    AllocaInst * alloca = nullptr;
+    if (LLVM_UNLIKELY(first == nullptr)) {
+        alloca = new AllocaInst(Ty, addrSize, ArraySize, "", &*entryBlock);
+    } else {
+        alloca = new AllocaInst(Ty, addrSize, ArraySize, "", first);
+    }
+    alloca->setAlignment(AlignType{alignment});
+    return alloca;
 }
 
 Value * CBuilder::CreateExtractElement(Value * Vec, Value *Idx, const Twine Name) {
@@ -1939,11 +1943,15 @@ static inline bool notConstantZeroArraySize(const AllocaInst * const Base) {
     return false;
 }
 
+
 void CBuilder::CheckAddress(Value * const Ptr, Value * const Size, Constant * const Name) {
+
     __CreateAssert(CreateOr(CreateIsNotNull(Ptr), CreateIsNull(Size)), "%s was given a null address", {Name});
+
+
     if (AllocaInst * Base = resolveStackAddress(Ptr)) {
-        DataLayout DL(getModule());
-        IntegerType * const intPtrTy = cast<IntegerType>(DL.getIntPtrType(Ptr->getType()));
+        IntegerType * const intPtrTy = getIntPtrTy(getModule()->getDataLayout());
+
         Value * sz = getTypeSize(Base->getAllocatedType(), intPtrTy);
         if (notConstantZeroArraySize(Base)) {
             sz = CreateMul(sz, CreateZExtOrTrunc(Base->getArraySize(), intPtrTy));
@@ -1955,27 +1963,28 @@ void CBuilder::CheckAddress(Value * const Ptr, Value * const Size, Constant * co
         Value * const valid = CreateAnd(CreateICmpUGE(p, s), CreateICmpULE(w, e));
         __CreateAssert(valid, "%s was given an invalid stack address (%" PRIx64 ")", {Name, p});
     }
+
     #ifdef HAS_ADDRESS_SANITIZER
-    if (LLVM_UNLIKELY(hasAddressSanitizer())) {
+//    if (LLVM_UNLIKELY(hasAddressSanitizer())) {
         Module * const m = getModule();
         PointerType * const voidPtrTy = getVoidPtrTy();
         IntegerType * const sizeTy = getSizeTy();
         Function * isPoisoned = m->getFunction("__asan_region_is_poisoned");
         if (LLVM_UNLIKELY(isPoisoned == nullptr)) {
-            isPoisoned = Function::Create(FunctionType::get(voidPtrTy, {voidPtrTy, sizeTy}, false), Function::ExternalLinkage, "__asan_region_is_poisoned", m);
+            FunctionType * const funcTy = FunctionType::get(voidPtrTy, {voidPtrTy, sizeTy}, false);
+            isPoisoned = LinkFunction( "__asan_region_is_poisoned", funcTy, (void*)__asan_region_is_poisoned);
             isPoisoned->setCallingConv(CallingConv::C);
             isPoisoned->setReturnDoesNotAlias();
         }
         Value * const addr = CreatePointerCast(Ptr, voidPtrTy);
         Value * const firstPoisoned = CreateCall(isPoisoned->getFunctionType(), isPoisoned, { addr, CreateTrunc(Size, sizeTy) });
         Value * const valid = CreateICmpEQ(firstPoisoned, ConstantPointerNull::get(voidPtrTy));
-        DataLayout DL(getModule());
-        IntegerType * const intPtrTy = cast<IntegerType>(DL.getIntPtrType(firstPoisoned->getType()));
+        IntegerType * const intPtrTy = getIntPtrTy(getModule()->getDataLayout());
         Value * const startInt = CreatePtrToInt(Ptr, intPtrTy);
         Value * const firstPoisonedInt = CreatePtrToInt(firstPoisoned, intPtrTy);
         Value * const offset = CreateSub(firstPoisonedInt, startInt);
         __CreateAssert(valid, "%s was given an unallocated %" PRIuMAX "-byte memory address 0x%" PRIxPTR " (first poisoned=%" PRIuMAX ")", {Name, Size, Ptr, offset});
-    }
+//    }
     #endif
 }
 
@@ -2038,6 +2047,7 @@ ModulePass * createRemoveRedundantAssertionsPass() {
 char RemoveRedundantAssertionsPass::ID = 0;
 
 bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
+
     Function * const assertFunc = M.getFunction("assert");
     if (LLVM_UNLIKELY(assertFunc == nullptr)) {
         return false;
@@ -2064,7 +2074,7 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
 
         assertions.clear();
         // scan through each instruction and remove any trivially true or redundant assertions.
-        for (auto & B : F) {
+        for (auto & B : F) { 
             for (auto i = B.begin(); i != B.end(); ) {
                 Instruction & inst = *i;
                 if (LLVM_UNLIKELY(isa<CallInst>(inst))) {
@@ -2141,20 +2151,28 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
                                     a = a->stripPointerCasts();
                                     if (LLVM_LIKELY(isa<GlobalVariable>(a))) {
                                         const GlobalVariable * const g = cast<GlobalVariable>(a);
-                                        const ConstantDataArray * const d = cast<ConstantDataArray>(g->getInitializer());
-                                        // StringRef does not "own" the data
-                                        const StringRef ref = d->getRawDataValues();
-                                        return ref.data();
+                                        const Constant * const gi = g->getInitializer(); assert (gi);
+                                        if (LLVM_LIKELY(isa<ConstantDataArray>(gi))) {
+                                            const ConstantDataArray * const d = cast<ConstantDataArray>(gi);
+                                            // StringRef does not "own" the data
+                                            const StringRef ref = d->getRawDataValues();
+                                            return ref.data();
+                                        } else {
+                                            errs() << "WARNING: \"";
+                                            ci.print(errs());
+                                            errs() << "\" has an unexpected trace log format\n";
+                                            return nullptr;
+                                        }
                                     } else {
-                                        assert (isa<ConstantPointerNull>(a) || isa<Function>(a));
-                                        return nullptr;
+                                        assert (isa<ConstantPointerNull>(a) || isa<Function>(a));    
                                     }
+                                    return nullptr;
                                 };
 
                                 const char * const name = extract(ci.getArgOperand(1)); assert (name);
                                 const char * const msg = extract(ci.getArgOperand(2)); assert (msg);
                                 const auto trace = reinterpret_cast<const __backtrace_data * const *>(extract(ci.getArgOperand(3)));
-                                const uint32_t n = cast<ConstantInt>(ci.getOperand(4))->getLimitedValue(); assert (trace || n == 0);
+                                const uint32_t n = trace ? cast<ConstantInt>(ci.getOperand(4))->getLimitedValue() : 0UL;
 
                                 // since we may not necessarily be able to statically evaluate every varadic param,
                                 // attempt to fill in what constants we can and report <any> for all others.
@@ -2295,14 +2313,14 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
 ConstantInt * LLVM_READNONE CBuilder::getTypeSize(Type * type, IntegerType * valType) const {
     // ConstantExpr::getSizeOf was creating an infinite(?) loop when folding the value for some complex structs
     // until replaced with this in LLVM 12.
-    DataLayout dl(getModule());
+    const DataLayout & dl = getModule()->getDataLayout();
     if (valType == nullptr) {
         valType = getSizeTy();
     }
     return ConstantInt::get(valType, getTypeSize(dl, type));
 }
 
-uintptr_t LLVM_READNONE CBuilder::getTypeSize(llvm::DataLayout & DL, llvm::Type * type) {
+uintptr_t LLVM_READNONE CBuilder::getTypeSize(const llvm::DataLayout & DL, llvm::Type * type) {
     uintptr_t size = 0;
     if (LLVM_LIKELY(type != nullptr)) {
         #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(11, 0, 0)
@@ -2316,6 +2334,21 @@ uintptr_t LLVM_READNONE CBuilder::getTypeSize(llvm::DataLayout & DL, llvm::Type 
     return size;
 }
 
+void CBuilder::linkAllNecessaryExternalFunctions() const {
+    assert (mDriver);
+    assert (mModule);
+    // void* aligned_alloc( std::size_t alignment, std::size_t size );
+
+    IntegerType * const sizeTy = getSizeTy();
+
+    FixedArray<Type *, 2> params;
+    params[0] = sizeTy;
+    params[1] = sizeTy;
+    FunctionType * fty = FunctionType::get(getVoidPtrTy(), params, false);
+    mDriver->addLinkFunction(mModule, ALIGNED_ALLOC_NAME, fty, (void*)std::aligned_alloc);
+
+}
+
 std::string CBuilder::getKernelName() const {
-    report_fatal_error("CBuilder does not have a default kernel name.");
+    return "cbuilder";
 }

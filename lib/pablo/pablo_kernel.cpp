@@ -22,6 +22,27 @@
 #include <fcntl.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <llvm/Transforms/Scalar.h>
+#include <llvm/Transforms/Utils/Local.h>
+#include <llvm/Transforms/IPO.h>
+#include <llvm/Transforms/InstCombine/InstCombine.h>
+#include <llvm/Transforms/AggressiveInstCombine/AggressiveInstCombine.h>
+#include <llvm/Transforms/Scalar/DCE.h>
+#include <llvm/Transforms/Scalar/EarlyCSE.h>
+#include <llvm/Transforms/Scalar/NewGVN.h>
+#include <llvm/Analysis/AssumptionCache.h>
+#include <llvm/Analysis/OptimizationRemarkEmitter.h>
+#include <llvm/Analysis/TargetTransformInfo.h>
+#include <llvm/Analysis/TargetLibraryInfo.h>
+#include <llvm/Analysis/AliasAnalysis.h>
+#include <llvm/Analysis/LoopInfo.h>
+#include <llvm/Analysis/MemorySSA.h>
+
+#include <llvm/IR/PassManager.h>
+#ifndef NDEBUG
+#include <llvm/IR/Verifier.h>
+#endif
+
 #define BEGIN_SCOPED_REGION {
 #define END_SCOPED_REGION }
 
@@ -327,8 +348,49 @@ std::string && annotateKernelNameWithPabloDebugFlags(std::string && name) {
     default:
         llvm_unreachable("Illegal PabloCarryMode");
     }
+    if (PabloUseLLVMOptimizationPasses) {
+        name += "+LLVM-opt";
+    }
     return std::move(name);
 }
+
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief runOptimizationPasses
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PabloKernel::runOptimizationPasses(KernelBuilder & b) const {
+
+    if (PabloUseLLVMOptimizationPasses) {
+        FunctionAnalysisManager FAM;
+        FAM.registerPass([&] { return PassInstrumentationAnalysis(); });
+        FAM.registerPass([&] { return AssumptionAnalysis(); });
+        FAM.registerPass([&] { return TargetIRAnalysis(); });
+        FAM.registerPass([&] { return TargetLibraryAnalysis(); });
+        FAM.registerPass([&] { return DominatorTreeAnalysis(); });
+        FAM.registerPass([&] { return AAManager(); });
+        FAM.registerPass([&] { return MemorySSAAnalysis(); });
+        FAM.registerPass([&] { return LoopAnalysis(); });
+        FAM.registerPass([&] { return OptimizationRemarkEmitterAnalysis(); });
+
+     //   FAM.registerPass([&] { return ModuleAnalysisManagerFunctionProxy(); });
+
+
+
+        FunctionPassManager FPM;
+        FPM.addPass(EarlyCSEPass());
+    //    FPM.addPass(InstCombinePass());
+        FPM.addPass(AggressiveInstCombinePass());
+        FPM.addPass(NewGVNPass());
+        FPM.addPass(DCEPass());
+        Module * M = b.getModule();
+        for (Function & F : *M) {
+            if (F.empty()) continue;
+            FPM.run(F, FAM);
+        }
+    }
+    Kernel::runOptimizationPasses(b);
+}
+
 
 PabloKernel::PabloKernel(LLVMTypeSystemInterface & ts,
                          std::string && kernelName,

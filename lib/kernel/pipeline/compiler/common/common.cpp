@@ -205,9 +205,7 @@ bool PipelineCommonGraphFunctions::isKernelStateFree(const size_t kernel) const 
 #ifdef DISABLE_ALL_DATA_PARALLEL_SYNCHRONIZATION
     return false;
 #else
-
     const Kernel * const kernelObj = getKernel(kernel);
-
     bool isExplicitlyMarkedAsStateFree = false;
     bool hasOverridableAttribute = false;
     bool hasForbiddenAttribute = false;

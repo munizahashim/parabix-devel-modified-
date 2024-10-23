@@ -88,13 +88,10 @@ ztfHashFunctionType ztfHash_compression_gen (CPUDriver & driver) {
 
     StreamSet * const bixHashes = P.CreateStreamSet(encodingScheme1.MAX_HASH_BITS);
     P.CreateKernelCall<BixHash>(u8basis, symbolRuns, bixHashes);
-    //P.CreateKernelCall<DebugDisplayKernel>("bixHashes", bixHashes);
 
     StreamSet * const hashValues = P.CreateStreamSet(1, 16);
     std::vector<StreamSet *> combinedHashData = {bixHashes, runIndex};
-    //P.CreateKernelCall<DebugDisplayKernel>("runIndex", runIndex);
     P.CreateKernelCall<P2S16Kernel>(combinedHashData, hashValues);
-    //P.CreateKernelCall<DebugDisplayKernel>("hashValues", hashValues);
 
     StreamSet * u8bytes = codeUnitStream;
     std::vector<StreamSet *> extractionMasks;
@@ -174,7 +171,6 @@ ztfHashFunctionType ztfHash_decompression_gen (CPUDriver & driver) {
         P.CreateKernelCall<LengthGroupSelector>(encodingScheme1, i, symbolRuns, runIndex, overflow, groupMarks);
         StreamSet * groupDecoded = P.CreateStreamSet(1);
         P.CreateKernelCall<StreamSelect>(groupDecoded, Select(decodedMarks, {i}));
-        //P.CreateKernelCall<DebugDisplayKernel>("decodedMarks", decodedMarks);
         StreamSet * input_bytes = u8bytes;
         StreamSet * output_bytes = P.CreateStreamSet(1, 8);
         if (encodingScheme1.byLength[i].lo == encodingScheme1.byLength[i].hi) {

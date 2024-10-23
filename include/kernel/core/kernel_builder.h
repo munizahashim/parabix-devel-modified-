@@ -24,7 +24,8 @@ public:
 
     llvm::Value * getThreadLocalHandle() const noexcept;
 
-    // Get the value of a scalar field for the current instance.
+    bool hasScalarField(const llvm::StringRef name) const;
+
     ScalarRef getScalarFieldPtr(const llvm::StringRef fieldName);
 
     llvm::Value * getScalarField(const llvm::StringRef fieldName);

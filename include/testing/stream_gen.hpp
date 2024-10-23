@@ -465,7 +465,7 @@ namespace __sg = streamgen;
  *      auto H = HexStream("cab1");
  *
  *  Creates a bitstream: 11.. 1.1. 11.1 ...1 (read from left to right)
- *  Which, when printed using `PrintRegister` or `util::DebugDisplay`, gives:
+ *  Which, when printed using `PrintRegister`, gives:
  *
  *      hex = ... 00 00 8d 53
  *
@@ -526,7 +526,7 @@ HexStreamSet(const char * const (& arr)[N]) {
 
  *      auto B = BinaryStream("11.. 1.1. 1.11 ...1");
  *
- *  Which, when printed using `PrintRegister` or `util::DebugDisplay`, gives:
+ *  Which, when printed using `PrintRegister`, gives:
  *
  *      bin = ... 00 00 8d 53
  */

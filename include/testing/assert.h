@@ -51,14 +51,4 @@ void AssertEQ(kernel::PipelineBuilder & P, kernel::StreamSet * lhs, kernel::Stre
  */
 void AssertNE(kernel::PipelineBuilder & P, kernel::StreamSet * lhs, kernel::StreamSet * rhs);
 
-/**
- * Prints both `lhs` and `rhs` `StreamsSets` as a mean of debug within the test scripts.
- *
- * Warning:
- * The test case will always fail when this function is called
- * as this is not meant to be used in actual tests
- *
- */
-void AssertDebug(kernel::PipelineBuilder & P, kernel::StreamSet * lhs, kernel::StreamSet * rhs);
-
 }

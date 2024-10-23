@@ -24,8 +24,10 @@ using namespace boost;
 using boost::container::flat_set;
 using IDISA::FixedVectorType;
 
+
 using boost::intrusive::detail::floor_log2;
 using boost::intrusive::detail::is_pow2;
+using boost::uuids::detail::sha1;
 
 namespace kernel {
 
@@ -35,14 +37,14 @@ using RateId = ProcessingRate::KindId;
 using StreamSetPort = Kernel::StreamSetPort;
 using PortType = Kernel::PortType;
 
-const static auto INITIALIZE_SUFFIX = "_Initialize";
-const static auto INITIALIZE_THREAD_LOCAL_SUFFIX = "_InitializeThreadLocal";
-const static auto GET_EXPECTED_OUTPUT_SIZE_SUFFIX = "_GetExpectedOutputSize";
-const static auto ALLOCATE_SHARED_INTERNAL_STREAMSETS_SUFFIX = "_AllocateSharedInternalStreamSets";
-const static auto ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_SUFFIX = "_AllocateThreadLocalInternalStreamSets";
-const static auto DO_SEGMENT_SUFFIX = "_DoSegment";
-const static auto FINALIZE_THREAD_LOCAL_SUFFIX = "_FinalizeThreadLocal";
-const static auto FINALIZE_SUFFIX = "_Finalize";
+constexpr static auto INITIALIZE_SUFFIX = "_Initialize";
+constexpr static auto INITIALIZE_THREAD_LOCAL_SUFFIX = "_InitializeThreadLocal";
+constexpr static auto GET_EXPECTED_OUTPUT_SIZE_SUFFIX = "_GetExpectedOutputSize";
+constexpr static auto ALLOCATE_SHARED_INTERNAL_STREAMSETS_SUFFIX = "_AllocateSharedInternalStreamSets";
+constexpr static auto ALLOCATE_THREAD_LOCAL_INTERNAL_STREAMSETS_SUFFIX = "_AllocateThreadLocalInternalStreamSets";
+constexpr static auto DO_SEGMENT_SUFFIX = "_DoSegment";
+constexpr static auto FINALIZE_THREAD_LOCAL_SUFFIX = "_FinalizeThreadLocal";
+constexpr static auto FINALIZE_SUFFIX = "_Finalize";
 #ifdef ENABLE_PAPI
 const static auto PAPI_INITIALIZE_EVENTSET = "_PAPIInitializeEventSet";
 #endif
@@ -268,6 +270,7 @@ void Kernel::loadCachedKernel(KernelBuilder & b) {
 void Kernel::linkExternalMethods(KernelBuilder & b) {
     auto & driver = b.getDriver();
     Module * const m = b.getModule(); assert (m);
+    b.linkAllNecessaryExternalFunctions();
     for (const LinkedFunction & linked : mLinkedFunctions) {
         driver.addLinkFunction(m, linked.Name, linked.Type, linked.FunctionPtr);
     }
@@ -600,7 +603,6 @@ Function * Kernel::addInitializeDeclaration(KernelBuilder & b) const {
         for (const Binding & binding : mInputScalars) {
             setNextArgName(binding.getName());
         }
-
     }
     return initFunc;
 }
@@ -625,18 +627,29 @@ Function * Kernel::addExpectedOutputSizeDeclaration(KernelBuilder & b) const {
     SmallVector<char, 256> tmp;
     const auto funcName = concat(getName(), GET_EXPECTED_OUTPUT_SIZE_SUFFIX, tmp);
     Module * const m = b.getModule();
-    Function * eosFunc = m->getFunction(funcName);
-    if (LLVM_LIKELY(eosFunc == nullptr)) {
+    Function * func = m->getFunction(funcName);
+    if (LLVM_LIKELY(func == nullptr)) {
         SmallVector<Type *, 1> params;
         if (LLVM_LIKELY(isStateful())) {
             params.push_back(getSharedStateType()->getPointerTo());
         }
         FunctionType * const funcType = FunctionType::get(b.getSizeTy(), params, false);
-        eosFunc = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
-        eosFunc->setCallingConv(CallingConv::C);
-        eosFunc->setDoesNotRecurse();
+        func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
+        func->setCallingConv(CallingConv::C);
+        func->setDoesNotRecurse();
+
+        auto arg = func->arg_begin();
+        auto setNextArgName = [&](const StringRef name) {
+            assert (arg != func->arg_end());
+            arg->setName(name);
+            std::advance(arg, 1);
+        };
+        if (LLVM_LIKELY(isStateful())) {
+            arg->addAttr(llvm::Attribute::AttrKind::NoCapture);
+            setNextArgName("shared");
+        }
     }
-    return eosFunc;
+    return func;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -746,7 +759,6 @@ Function * Kernel::addAllocateSharedInternalStreamSetsDeclaration(KernelBuilder 
                 params.push_back(getSharedStateType()->getPointerTo());
             }
             params.push_back(b.getSizeTy());
-
             FunctionType * const funcType = FunctionType::get(b.getVoidTy(), params, false);
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
             func->setCallingConv(CallingConv::C);
@@ -822,7 +834,6 @@ Function * Kernel::addAllocateThreadLocalInternalStreamSetsDeclaration(KernelBui
             }
             params.push_back(getThreadLocalStateType()->getPointerTo());
             params.push_back(b.getSizeTy());
-
             FunctionType * const funcType = FunctionType::get(b.getVoidTy(), params, false);
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
             func->setCallingConv(CallingConv::C);
@@ -962,7 +973,7 @@ std::vector<Type *> Kernel::getDoSegmentFields(KernelBuilder & b) const {
         } else if (isMainPipeline || requiresItemCount(output)) {
             fields.push_back(sizeTy); // writable item count
         }
-    }
+    }    
     return fields;
 }
 
@@ -1059,9 +1070,6 @@ Function * Kernel::addDoSegmentDeclaration(KernelBuilder & b) const {
             }
 
         }
-
-
-        //assert (arg == doSegment->arg_end());
     }
     return doSegment;
 }
@@ -1111,7 +1119,6 @@ Function * Kernel::addFinalizeThreadLocalDeclaration(KernelBuilder & b) const {
             PointerType * const threadLocalPtrTy = getThreadLocalStateType()->getPointerTo();
             params.push_back(threadLocalPtrTy);
             params.push_back(threadLocalPtrTy);
-
             FunctionType * const funcType = FunctionType::get(b.getVoidTy(), params, false);
             func = Function::Create(funcType, GlobalValue::ExternalLinkage, funcName, m);
             func->setCallingConv(CallingConv::C);
@@ -1234,7 +1241,6 @@ Value * Kernel::createInstance(KernelBuilder & b) const {
 Value * Kernel::initializeThreadLocalInstance(KernelBuilder & b, ArrayRef<Value *> args) const {
     Value * instance = nullptr;
     if (hasThreadLocal()) {
-        assert (args.size() == ((isStateful() ? 1u : 0u) + (hasThreadLocal() ? 1u : 0u)));
         Function * const init = getInitializeThreadLocalFunction(b);
         instance = b.CreateCall(init->getFunctionType(), init, args);
     }
@@ -1245,7 +1251,6 @@ Value * Kernel::initializeThreadLocalInstance(KernelBuilder & b, ArrayRef<Value 
  * @brief finalizeThreadLocalInstance
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::finalizeThreadLocalInstance(KernelBuilder & b, ArrayRef<Value *> args) const {
-    assert (args.size() == ((isStateful() ? 1u : 0u) + (hasThreadLocal() ? 2u : 0u)));
     Function * const init = getFinalizeThreadLocalFunction(b); assert (init);
     b.CreateCall(init->getFunctionType(), init, args);
 }
@@ -1255,7 +1260,6 @@ void Kernel::finalizeThreadLocalInstance(KernelBuilder & b, ArrayRef<Value *> ar
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * Kernel::finalizeInstance(KernelBuilder & b, ArrayRef<Value *> args) const {
     Function * const termFunc = getFinalizeFunction(b);
-    assert (args.size() == ((isStateful() ? 1u : 0u) + (hasThreadLocal() ? 1u : 0u)));
     Value * result = b.CreateCall(termFunc->getFunctionType(), termFunc, args);
     if (mOutputScalars.empty()) {
         assert (!result || result->getType()->isVoidTy());
@@ -1383,7 +1387,7 @@ void Kernel::recursivelyConstructFamilyKernels(KernelBuilder & b, InitArgs & arg
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief runOptimizationPasses
  ** ------------------------------------------------------------------------------------------------------------- */
-void Kernel::runOptimizationPasses(KernelBuilder & /* b */) const {
+void Kernel::runOptimizationPasses(KernelBuilder & b) const {
 
 }
 
@@ -1394,17 +1398,26 @@ void Kernel::runOptimizationPasses(KernelBuilder & /* b */) const {
  ** ------------------------------------------------------------------------------------------------------------- */
 std::string Kernel::getStringHash(const StringRef str) {
 
-    uint32_t digest[5]; // 160 bits in total
-    boost::uuids::detail::sha1 sha1;
+    sha1::digest_type digest;
+
+    constexpr auto length = sizeof(sha1::digest_type);
+
+    sha1 sha1;
     sha1.process_bytes(str.data(), str.size());
     sha1.get_digest(digest);
 
     std::string buffer;
-    buffer.reserve((5 * 8) + 1);
+    buffer.reserve(length * 2 + 1);
     raw_string_ostream out(buffer);
-    for (unsigned i = 0; i < 5; ++i) {
-        out << format_hex_no_prefix(digest[i], 8);
+
+    constexpr static char hex_table[16] = { '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd','e', 'f'};
+
+    const uint8_t * const d = reinterpret_cast<uint8_t *>(digest);
+    for (size_t i = 0; i < length; ++i) {
+        const auto c = d[i];
+        out << hex_table[(c & 0xF)] << hex_table[(c >> 4)];
     }
+
     out.flush();
 
     return buffer;

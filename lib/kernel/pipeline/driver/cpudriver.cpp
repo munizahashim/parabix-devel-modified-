@@ -66,12 +66,12 @@ using AttrId = kernel::Attribute::KindId;
 ATTRIBUTE_NO_SANITIZE_ADDRESS
 CPUDriver::CPUDriver(std::string && moduleName)
 : BaseDriver(std::move(moduleName))
-, mTarget(nullptr)
-, mEngine(nullptr)
 , mUnoptimizedIROutputStream{}
 , mIROutputStream{}
 , mASMOutputStream{}
-, mPassManager{} {
+, mPassManager{}
+, mEngine(nullptr)
+, mTarget(nullptr) {
 
     InitializeNativeTarget();
     InitializeNativeTargetAsmPrinter();
@@ -97,11 +97,11 @@ CPUDriver::CPUDriver(std::string && moduleName)
         builder.setMAttrs(attrs);
     }
 
-    mTarget = builder.selectTarget();
+    mTarget.reset(builder.selectTarget());
     if (mTarget == nullptr) {
         throw std::runtime_error("Could not selectTarget");
     }
-    mEngine = builder.create();
+    mEngine.reset(builder.create());
     if (mEngine == nullptr) {
         throw std::runtime_error("Could not create ExecutionEngine: " + errMessage);
     }
@@ -345,10 +345,7 @@ bool CPUDriver::hasExternalFunction(llvm::StringRef functionName) const {
 }
 
 CPUDriver::~CPUDriver() {
-    #ifndef ORCJIT
-    delete mEngine;
-    #endif
-    delete mTarget;
+
 }
 
 class TracePass : public ModulePass {

@@ -8,7 +8,6 @@ namespace kernel {
 void PipelineCompiler::bindAdditionalInitializationArguments(KernelBuilder & b, ArgIterator & arg, const ArgIterator & arg_end) {
     bindFamilyInitializationArguments(b, arg, arg_end);
     bindRepeatingStreamSetInitializationArguments(b, arg, arg_end);
-    assert (arg == arg_end);
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -115,15 +114,23 @@ void PipelineCompiler::addPipelineKernelProperties(KernelBuilder & b) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsigned kernelId, const bool isRoot) {
 
+    if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
+        assert (LastKernel == PipelineInput);
+        return;
+    }
+
+    assert (FirstKernel <= kernelId && kernelId <= LastKernel);
     mKernelId = kernelId;
     mKernel = getKernel(kernelId);
+    assert (mKernel->isGenerated());
+
     bool isStateless = false;
 
     const auto firstComputeKernelId = FirstKernelInPartition[FirstComputePartitionId];
     const auto onAfterLastComputeKernelId = FirstKernelInPartition[LastComputePartitionId + 1];
 
     if (LLVM_UNLIKELY(isKernelStateFree(kernelId))) {
-        if (LLVM_LIKELY(firstComputeKernelId <= mKernelId && mKernelId < onAfterLastComputeKernelId && !mUsesIllustrator)) {
+        if (LLVM_LIKELY(firstComputeKernelId <= kernelId && kernelId < onAfterLastComputeKernelId && !mUsesIllustrator)) {
             isStateless = true;
             mIsStatelessKernel.set(kernelId);
         }
@@ -199,6 +206,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
             sharedStateTy = b.getVoidPtrTy();
         } else {
             sharedStateTy = mKernel->getSharedStateType();
+            assert (!sharedStateTy->isEmptyTy());
         }
         mTarget->addInternalScalar(sharedStateTy, name, groupId);
     }
@@ -210,6 +218,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
             localStateTy = b.getVoidPtrTy();
         } else {
             localStateTy = mKernel->getThreadLocalStateType();
+            assert (!localStateTy->isEmptyTy());
         }
         mTarget->addThreadLocalScalar(localStateTy, name + KERNEL_THREAD_LOCAL_SUFFIX, groupId);
     }
@@ -265,6 +274,7 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
         mTarget->addInternalScalar(StructType::get(C, traceStruct),
                                            name + STATISTICS_STRIDES_PER_SEGMENT_SUFFIX, groupId);
     }
+
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -366,6 +376,10 @@ void PipelineCompiler::generateInitializeMethod(KernelBuilder & b) {
  * @brief generateAllocateInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuilder & b, Value * const expectedNumOfStrides) {
+    if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
+        assert (FirstKernel == LastKernel);
+        return;
+    }
 
     b.setScalarField(EXPECTED_NUM_OF_STRIDES_MULTIPLIER, expectedNumOfStrides);
 
@@ -425,6 +439,10 @@ void PipelineCompiler::generateAllocateSharedInternalStreamSetsMethod(KernelBuil
  * @brief generateInitializeThreadLocalMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateInitializeThreadLocalMethod(KernelBuilder & b) {
+    if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
+        assert (FirstKernel == LastKernel);
+        return;
+    }
     assert (mTarget->hasThreadLocal());
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
         const Kernel * const kernel = getKernel(i);
@@ -440,6 +458,10 @@ void PipelineCompiler::generateInitializeThreadLocalMethod(KernelBuilder & b) {
  * @brief generateAllocateThreadLocalInternalStreamSetsMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(KernelBuilder & b, Value * const expectedNumOfStrides) {
+    if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
+        assert (FirstKernel == LastKernel);
+        return;
+    }
     assert (mTarget->hasThreadLocal());
     Value * allocScale = expectedNumOfStrides;
     if (LLVM_LIKELY(!mIsNestedPipeline)) {
@@ -466,6 +488,10 @@ void PipelineCompiler::generateAllocateThreadLocalInternalStreamSetsMethod(Kerne
  * @brief generateKernelMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateKernelMethod(KernelBuilder & b) {
+    if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
+        assert (FirstKernel == LastKernel);
+        return;
+    }
     initializeKernelAssertions(b);
     initializeScalarValues(b);
     if (mIsNestedPipeline) {
@@ -480,12 +506,10 @@ void PipelineCompiler::generateKernelMethod(KernelBuilder & b) {
  * @brief generateFinalizeMethod
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::generateFinalizeMethod(KernelBuilder & b) {
-
     if (LLVM_UNLIKELY(FirstKernel == PipelineInput)) {
-        assert (FirstKernel == LastKernel);
+        assert (LastKernel == PipelineInput);
         return;
     }
-
     if (LLVM_UNLIKELY(codegen::AnyDebugOptionIsSet() || NumOfPAPIEvents > 0)) {
         printOptionalCycleCounter(b);
         #ifdef ENABLE_PAPI
@@ -511,16 +535,16 @@ void PipelineCompiler::generateFinalizeMethod(KernelBuilder & b) {
     initializeScalarValues(b);
     for (unsigned i = FirstKernel; i <= LastKernel; ++i) {
         setActiveKernel(b, i, true);
-        SmallVector<Value *, 1> params;
+        SmallVector<Value *, 1> args;
         if (LLVM_LIKELY(mKernel->isStateful())) {
             assert (mTarget->isStateful());
-            params.push_back(mKernelSharedHandle);
+            args.push_back(mKernelSharedHandle);
         }
         if (LLVM_UNLIKELY(mKernel->hasThreadLocal())) {
             assert (mTarget->hasThreadLocal());
-            params.push_back(mKernelThreadLocalHandle);
+            args.push_back(mKernelThreadLocalHandle);
         }
-        mScalarValue[i] = callKernelFinalizeFunction(b, params);
+        mScalarValue[i] = callKernelFinalizeFunction(b, args);
     }
 
     if (LLVM_UNLIKELY(mGenerateTransferredItemCountHistogram || mGenerateDeferredItemCountHistogram)) {
@@ -557,9 +581,9 @@ void PipelineCompiler::generateFinalizeThreadLocalMethod(KernelBuilder & b) {
             args.push_back(mKernelCommonThreadLocalHandle); assert (mKernelCommonThreadLocalHandle);
             args.push_back(mKernelThreadLocalHandle); assert (mKernelThreadLocalHandle);
             callKernelFinalizeThreadLocalFunction(b, args);
-            if (LLVM_UNLIKELY(isKernelFamilyCall(i))) {
-              //  b.CreateFree(mKernelThreadLocalHandle);
-            }
+//            if (LLVM_UNLIKELY(isKernelFamilyCall(i))) {
+//                b.CreateFree(mKernelThreadLocalHandle);
+//            }
         }
     }
 

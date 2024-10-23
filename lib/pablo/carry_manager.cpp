@@ -116,10 +116,12 @@ void CarryManager::initializeCarryData(kernel::KernelBuilder & b, PabloKernel * 
     mCarryMetadata.resize(getScopeCount(entryScope));
 
     mCarryFrameType = analyse(b, entryScope);
+
+
     if (LLVM_UNLIKELY(mCarryFrameType->isEmptyTy())) {
-        // temporary refactoring step
-        kernel->addNonPersistentScalar(mCarryFrameType, "carries");
+        mCarryFrameType = nullptr;
     } else {
+        assert (b.getTypeSize(b.getModule()->getDataLayout(), mCarryFrameType) > 0);
         kernel->addInternalScalar(mCarryFrameType, "carries");
     }
 
@@ -218,8 +220,11 @@ void CarryManager::initializeCodeGen(kernel::KernelBuilder & b) {
     assert(!mCarryMetadata.empty());
     mCarryInfo = &mCarryMetadata[0];
     assert (!mCarryInfo->hasSummary());
-    mCurrentFrame = b.getScalarFieldPtr("carries").first;
 
+    if (LLVM_UNLIKELY(mCarryFrameType == nullptr)) {
+        return;
+    }
+    mCurrentFrame = b.getScalarFieldPtr("carries").first;
     mCurrentFrameIndex = 0;
     mCarryScopes = 0;
     mCurrentFrameType = mCarryFrameType;
@@ -250,11 +255,11 @@ void CarryManager::finalizeCodeGen(kernel::KernelBuilder & b) {
     }
     assert (mNestedLoopCarryInMaskPhi == nullptr);
     assert (mCarryFrameStack.empty());
-    assert ("base summary value was deleted!" && mCarrySummaryStack.size() >= 1);
-    assert ("not all summaries were used!" && mCarrySummaryStack.size() == 1);
-    assert ("base summary value was overwritten with non-zero value!" && isa<Constant>(mCarrySummaryStack[0]) && cast<Constant>(mCarrySummaryStack[0])->isNullValue());
+    assert ("base summary value was deleted!" && (mCarryFrameType == nullptr || mCarrySummaryStack.size() >= 1));
+    assert ("not all summaries were used!" && (mCarryFrameType == nullptr|| mCarrySummaryStack.size() == 1));
+    assert ("base summary value was overwritten with non-zero value!" && (mCarryFrameType == nullptr || (isa<Constant>(mCarrySummaryStack[0]) && cast<Constant>(mCarrySummaryStack[0])->isNullValue())));
     mCarrySummaryStack.clear();
-    assert (mCarryScopeIndex.size() == 1);
+    assert (mCarryFrameType == nullptr || mCarryScopeIndex.size() == 1);
     mCarryScopeIndex.clear();
 }
 
@@ -506,7 +511,7 @@ Value * CarryManager::generateExitSummaryTest(kernel::KernelBuilder & b, Value *
     if (LLVM_LIKELY(condition->getType() == b.getBitBlockType())) {
         condition = b.bitblock_any(condition);
     }
-    if (LLVM_UNLIKELY(mCarryInfo->nonCarryCollapsingMode())) {
+    if (LLVM_UNLIKELY(mCarryInfo && mCarryInfo->nonCarryCollapsingMode())) {
         assert ("summary condition cannot be null!" && condition);
         assert ("summary test was not generated" && mNextSummaryTest);
         assert ("summary condition and test must have the same context!" && &condition->getContext() == &mNextSummaryTest->getContext());
@@ -521,7 +526,6 @@ Value * CarryManager::generateExitSummaryTest(kernel::KernelBuilder & b, Value *
  * @brief leaveLoopScope
  ** ------------------------------------------------------------------------------------------------------------- */
 void CarryManager::leaveLoopScope(kernel::KernelBuilder & b, BasicBlock * const entryBlock, BasicBlock * const exitBlock) {
-
     PHINode * nonZeroCarryOutPhi = nullptr;
     if (LLVM_UNLIKELY(mCarryInfo->nonCarryCollapsingMode())) {
         nonZeroCarryOutPhi = b.CreatePHI(b.getSizeTy(), 2);
@@ -602,6 +606,9 @@ void CarryManager::leaveIfScope(kernel::KernelBuilder & b, BasicBlock * const en
  * @brief enterScope
  ** ------------------------------------------------------------------------------------------------------------- */
 void CarryManager::enterScope(kernel::KernelBuilder & b) {
+    if (LLVM_UNLIKELY(mCarryFrameType == nullptr)) {
+        return;
+    }
     // Store the state of the current frame and update the scope state
     mCarryFrameStack.emplace_back(mCurrentFrame, mCurrentFrameType, mCurrentFrameIndex + 1);
     mCarryScopeIndex.push_back(++mCarryScopes);
@@ -626,6 +633,9 @@ void CarryManager::enterScope(kernel::KernelBuilder & b) {
  * @brief leaveScope
  ** ------------------------------------------------------------------------------------------------------------- */
 void CarryManager::leaveScope() {
+    if (LLVM_UNLIKELY(mCarryFrameType == nullptr)) {
+        return;
+    }
     // Sanity test: are there remaining carry frames?
     assert (!mCarryFrameStack.empty());
     const CarryFrame & outer = mCarryFrameStack.back();

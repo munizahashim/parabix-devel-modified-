@@ -260,7 +260,6 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
         accumPAPIMeasurementWithoutReset(b, mKernelId, PAPIKernelCounter::PAPI_KERNEL_EXECUTION);
     }
     #endif
-
     if (mKernelCanTerminateEarly) {
         mTerminatedExplicitly = doSegmentRetVal;
         assert (doSegmentRetVal->getType()->isIntegerTy());
@@ -390,6 +389,7 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             argTy->print(out);
             out << " but got ";
             arg->getType()->print(out);
+            assert (false);
             report_fatal_error(out.str());
         }
         #endif
@@ -543,7 +543,6 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
         }
 
     }
-
     assert (args.size() == mKernelDoSegmentFunctionType->getNumParams());
 }
 

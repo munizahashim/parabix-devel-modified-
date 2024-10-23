@@ -195,13 +195,6 @@ void filtration(string inputFile, string HeaderInput, string DataInput, bool dro
 //    P->CreateKernelCall<P2SKernel>(filteredBasis, filtered);
 //    P->CreateKernelCall<StdOutKernel>(filtered);
 //
-//    P->CreateKernelCall<DebugDisplayKernel>("fieldSeparators", fieldSeparators);
-//    P->CreateKernelCall<DebugDisplayKernel>("recordSeparators", recordSeparators);
-//    //P->CreateKernelCall<DebugDisplayKernel>("compressedSepNum", compressedSepNum);
-//    //P->CreateKernelCall<DebugDisplayKernel>("compressedFieldNum", compressedFieldNum);
-//    //P->CreateKernelCall<DebugDisplayKernel>("fieldNum", fieldNum);
-//    //P->CreateKernelCall<DebugDisplayKernel>("InsertBixNum", InsertBixNum);
-//    //P->CreateKernelCall<DebugDisplayKernel>("ExpandedBasis", ExpandedBasis);
 //
 //
 //    if(KeepRows){

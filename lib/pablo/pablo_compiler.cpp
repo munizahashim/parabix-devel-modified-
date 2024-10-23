@@ -224,7 +224,13 @@ void PabloCompiler::examineBlock(KernelBuilder & b, const PabloBlock * const blo
                 const Var * const input = mKernel->getInput(i);
                 if (array == input) {
                     const auto & binding = mKernel->getInputStreamSetBinding(i);
-                    if (LLVM_UNLIKELY(!binding.hasLookahead() || binding.getLookahead() < la->getAmount())) {
+                    size_t maxLookAhead = 0;
+                    for (const auto & attr : binding.getAttributes()) {
+                        if (attr.getKind() == kernel::Attribute::KindId::LookAhead) {
+                            maxLookAhead = std::max(maxLookAhead, attr.amount());
+                        }
+                    }
+                    if (LLVM_UNLIKELY(maxLookAhead < la->getAmount())) {
                         std::string tmp;
                         raw_string_ostream out(tmp);
                         array->print(out);
@@ -588,7 +594,6 @@ void PabloCompiler::compileWhile(KernelBuilder & b, const While * const whileSta
 }
 
 void PabloCompiler::compileStatement(KernelBuilder & b, const Statement * const stmt) {
-
     if (LLVM_UNLIKELY(isa<If>(stmt))) {
         compileIf(b, cast<If>(stmt));
     } else if (LLVM_UNLIKELY(isa<While>(stmt))) {
@@ -622,7 +627,8 @@ void PabloCompiler::compileStatement(KernelBuilder & b, const Statement * const 
             const Advance * const adv = cast<Advance>(stmt);
             // If our expr is an Extract op on a mutable Var then we need to pass the index value to the carry
             // manager so that it properly selects the correct carry bit.
-            value = mCarryManager->advanceCarryInCarryOut(b, adv, compileExpression(b, adv->getExpression()));
+            Value * expr = compileExpression(b, adv->getExpression());
+            value = mCarryManager->advanceCarryInCarryOut(b, adv, expr);
         } else if (isa<IndexedAdvance>(stmt)) {
             const IndexedAdvance * const adv = cast<IndexedAdvance>(stmt);
             Value * strm = compileExpression(b, adv->getExpression());
@@ -756,13 +762,14 @@ void PabloCompiler::compileStatement(KernelBuilder & b, const Statement * const 
                 Value * ptr1 = b.getInputStreamBlockPtr(stream->getName(), index, b.getSize(block_shift + 1));
                 Value * lookAhead1 = b.CreateBlockAlignedLoad(b.getBitBlockType(), ptr1);
                 value = b.mvmd_dslli(1, lookAhead1, lookAhead, b.getBitBlockWidth() - bit_shift);
+                value = b.CreateBitCast(value, b.getBitBlockType());
             }
         } else if (const Repeat * const s = dyn_cast<Repeat>(stmt)) {
             value = compileExpression(b, s->getValue());
             Type * const ty = s->getType();
             if (LLVM_LIKELY(ty->isVectorTy())) {
                 const auto repeatWidth = value->getType()->getIntegerBitWidth();
-                value = b.simd_fill(repeatWidth, value);
+                value = b.bitCast(b.simd_fill(repeatWidth, value));
             } else {
                 value = b.CreateZExtOrTrunc(value, ty);
             }
@@ -774,7 +781,7 @@ void PabloCompiler::compileStatement(KernelBuilder & b, const Statement * const 
             const auto result_packs = sourceWidth/2;
             Type * bt = b.getBitBlockType();
             if (LLVM_LIKELY(result_packs > 1)) {
-                value = b.CreateAlloca(ArrayType::get(bt, result_packs));
+                value = b.CreateAllocaAtEntryPoint(ArrayType::get(bt, result_packs));
             }
             Constant * const ZERO = b.getInt32(0);
 
@@ -796,7 +803,7 @@ void PabloCompiler::compileStatement(KernelBuilder & b, const Statement * const 
             const auto result_packs = sourceWidth/2;
             Type * bt = b.getBitBlockType();
             if (LLVM_LIKELY(result_packs > 1)) {
-                value = b.CreateAlloca(ArrayType::get(bt, result_packs));
+                value = b.CreateAllocaAtEntryPoint(ArrayType::get(bt, result_packs));
             }
             Constant * const ZERO = b.getInt32(0);
             for (unsigned i = 0; i < result_packs; ++i) {
@@ -824,7 +831,8 @@ void PabloCompiler::compileStatement(KernelBuilder & b, const Statement * const 
             Value * const op0 = compileExpression(b, stmt->getOperand(1));
             Value * const op1 = compileExpression(b, stmt->getOperand(2));
             Value * const op2 = compileExpression(b, stmt->getOperand(3));
-            value = b.simd_ternary(mask, b.bitCast(op0), b.bitCast(op1), b.bitCast(op2));
+            value = b.simd_ternary(mask, op0, op1, op2);
+            assert (value->getType() == b.getBitBlockType());
         } else if (const Illustrate * const il = dyn_cast<Illustrate>(stmt)) {
             // Should we use the name as the streamName? what if this is in a loop?
             // TODO: need to fix pablo printer still
@@ -1014,7 +1022,7 @@ Value * PabloCompiler::compileExpression(KernelBuilder & b, const PabloAST * con
 
                 if (LLVM_UNLIKELY(typeId == TypeId::Add || typeId == TypeId::Subtract)) {
 
-                    value = b.CreateAlloca(vTy, b.getInt32(intWidth));
+                    value = b.CreateAllocaAtEntryPoint(vTy, b.getInt32(intWidth));
 
                     for (unsigned i = 0; i < intWidth; ++i) {
                         llvm::Constant * const index = b.getInt32(i);

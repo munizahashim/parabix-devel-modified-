@@ -162,20 +162,17 @@ void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kern
             }
         }
     }
-
-    #ifdef NDEBUG
-    mCycleCounters[(unsigned)type] = nullptr;
-    #endif
-
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief updateOptionalCycleCounter
  ** ------------------------------------------------------------------------------------------------------------- */
 void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kernelId, Value * const cond, const CycleCounter ifTrue, const CycleCounter ifFalse) {
+
     assert (EnableCycleCounter || mUseDynamicMultithreading);
     Value * const end = b.CreateReadCycleCounter();
-    Value * const start = mCycleCounters[(unsigned)ifTrue]; assert (start);
+    Value * const start = mCycleCounters[(unsigned)ifTrue];
+    assert (start);
     assert (mCycleCounters[(unsigned)ifFalse] == start);
     Value * const duration = b.CreateSub(end, start);
     const auto prefix = makeKernelName(kernelId);
@@ -189,14 +186,9 @@ void PipelineCompiler::updateCycleCounter(KernelBuilder & b, const unsigned kern
     index[1] = b.getInt32(ifFalse);
     Value * const sumCounterPtrB = b.CreateGEP(ty, ptr, index);
     Value * const sumCounterPtr = b.CreateSelect(cond, sumCounterPtrA, sumCounterPtrB);
-
     Value * const sumRunningCount = b.CreateLoad(b.getSizeTy(), sumCounterPtr);
     Value * const sumUpdatedCount = b.CreateAdd(sumRunningCount, duration);
     b.CreateStore(sumUpdatedCount, sumCounterPtr);
-    #ifdef NDEBUG
-    mCycleCounters[(unsigned)ifTrue] = nullptr;
-    mCycleCounters[(unsigned)ifFalse] = nullptr;
-    #endif
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

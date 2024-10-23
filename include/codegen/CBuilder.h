@@ -38,6 +38,8 @@ inline bool is_power_2(const uint64_t n) {
 
 extern "C" void free_debug_wrapper(void * ptr);
 
+
+
 class CBuilder : public llvm::IRBuilder<> {
 
     friend class kernel::PipelineKernel;
@@ -60,7 +62,7 @@ public:
         return mModule;
     }
 
-    void setModule(llvm::Module * module) {
+    void setModule(not_null<llvm::Module *> module) {
         mModule = module;
         ClearInsertionPoint();
     }
@@ -143,11 +145,15 @@ public:
 
     llvm::CallInst * CreateMemCmp(llvm::Value * ptr1, llvm::Value * ptr2, llvm::Value * num);
 
+   llvm::AllocaInst * CreateAllocaAtEntryPoint(llvm::Type * Ty, llvm::Value * ArraySize = nullptr, const llvm::Twine Name = "");
+
     llvm::AllocaInst * CreateAlignedAlloca(llvm::Type * const Ty, const unsigned alignment, llvm::Value * const ArraySize = nullptr);
 
     llvm::AllocaInst * CreateCacheAlignedAlloca(llvm::Type * const Ty, llvm::Value * const ArraySize = nullptr) {
         return CreateAlignedAlloca(Ty, getCacheAlignment(), ArraySize);
     }
+
+    llvm::AllocaInst * CreateAlignedAllocaAtEntryPoint(llvm::Type * const Ty, const unsigned alignment, llvm::Value * const ArraySize = nullptr);
 
     // stdio.h functions
     //
@@ -275,7 +281,7 @@ public:
 
     llvm::ConstantInt * LLVM_READNONE getTypeSize(llvm::Type * type, llvm::IntegerType * valType = nullptr) const;
 
-    static uintptr_t LLVM_READNONE getTypeSize(llvm::DataLayout & DL, llvm::Type * type);
+    static uintptr_t LLVM_READNONE getTypeSize(const llvm::DataLayout & DL, llvm::Type * type);
 
     inline unsigned getCacheAlignment() const {
         return mCacheLineAlignment;
@@ -320,8 +326,6 @@ public:
     llvm::BranchInst * CreateUnlikelyCondBr(llvm::Value * Cond, llvm::BasicBlock * True, llvm::BasicBlock * False, const int probability = 90) {
         return CreateLikelyCondBr(Cond, True, False, 100 - probability);
     }
-
-    llvm::AllocaInst * CreateAllocaAtEntryPoint(llvm::Type * Ty, llvm::Value * ArraySize = nullptr, const llvm::Twine Name = "");
 
     llvm::BasicBlock * CreateBasicBlock(const llvm::StringRef name = "", llvm::BasicBlock * insertBefore = nullptr);
 
@@ -479,15 +483,13 @@ protected:
 
     static llvm::AllocaInst * resolveStackAddress(llvm::Value * Ptr);
 
-    bool hasAlignedAlloc() const;
-
-    bool hasPosixMemalign() const;
-
     bool hasAddressSanitizer() const;
 
     virtual std::string getKernelName() const;
 
     void __CreateAssert(llvm::Value * assertion, const llvm::Twine failureMessage, std::initializer_list<llvm::Value *> args);
+
+    virtual void linkAllNecessaryExternalFunctions() const;
 
 protected:
 

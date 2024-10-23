@@ -99,6 +99,7 @@ void destroy_circular_buffer(uint8_t * base, const size_t size, const size_t has
     const size_t m = n + 2;
     const auto ptr = base - (n * size);
     munmap(ptr, m * size);
+
 }
 
 namespace llvm { class Constant; }
@@ -311,13 +312,13 @@ void ExternalBuffer::setBaseAddress(kernel::KernelBuilder & b, Value * const add
 Value * ExternalBuffer::getBaseAddress(kernel::KernelBuilder & b) const {
     assert (mHandle && "has not been set prior to calling getBaseAddress");
     Value * const p = b.CreateInBoundsGEP(mHandleType, mHandle, {b.getInt32(0), b.getInt32(BaseAddress)});
-    return b.CreateLoad(getPointerType(), p);
+    return b.CreateAlignedLoad(getPointerType(), p, sizeof(void*));
 }
 
 void ExternalBuffer::setCapacity(kernel::KernelBuilder & b, Value * const capacity) const {
     assert (mHandle && "has not been set prior to calling setCapacity");
     Value *  const p = b.CreateInBoundsGEP(mHandleType, mHandle, {b.getInt32(0), b.getInt32(EffectiveCapacity)});
-    b.CreateStore(b.CreateZExt(capacity, b.getSizeTy()), p);
+    b.CreateAlignedStore(b.CreateZExt(capacity, b.getSizeTy()), p, sizeof(size_t));
 }
 
 Value * ExternalBuffer::getCapacity(kernel::KernelBuilder & b) const {

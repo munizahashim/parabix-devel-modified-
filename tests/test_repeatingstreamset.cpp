@@ -717,7 +717,7 @@ bool runRepeatingStreamSetTest(CPUDriver & driver, std::default_random_engine & 
 
     StreamSet * const Output = P.CreateStreamSet(numElements, fieldWidth);
 
-    Scalar *  const repLength = P.CreateConstant(driver.getSize(repetitionLength));
+    Scalar *  const repLength = P.CreateConstant(P.getSize(repetitionLength));
 
     P.CreateKernelCall<RepeatingSourceKernel>(pattern, Output, repLength);
 

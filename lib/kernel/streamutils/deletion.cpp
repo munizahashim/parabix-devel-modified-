@@ -29,23 +29,18 @@ namespace kernel {
 void FilterByMask(PipelineBuilder & P,
                   StreamSet * mask, StreamSet * inputs, StreamSet * outputs,
                   unsigned streamOffset,
-                  unsigned extractionFieldWidth,
-                  bool byteDeletion) {
-    if (byteDeletion) {
-        StreamSet * const input_streams = P.CreateStreamSet(8);
-        P.CreateKernelCall<S2PKernel>(inputs, input_streams);
-        StreamSet * const output_streams = P.CreateStreamSet(8);
-        StreamSet * const compressed = P.CreateStreamSet(output_streams->getNumElements());
-        std::vector<uint32_t> output_indices = streamutils::Range(streamOffset, streamOffset + output_streams->getNumElements());
-        P.CreateKernelCall<FieldCompressKernel>(Select(mask, {0}), SelectOperationList { Select(input_streams, output_indices)}, compressed, extractionFieldWidth);
-        P.CreateKernelCall<StreamCompressKernel>(mask, compressed, output_streams, extractionFieldWidth);
-        P.CreateKernelCall<P2SKernel>(output_streams, outputs);
-    }
-    else {
+                  unsigned extractionFieldWidth) {
+    if (inputs->getFieldWidth() < 8) {
         StreamSet * const compressed = P.CreateStreamSet(outputs->getNumElements());
         std::vector<uint32_t> output_indices = streamutils::Range(streamOffset, streamOffset + outputs->getNumElements());
         P.CreateKernelCall<FieldCompressKernel>(Select(mask, {0}), SelectOperationList { Select(inputs, output_indices)}, compressed, extractionFieldWidth);
         P.CreateKernelCall<StreamCompressKernel>(mask, compressed, outputs, extractionFieldWidth);
+    } else {
+        Scalar * offset = nullptr;
+        if (streamOffset || inputs->getNumElements() != outputs->getNumElements()) {
+            offset = P.CreateConstant(P.getSize(streamOffset));
+        }
+        P.CreateKernelCall<ByteFilterByMaskKernel>(inputs, mask, outputs, offset);
     }
 }
 
@@ -376,17 +371,23 @@ void StreamCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Valu
         // However, field number operations will sometimes produce a zero, for
         // fields that are not selected.  So we add 1 to field numbers first.
         Value * fieldNo = b.simd_add(mFW, initialFieldNo, oneSplat);
+        assert (fieldNo->getType() == oneSplat->getType());
         // Now move bits back and combine to produce consecutive field numbers.
         Value * firstFieldNoSplat = b.simd_fill(mFW, b.mvmd_extract(mFW, fieldNo, 0));
+        assert (firstFieldNoSplat->getType() == fieldNo->getType());
         Value * finalFieldNo = b.CreateAdd(firstFieldNoSplat, intSequence);
+        assert (finalFieldNo->getType() == fieldNo->getType());
         for (unsigned step = 0; step < fieldMovementSteps; step++) {
-            unsigned mov = 1 << step;
+            unsigned mov = 1UL << step;
+            assert (finalFieldNo->getType() == fieldNo->getType());
             Value * fieldMovement = b.CreateSub(finalFieldNo, fieldNo);
             Value * movSplat = b.simd_fill(mFW, b.getIntN(mFW, mov));
             fieldsToMove[blk][step] = b.simd_eq(mFW, movSplat, b.simd_and(movSplat, fieldMovement));
             Value * receivingFields = b.mvmd_srli(mFW, fieldsToMove[blk][step], mov);
             Value * newFieldNos = b.simd_if(1, receivingFields, b.mvmd_srli(mFW, fieldNo, mov), fieldNo);
+            newFieldNos = b.CreateBitCast(newFieldNos, fieldNo->getType());
             combine[blk][step] = b.simd_and(b.simd_eq(mFW, fieldNo, newFieldNos), receivingFields);
+            assert (newFieldNos->getType() == fieldNo->getType());
             fieldNo = newFieldNos;
         }
         //
@@ -403,12 +404,14 @@ void StreamCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Valu
         Value * increment = b.CreateZExtOrTrunc(b.mvmd_extract(mFW, initialFieldNo, 0), fwTy);
         updatedFieldIdx[blk] = b.CreateAdd(pendingFieldIdx[blk], increment);
         pendingSpaceFilled[blk] = b.CreateICmpEQ(updatedFieldIdx[blk], numFieldConst);
+        assert (numFieldConst->getType() == updatedFieldIdx[blk]->getType());
         shftBack[blk] = b.CreateSub(numFieldConst, updatedFieldIdx[blk]);
         //
         // Now determine the total amount of pending items and whether
         // the pending data all fits within the pendingOutput.
         Value * nextPendingItems = b.CreateAdd(pendingItems[blk], newPendingItems);
         doesFit[blk] = b.CreateICmpULT(nextPendingItems, BLOCK_WIDTH);
+        assert (nextPendingItems->getType() == BLOCK_WIDTH->getType());
         pendingItems[blk+1] = b.CreateSelect(doesFit[blk], nextPendingItems, b.CreateSub(nextPendingItems, BLOCK_WIDTH));
         inputOffset[blk+1] = b.CreateAdd(inputOffset[blk], ONE);
         Value * nextOutputOffset = b.CreateAdd(outputOffset[blk], ONE);
@@ -1285,10 +1288,10 @@ void FilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & kb, llvm::Value
     std::vector<Value *> pendingDataPtr(mPendingSetCount);
     for (unsigned i = 0; i < mPendingSetCount; i++) {
         Value * pending = kb.getScalarField("pendingData" + std::to_string(i));
-        pendingDataPtr[i] = kb.CreateAlloca(pending->getType());
+        pendingDataPtr[i] = kb.CreateAllocaAtEntryPoint(pending->getType());
         kb.CreateStore(pending, pendingDataPtr[i]);
     }
-    Value * produceOffsetPtr = kb.CreateAlloca(baseProducedOffset->getType());
+    Value * produceOffsetPtr = kb.CreateAllocaAtEntryPoint(baseProducedOffset->getType());
     kb.CreateStore(baseProducedOffset, produceOffsetPtr);
 
     kb.CreateBr(stridePrologue);
@@ -1453,6 +1456,248 @@ void FilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & kb, llvm::Value
     }
     kb.CreateBr(done);
     kb.SetInsertPoint(done);
+}
+
+
+ByteFilterByMaskKernel::ByteFilterByMaskKernel(LLVMTypeSystemInterface & b, StreamSet * const byteStream, StreamSet * const filter, StreamSet * const output, Scalar * streamOffset)
+: MultiBlockKernel(b, [&]() {
+    std::string tmp;
+    raw_string_ostream nm(tmp);
+    nm << "ByteFilterByMask" << output->getNumElements() << 'x' << byteStream->getFieldWidth();
+    if (streamOffset) {
+        nm << 'S';
+    }
+    nm.flush();
+    return tmp;
+}(),
+{Binding{"byteStream", byteStream}, Binding{"filter", filter}},
+{Binding{"output", output, PopcountOf("filter")}}, {}, {}, {}) {
+    assert (byteStream->getFieldWidth() == output->getFieldWidth());
+    if (streamOffset) {
+        mInputScalars.emplace_back("offset", streamOffset);
+    }
+}
+
+void ByteFilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & b, Value * const numOfStrides) {
+    BasicBlock * entry = b.GetInsertBlock();
+    BasicBlock * packLoop = b.CreateBasicBlock("packLoop");
+    BasicBlock * packFinalize = b.CreateBasicBlock("packFinalize");
+
+    ConstantInt * const sz_ZERO = b.getSize(0);
+    ConstantInt * const sz_ONE = b.getSize(1);
+
+    const auto fieldWidth = getInputStreamSet(0)->getFieldWidth();
+
+    StreamSet * const output = getOutputStreamSet(0);
+    if (LLVM_UNLIKELY(output->getFieldWidth() != fieldWidth)) {
+        report_fatal_error(Twine{getName(), ": input field width does not match output field width"});
+    }
+
+    const auto numElements = output->getNumElements();
+    const auto numInputElements = getInputStreamSet(0)->getNumElements();
+    if (numElements > getInputStreamSet(0)->getNumElements()) {
+        report_fatal_error(Twine{getName(), ": number of output streams exceeds the input streamset size"});
+    }
+
+    const auto fieldsPerBlock = (b.getBitBlockWidth() / fieldWidth);
+
+    ConstantInt * const BLOCK_WIDTH_MASK = b.getSize(b.getBitBlockWidth() - 1);
+
+    ConstantInt * const FIELD_WIDTH_MASK = b.getSize(fieldWidth - 1);
+
+    ConstantInt * const LOG_2_FIELD_WIDTH = b.getSize(floor_log2(fieldWidth));
+
+    ConstantInt * const FIELDS_PER_BLOCK = b.getSize(fieldsPerBlock);
+
+    ConstantInt * const FIELDS_PER_BLOCK_MASK = b.getSize(fieldsPerBlock - 1);
+
+    ConstantInt * const LOG_2_FIELDS_PER_BLOCK = b.getSize(floor_log2(fieldsPerBlock));
+
+    FixedVectorType * dataVecTy = b.fwVectorType(fieldWidth);
+
+    Value * initToWritePos = b.getProducedItemCount("output");
+
+    if (numElements == 1 && numInputElements == 1) {
+
+        Value * const totalBlocks = b.CreateMul(numOfStrides, b.getSize(fieldWidth));
+        Value * const baseDataPtr = b.getInputStreamPackPtr("byteStream", sz_ZERO, sz_ZERO);
+        assert (fieldWidth <= b.getBitBlockWidth());
+        const auto popCountSize = b.getBitBlockWidth() / fieldWidth;
+
+        Value * const baseFilterPtr = b.getInputStreamPackPtr("filter", sz_ZERO, sz_ZERO); ;
+
+        b.CreateBr(packLoop);
+
+        b.SetInsertPoint(packLoop);
+        PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
+        blockOffsetPhi->addIncoming(sz_ZERO, entry);
+        PHINode * const toWritePosPhi = b.CreatePHI(b.getSizeTy(), 2);
+        toWritePosPhi->addIncoming(initToWritePos, entry);
+
+        Value * filter = nullptr;
+        if (popCountSize < 8) {
+            Value * ptr = b.CreatePointerCast(baseFilterPtr, b.getInt8Ty()->getPointerTo());
+            const auto packsPerByte = (8 / popCountSize);
+            assert (packsPerByte > 1);
+            Value * pos = b.CreateLShr(blockOffsetPhi, b.getSize(floor_log2(packsPerByte)));
+            filter = b.CreateAlignedLoad(b.getInt8Ty(), b.CreateGEP(b.getInt8Ty(), ptr, pos), 1);
+            filter = b.CreateZExt(filter, b.getSizeTy());
+            Value * off = b.CreateAnd(blockOffsetPhi, b.getSize(packsPerByte - 1));
+            filter = b.CreateLShr(filter, b.CreateShl(off, b.getSize(floor_log2(popCountSize))));
+            filter = b.CreateAnd(filter, b.getSize((1UL << popCountSize) - 1UL));
+        } else {
+            IntegerType * const popCountTy = b.getIntNTy(popCountSize);
+            Value * ptr = b.CreatePointerCast(baseFilterPtr, popCountTy->getPointerTo());
+            filter = b.CreateAlignedLoad(popCountTy, b.CreateGEP(popCountTy, ptr, blockOffsetPhi), popCountSize / 8);
+        }
+
+        Value * const data = b.CreateAlignedLoad(dataVecTy, b.CreateGEP(dataVecTy, baseDataPtr, blockOffsetPhi), b.getBitBlockWidth() / 8);
+        Value * const compressed = b.mvmd_compress(fieldWidth, data, filter);
+
+        Value * const ptr = b.getRawOutputPointer("output", toWritePosPhi);
+
+        Value * const toStorePtr = b.CreatePointerCast(ptr, compressed->getType()->getPointerTo());
+        b.CreateAlignedStore(compressed, toStorePtr, 1);
+
+        Value * const elementPopCount = b.CreatePopcount(filter);
+        Value * toWritePos = b.CreateAdd(toWritePosPhi, b.CreateZExt(elementPopCount, b.getSizeTy()));
+
+        Value * nextBlk = b.CreateAdd(blockOffsetPhi, sz_ONE);
+        blockOffsetPhi->addIncoming(nextBlk, packLoop);
+
+        toWritePosPhi->addIncoming(toWritePos, packLoop);
+        Value * moreToDo = b.CreateICmpNE(nextBlk, totalBlocks);
+
+        b.CreateCondBr(moreToDo, packLoop, packFinalize);
+
+        b.SetInsertPoint(packFinalize);
+
+    } else {
+
+        Value * baseStreamIndex = nullptr;
+        if (b.hasScalarField("offset")) {
+            baseStreamIndex = b.getScalarField("offset");
+            if (DebugOptionIsSet(codegen::EnableAsserts)) {
+                Value * const maxElem = b.CreateAdd(baseStreamIndex, b.getSize(numElements));
+                Value * valid = b.CreateICmpULE(maxElem, b.getSize(numInputElements));
+                b.CreateAssert(valid, "%s: stream index plus output streamset size exceeds input streamset size",
+                               b.GetString(getName()), baseStreamIndex, b.getSize(numElements), b.getSize(numInputElements));
+            }
+        }
+
+        Value * initialPosition = b.CreateAnd(initToWritePos, BLOCK_WIDTH_MASK);
+        Value * initialPackIndex = b.CreateLShr(initialPosition, LOG_2_FIELDS_PER_BLOCK);
+
+        SmallVector<Value *, 32> pending(numElements);
+        SmallVector<PHINode *, 32> pendingPhi(numElements);
+
+        Constant * ZERO_VEC = ConstantVector::getNullValue(dataVecTy);
+
+        for (unsigned i = 0; i < numElements; ++i) {
+            Value * streamIndex = b.getSize(i);
+            Value * ptr = b.getOutputStreamPackPtr("output", streamIndex, initialPackIndex, sz_ZERO);
+            pending[i] = b.CreateAlignedLoad(dataVecTy, ptr, b.getBitBlockWidth() / 8);
+        }
+
+        b.CreateBr(packLoop);
+
+        b.SetInsertPoint(packLoop);
+        PHINode * blockOffsetPhi = b.CreatePHI(b.getSizeTy(), 2);
+        blockOffsetPhi->addIncoming(sz_ZERO, entry);
+
+        PHINode * const shiftPhi = b.CreatePHI(b.getSizeTy(), 2);
+        shiftPhi->addIncoming(initialPosition, entry);
+
+        PHINode * const packIndexPhi = b.CreatePHI(b.getSizeTy(), 2);
+        packIndexPhi->addIncoming(initialPackIndex, entry);
+
+        for (unsigned i = 0; i < numElements; ++i) {
+            PHINode * pPhi = b.CreatePHI(dataVecTy, 2);
+            pPhi->addIncoming(pending[i], entry);
+            pendingPhi[i] = pPhi;
+            pending[i] = pPhi;
+        }
+
+        Value * filterVec = b.loadInputStreamBlock("filter", sz_ZERO, blockOffsetPhi);
+
+        VectorType * popVecTy = FixedVectorType::get(b.getIntNTy(b.getBitBlockWidth() / fieldWidth), fieldWidth);
+
+        filterVec = b.CreateBitCast(filterVec, popVecTy);
+
+        SmallVector<Value *, 65> shiftVal(fieldWidth + 1);
+        SmallVector<Value *, 65> fieldPackIndex(fieldWidth + 1);
+
+        SmallVector<Value *, 64> filterElem(fieldWidth);
+        SmallVector<Value *, 64> leftShift(fieldWidth);
+        SmallVector<Value *, 64> packIndex(fieldWidth);
+        SmallVector<Value *, 64> blockIndex(fieldWidth);
+        SmallVector<Value *, 64> rightShift(fieldWidth);
+        SmallVector<Value *, 64> keepCurrentPending(fieldWidth);
+
+
+        for (unsigned i = 0; i < numElements; ++i) {
+
+            ConstantInt * outputStreamIndex = b.getSize(i);
+            Value * inputStreamIndex = outputStreamIndex;
+            if (baseStreamIndex) {
+                inputStreamIndex = b.CreateAdd(outputStreamIndex, baseStreamIndex);
+            }
+
+            shiftVal[0] = shiftPhi;
+            fieldPackIndex[0] = packIndexPhi;
+
+            for (unsigned j = 0; j < fieldWidth; ++j) {
+                if (i == 0) {
+                    filterElem[j] = b.CreateExtractElement(filterVec, b.getInt32(j));
+                    Value * const elementPopCount = b.CreateZExt(b.CreatePopcount(filterElem[j]), b.getSizeTy());
+                    leftShift[j] = b.CreateAnd(shiftVal[j], FIELDS_PER_BLOCK_MASK);
+                    packIndex[j] = b.CreateAnd(fieldPackIndex[j], FIELD_WIDTH_MASK);
+                    blockIndex[j] = b.CreateLShr(fieldPackIndex[j], LOG_2_FIELD_WIDTH);
+                    rightShift[j] = b.CreateSub(FIELDS_PER_BLOCK, leftShift[j]);
+                    Value * nextShiftVal = b.CreateAdd(shiftVal[j], elementPopCount);
+                    Value * nextPackIndex = b.CreateLShr(nextShiftVal, LOG_2_FIELDS_PER_BLOCK);
+                    keepCurrentPending[j] = b.CreateICmpEQ(fieldPackIndex[j], nextPackIndex);
+                    fieldPackIndex[j + 1] = nextPackIndex;
+                    shiftVal[j + 1] = nextShiftVal;
+                }
+                Value * const data = b.loadInputStreamPack("byteStream", inputStreamIndex, b.getSize(j), blockOffsetPhi);
+                Value * const compressed = b.mvmd_compress(fieldWidth, data, filterElem[j]);
+                Value * lshiftVal = b.mvmd_sll(fieldWidth, compressed, leftShift[j]);
+                Value * toWriteVal = b.CreateOr(pending[i], lshiftVal);
+                b.storeOutputStreamPack("output", outputStreamIndex, packIndex[j], blockIndex[j], toWriteVal);
+                Value * rshiftVal = b.mvmd_srl(fieldWidth, compressed, rightShift[j]);
+                rshiftVal = b.CreateSelect(b.CreateICmpNE(leftShift[j], sz_ZERO), rshiftVal, ZERO_VEC);
+                pending[i] = b.CreateSelect(keepCurrentPending[j], toWriteVal, rshiftVal);
+            }
+        }
+
+        for (unsigned i = 0; i < numElements; ++i) {
+            pendingPhi[i]->addIncoming(pending[i], packLoop);
+        }
+
+        packIndexPhi->addIncoming(fieldPackIndex[fieldWidth], packLoop);
+
+        shiftPhi->addIncoming(shiftVal[fieldWidth], packLoop);
+
+        Value * nextBlk = b.CreateAdd(blockOffsetPhi, sz_ONE);
+        blockOffsetPhi->addIncoming(nextBlk, packLoop);
+
+        Value * moreToDo = b.CreateICmpNE(nextBlk, numOfStrides);
+
+        b.CreateCondBr(moreToDo, packLoop, packFinalize);
+
+        b.SetInsertPoint(packFinalize);
+        Value * packIdx = b.CreateAnd(fieldPackIndex[fieldWidth], FIELD_WIDTH_MASK);
+        Value * blkIdx = b.CreateLShr(fieldPackIndex[fieldWidth], LOG_2_FIELD_WIDTH);
+        for (unsigned i = 0; i < numElements; ++i) {
+            b.storeOutputStreamPack("output", b.getSize(i), packIdx, blkIdx, pending[i]);
+        }
+
+
+
+    }
+
+
 }
 
 }

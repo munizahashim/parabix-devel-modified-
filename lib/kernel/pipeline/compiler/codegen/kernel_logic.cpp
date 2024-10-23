@@ -10,6 +10,7 @@ void PipelineCompiler::setActiveKernel(KernelBuilder & b, const unsigned kernelI
     mKernelId = kernelId;
     mKernel = getKernel(kernelId);
     mKernelSharedHandle = nullptr;
+
     if (LLVM_LIKELY(mKernel->isStateful())) {
         Value * handle = b.getScalarFieldPtr(makeKernelName(kernelId)).first;
         if (LLVM_UNLIKELY(isKernelFamilyCall(kernelId))) {

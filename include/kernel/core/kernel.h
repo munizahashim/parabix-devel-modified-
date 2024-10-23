@@ -45,6 +45,7 @@ constexpr static auto KERNEL_ILLUSTRATOR_ENTER_LOOP = "__illustrator_enter_loop"
 constexpr static auto KERNEL_ILLUSTRATOR_ITERATE_LOOP = "__illustrator_iterate_loop";
 constexpr static auto KERNEL_ILLUSTRATOR_EXIT_LOOP = "__illustrator_exit_loop";
 
+
 class Kernel : public AttributeSet {
     friend class KernelCompiler;
     friend class PipelineAnalysis;
