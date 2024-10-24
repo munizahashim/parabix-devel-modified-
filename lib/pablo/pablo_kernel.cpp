@@ -360,6 +360,7 @@ std::string && annotateKernelNameWithPabloDebugFlags(std::string && name) {
  ** ------------------------------------------------------------------------------------------------------------- */
 void PabloKernel::runOptimizationPasses(KernelBuilder & b) const {
 
+#if 0
     if (PabloUseLLVMOptimizationPasses) {
         FunctionAnalysisManager FAM;
         FAM.registerPass([&] { return PassInstrumentationAnalysis(); });
@@ -389,6 +390,7 @@ void PabloKernel::runOptimizationPasses(KernelBuilder & b) const {
         }
     }
     Kernel::runOptimizationPasses(b);
+#endif
 }
 
 

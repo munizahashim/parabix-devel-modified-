@@ -40,6 +40,7 @@ static cl::opt<bool> SuffixOptimization("SuffixOptimization", cl::init(false), c
 static cl::opt<unsigned> UnifiedBasisBytes("UnifiedBasisBytes", cl::desc("Create unified basis from the final n bytes (default 0)"), cl::init(0), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> AdvanceBasis("AdvanceBasis", cl::desc("Advance basis bits before compileCodeUnit"), cl::init(false), cl::cat(codegen::CodeGenOptions));
 enum class InitialTestMode {PrefixCC, RangeCC, NonASCII};
+static cl::opt<unsigned> PrefixTestMax("PrefixTestMax", cl::desc("Max prefix count to focus initial non-ASCII test to exact prefix CC"), cl::init(30), cl::cat(codegen::CodeGenOptions));
 static cl::opt<InitialTestMode> InitialTest("InitialTest", cl::ValueOptional,
 cl::values(
            clEnumValN(InitialTestMode::PrefixCC, "PrefixCC", "Initial test based on exact prefix CC."),
@@ -57,6 +58,7 @@ std::string kernelAnnotation() {
     a += "p" + std::to_string(PartitioningCostThreshhold);
     a += "f" + std::to_string(PartitioningFactor);
     a += "u" + std::to_string(UnifiedBasisBytes);
+    a += "m" + std::to_string(PrefixTestMax);
     if (AdvanceBasis) {
         a += "a";
     }
@@ -1248,6 +1250,13 @@ void U8_Compiler::createInitialHierarchy(CC_List & ccs) {
     extract_CCs_by_range(nonASCII_Range, ccs, nonASCII_ccs);
     Range actual_subrange = CC_Set_Range(nonASCII_ccs);
     if (!actual_subrange.is_empty()) {
+        unsigned pfx_count = 0;
+        for (unsigned k = TwoByte; k <= FourByte; k++) {
+            pfx_count += mSeqData[k].byte1CC->count();
+        }
+        if ((InitialTest == InitialTestMode::PrefixCC) && (pfx_count > PrefixTestMax)) {
+            InitialTest = InitialTestMode::NonASCII;
+        }
         if (InitialTest == InitialTestMode::NonASCII) {
             PabloAST * nonASCII_test = combineAnd(mMask, mScopeBasis[0][7], mPB);
             auto nested = mPB.createScope();
