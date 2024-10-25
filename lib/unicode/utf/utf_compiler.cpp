@@ -1096,6 +1096,7 @@ protected:
     unsigned                mScopePosition;
     SeqData                 mSeqData[4];
     Basis_Set               mScopeBasis[4];
+    std::unique_ptr<cc::CC_Compiler> mCodeUnitCompiler[4];
     re::CC * codeUnitCC(re::CC *, unsigned pos = 1);
     re::CC * codeUnitCC(CC_List & ccs, unsigned pos = 1);
     virtual unsigned costModel(CC_List & ccs, unsigned from_pos);
@@ -1135,10 +1136,17 @@ void U8_Compiler::compile(Target_List targets, CC_List ccs) {
     }
     llvm::ArrayType * ty = cast<ArrayType>(mBasisVar->getType());
     unsigned streamCount = ty->getArrayNumElements();
-    assert(streamCount == mCodeUnitBits);
-    mScopeBasis[0].resize(mCodeUnitBits);
-    for (unsigned i = 0; i < streamCount; i++) {
-        mScopeBasis[0][i] = mPB.createExtract(mBasisVar, mPB.getInteger(i));
+    if (streamCount == mCodeUnitBits) {
+        mScopeBasis[0].resize(mCodeUnitBits);
+        for (unsigned i = 0; i < streamCount; i++) {
+            mScopeBasis[0][i] = mPB.createExtract(mBasisVar, mPB.getInteger(i));
+        }
+        mCodeUnitCompiler[0] = std::make_unique<cc::Parabix_CC_Compiler_Builder>(mScopeBasis[0]);
+    } else {
+        assert(streamCount == 1);  // A byte stream
+        mScopeBasis[0].resize(1);
+        mScopeBasis[0][0] = mPB.createExtract(mBasisVar, mPB.getInteger(0));
+        mCodeUnitCompiler[0] = std::make_unique<cc::Direct_CC_Compiler>(mScopeBasis[0][0]);
     }
     createInitialHierarchy(ccs);
 }
@@ -1209,7 +1217,7 @@ void U8_Compiler::lengthAnalysis(CC_List & ccs) {
 }
 
 PabloAST * U8_Compiler::compilePrefix(re::CC * prefixCC, PabloBuilder & pb) {
-    return cc::Parabix_CC_Compiler_Builder(mScopeBasis[0]).compileCC(prefixCC, pb);
+    return mCodeUnitCompiler[0]->compileCC(prefixCC, pb);
 }
 
 void U8_Compiler::preparePrefixTests(PabloBuilder & pb) {
@@ -1230,7 +1238,7 @@ void U8_Compiler::preparePrefixTests(PabloBuilder & pb) {
 
 void U8_Compiler::createInitialHierarchy(CC_List & ccs) {
     lengthAnalysis(ccs);
-    for (unsigned k = TwoByte; k <= FourByte; k++) {
+    for (unsigned k = ASCII; k <= FourByte; k++) {
         for (unsigned i = 0; i < ccs.size(); i++) {
             if (!mSeqData[k].actualRange.is_empty()) {
                 std::string tname = "tgt" + std::to_string(i) + "_len" + std::to_string(k+1);
@@ -1239,11 +1247,14 @@ void U8_Compiler::createInitialHierarchy(CC_List & ccs) {
         }
     }
     if (!mSeqData[ASCII].actualRange.is_empty()) {
-        PabloAST * ASCII_test = mPB.createNot(mScopeBasis[0][7]);
-        Basis_Set ASCIIBasis = prepareUnifiedBasis(UTF8_Range[ASCII]);
-        Unicode_Range_Compiler ASCII_compiler(ASCIIBasis, mTargets, mPB);
-        EnclosingInfo ASCII_info(UTF8_Range[ASCII], ASCII_test);
-        ASCII_compiler.compile(ccs, ASCII_info);
+        re::CC * ASCII_CC = re::makeCC(0x0, 0x7F, &Byte);
+        PabloAST * ASCII_test = mCodeUnitCompiler[0]->compileCC(ASCII_CC, mPB);
+        Range ASCII_Range{0, 0x7F};
+        EnclosingInfo ASCII_info(ASCII_Range, ASCII_test);
+        compileFromCodeUnit(ASCII, ASCII_info, 1, mPB);
+        for (unsigned i = 0; i < ccs.size(); i++) {
+            mPB.createAssign(mTargets[i], mSeqData[ASCII].targets[i]);
+        }
     }
     CC_List nonASCII_ccs(ccs.size());
     Range nonASCII_Range{0x80, 0x10FFFF};
@@ -1258,7 +1269,8 @@ void U8_Compiler::createInitialHierarchy(CC_List & ccs) {
             InitialTest = InitialTestMode::NonASCII;
         }
         if (InitialTest == InitialTestMode::NonASCII) {
-            PabloAST * nonASCII_test = combineAnd(mMask, mScopeBasis[0][7], mPB);
+            re::CC * nonASCII = re::makeCC(0x80, 0xFF, &Byte);
+            PabloAST * nonASCII_test = combineAnd(mMask, mCodeUnitCompiler[0]->compileCC(nonASCII, mPB), mPB);
             auto nested = mPB.createScope();
             mPB.createIf(nonASCII_test, nested);
             preparePrefixTests(nested);
@@ -1399,7 +1411,10 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, 
     if (lgth == code_unit) {  // At the final code unit position
         for (unsigned i = 0; i < rangeCCs.size(); i++) {
             re::CC * unitCC = codeUnitCC(rangeCCs[i], code_unit);
-            PabloAST * compiled = pb.createAnd(enclosing_test, compileCodeUnit(k, unitCC, code_unit, pb), "compiled");
+            PabloAST * compiled = compileCodeUnit(k, unitCC, code_unit, pb);
+            if (code_unit > 1) {
+                compiled = pb.createAnd(enclosing_test, compiled, "compiled");
+            }
             pb.createAssign(mSeqData[k].targets[i], pb.createOr(mSeqData[k].targets[i], compiled));
         }
     } else {
@@ -1502,13 +1517,17 @@ void U8_Lookahead_Compiler::prepareSuffix(unsigned scope, PabloBuilder & pb) {
     if (mSeqData[scope].byte1CC->empty()) return;
     for (unsigned sfx = 1; sfx <= scope; sfx++) {
         if (mSeqData[sfx].suffixTest == nullptr) {
-            PabloAST * sfxbit7 = pb.createLookahead(mScopeBasis[0][7], sfx);
-            PabloAST * sfxbit6 = pb.createLookahead(mScopeBasis[0][6], sfx);
-            PabloAST * sfxmark = pb.createAnd(sfxbit7, pb.createNot(sfxbit6));
-            if (sfx > 1) {
-                mSeqData[sfx].suffixTest = pb.createAnd(mSeqData[sfx-1].suffixTest, sfxmark);
+            if (mScopeBasis[0].size() == 8) {
+                PabloAST * sfxbit7 = pb.createLookahead(mScopeBasis[0][7], sfx);
+                PabloAST * sfxbit6 = pb.createLookahead(mScopeBasis[0][6], sfx);
+                mSeqData[sfx].suffixTest = pb.createAnd(sfxbit7, pb.createNot(sfxbit6));
             } else {
-                mSeqData[sfx].suffixTest = sfxmark;
+                prepareScope(scope, pb);
+                re::CC * suffixCC = re::makeCC(0x80, 0xBF, &Byte);
+                mSeqData[sfx].suffixTest = mCodeUnitCompiler[scope]->compileCC(suffixCC, pb);
+            }
+            if (sfx > 1) {
+                mSeqData[sfx].suffixTest = pb.createAnd(mSeqData[sfx-1].suffixTest, mSeqData[sfx].suffixTest);
             }
         }
     }
@@ -1519,13 +1538,19 @@ void U8_Lookahead_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
     for (unsigned sfx = 1; sfx <= scope; sfx++) {
         bool basis_needed = mScopeBasis[sfx].size() == 0;
         if (basis_needed) {
-            mScopeBasis[sfx].resize(mCodeUnitBits);
-            for (unsigned i = 0; i < 6; i++) {
-                mScopeBasis[sfx][i] = pb.createLookahead(mScopeBasis[0][i], sfx);
+            mScopeBasis[sfx].resize(mScopeBasis[0].size());
+            if (mScopeBasis[0].size() == 1) {
+                mScopeBasis[sfx][0] = pb.createLookahead(mScopeBasis[0][0], sfx);
+                mCodeUnitCompiler[sfx] = std::make_unique<cc::Direct_CC_Compiler>(mScopeBasis[sfx][0]);
+            } else {
+                for (unsigned i = 0; i < 6; i++) {
+                    mScopeBasis[sfx][i] = pb.createLookahead(mScopeBasis[0][i], sfx);
+                }
+                // Set the expected suffix bits - the final suffixTest will confirm.
+                mScopeBasis[sfx][6] = pb.createZeroes();
+                mScopeBasis[sfx][7] = pb.createOnes();
+                mCodeUnitCompiler[sfx] = std::make_unique<cc::Parabix_CC_Compiler_Builder>(mScopeBasis[sfx]);
             }
-            // Set the expected suffix bits - the final suffixTest will confirm.
-            mScopeBasis[sfx][6] = pb.createZeroes();
-            mScopeBasis[sfx][7] = pb.createOnes();
         }
     }
 }
@@ -1537,7 +1562,7 @@ PabloAST *  U8_Lookahead_Compiler::adjustPosition(PabloAST * t, unsigned from, u
 }
 
 PabloAST * U8_Lookahead_Compiler::compileCodeUnit(U8_Seq_Kind k, re::CC * unitCC, unsigned unitPos, PabloBuilder & pb) {
-    return cc::Parabix_CC_Compiler_Builder(mScopeBasis[unitPos - 1]).compileCC(unitCC, pb);
+    return mCodeUnitCompiler[unitPos - 1]->compileCC(unitCC, pb);
 }
 
 Basis_Set U8_Lookahead_Compiler::prepareUnifiedBasis(Range cc_range) {
@@ -1593,7 +1618,8 @@ unsigned U8_Advance_Compiler::costModel(CC_List & ccs, unsigned from_pos) {
 void U8_Advance_Compiler::prepareSuffix(unsigned scope, PabloBuilder & pb) {
     if (mSeqData[scope].byte1CC->empty()) return;
     if (mSuffix == nullptr) {
-        mSuffix = pb.createAnd(mScopeBasis[0][7], pb.createNot(mScopeBasis[0][6]), "mSuffix");
+        re::CC * suffixCC = re::makeCC(0x80, 0xBF, &Byte);
+        mSuffix = mCodeUnitCompiler[0]->compileCC(suffixCC, pb);
         mSeqData[1].suffixTest = mSuffix;
     }
     for (unsigned sfx = 2; sfx <= scope; sfx++) {
@@ -1660,9 +1686,9 @@ PabloAST * U8_Advance_Compiler::compileCodeUnit(U8_Seq_Kind k, re::CC * unitCC, 
     }
     if (AdvanceBasis) {
         unsigned lgth = k + 1;
-        return cc::Parabix_CC_Compiler_Builder(mScopeBasis[lgth-unitPos]).compileCC(unitCC, pb);
+        return mCodeUnitCompiler[lgth-unitPos]->compileCC(unitCC, pb);
     }
-    return cc::Parabix_CC_Compiler_Builder(mScopeBasis[0]).compileCC(unitCC, pb);
+    return mCodeUnitCompiler[0]->compileCC(unitCC, pb);
 }
 
 PabloAST *  U8_Advance_Compiler::adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) {
@@ -1715,39 +1741,26 @@ void UTF_Compiler::compile(Target_List targets, CC_List ccs) {
         VectorType * const vt = cast<VectorType>(ty->getArrayElementType());
         const auto streamWidth = vt->getElementType()->getIntegerBitWidth();
         codeUnitBits = streamWidth;
+    } else {
+        codeUnitBits = streamCount;
+    }
+    if (UseLegacyUTFHierarchy) {
         UTF_Legacy_Compiler utf_compiler(mVar, mPB, mMask);
         for (unsigned i = 0; i < targets.size(); i++) {
             utf_compiler.addTarget(targets[i], ccs[i]);
         }
         utf_compiler.compile();
-        return;
-    }
-    codeUnitBits = streamCount;
-    if (codeUnitBits == 8) {
+    } else if (codeUnitBits == 8) {
         if (mBitMovement == pablo::BitMovementMode::LookAhead) {
             U8_Lookahead_Compiler utf_compiler(mVar, mPB, mMask);
             utf_compiler.compile(targets, ccs);
-        } else if (!UseLegacyUTFHierarchy) {
+        } else {
             U8_Advance_Compiler utf_compiler(mVar, mPB, mMask);
             utf_compiler.compile(targets, ccs);
-        } else {
-            UTF_Legacy_Compiler utf_compiler(mVar, mPB, mMask);
-            for (unsigned i = 0; i < targets.size(); i++) {
-                utf_compiler.addTarget(targets[i], ccs[i]);
-            }
-            utf_compiler.compile();
         }
     } else {
-        if (UseLegacyUTFHierarchy) {
-            UTF_Legacy_Compiler utf_compiler(mVar, mPB, mMask);
-            for (unsigned i = 0; i < targets.size(); i++) {
-                utf_compiler.addTarget(targets[i], ccs[i]);
-            }
-            utf_compiler.compile();
-        } else {
-            U21_Compiler u21_compiler(mVar, mPB, mMask);
-            u21_compiler.compile(targets, ccs);
-        }
+        U21_Compiler u21_compiler(mVar, mPB, mMask);
+        u21_compiler.compile(targets, ccs);
     }
 }
 
