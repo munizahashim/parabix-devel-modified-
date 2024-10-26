@@ -36,7 +36,6 @@ static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", 
 static cl::opt<unsigned> PartitioningCostThreshhold("PartitioningCostThreshhold", cl::init(12), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(4), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> SuffixOptimization("SuffixOptimization", cl::init(false), cl::cat(codegen::CodeGenOptions));
-static cl::opt<unsigned> UnifiedBasisBytes("UnifiedBasisBytes", cl::desc("Create unified basis from the final n bytes (default 0)"), cl::init(0), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> AdvanceBasis("AdvanceBasis", cl::desc("Advance basis bits before compileCodeUnit"), cl::init(false), cl::cat(codegen::CodeGenOptions));
 enum class InitialTestMode {PrefixCC, RangeCC, NonASCII};
 static cl::opt<unsigned> PrefixTestMax("PrefixTestMax", cl::desc("Max prefix count to focus initial non-ASCII test to exact prefix CC"), cl::init(30), cl::cat(codegen::CodeGenOptions));
@@ -56,7 +55,6 @@ std::string kernelAnnotation() {
     a += "i" + std::to_string(IfEmbeddingCostThreshhold);
     a += "p" + std::to_string(PartitioningCostThreshhold);
     a += "f" + std::to_string(PartitioningFactor);
-    a += "u" + std::to_string(UnifiedBasisBytes);
     a += "m" + std::to_string(PrefixTestMax);
     if (AdvanceBasis) {
         a += "a";
@@ -468,7 +466,6 @@ protected:
     virtual void prepareSuffix(unsigned scope, PabloBuilder & pb) = 0;
     virtual void prepareScope(unsigned scope, PabloBuilder & pb) = 0;
     virtual PabloAST * adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) = 0;
-    virtual Basis_Set prepareUnifiedBasis(Range basis_range) = 0;
 };
 
 unsigned U8_Compiler::costModel(CC_List & ccs, unsigned from_pos) {
@@ -743,15 +740,6 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, 
            "compileFromCodeUnit called with range having code unit difference prior to code_unit pos");
     CC_List rangeCCs(mSeqData[k].seqCCs.size());
     extract_CCs_by_range(enclosing.range, mSeqData[k].seqCCs, rangeCCs);
-    if ((UnifiedBasisBytes + code_unit - 1) >= lgth) {
-        Basis_Set UnifiedBasis = prepareUnifiedBasis(enclosing.range);
-        Unicode_Range_Compiler range_compiler(UnifiedBasis, mSeqData[k].targets, pb);
-        PabloAST * enclosing_test = adjustPosition(enclosing.test, enclosing.testPosition, lgth, pb);
-        EnclosingInfo info{enclosing.range, enclosing_test, lgth};
-        range_compiler.compile(rangeCCs, info);
-        return;
-    }
-
     PabloAST * enclosing_test = enclosing.test;
     if (!AdvanceBasis) {
         enclosing_test = adjustPosition(enclosing_test, enclosing.testPosition, code_unit, pb);
@@ -846,7 +834,6 @@ protected:
     void prepareScope(unsigned scope, PabloBuilder & pb) override;
     PabloAST * adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) override;
     PabloAST * compileCodeUnit(U8_Seq_Kind k, re::CC * unitCC, unsigned pos, PabloBuilder & pb) override;
-    Basis_Set prepareUnifiedBasis(Range basis_range) override;
 };
 
 class U8_Advance_Compiler : public U8_Compiler {
@@ -859,7 +846,6 @@ protected:
     void prepareScope(unsigned scope, PabloBuilder & pb) override;
     PabloAST * adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) override;
     PabloAST * compileCodeUnit(U8_Seq_Kind k, re::CC * unitCC, unsigned pos, PabloBuilder & pb) override;
-    Basis_Set prepareUnifiedBasis(Range basis_range) override;
 };
 
 U8_Lookahead_Compiler::U8_Lookahead_Compiler(pablo::Var * v, PabloBuilder & pb, pablo::PabloAST * mask) :
@@ -918,34 +904,6 @@ PabloAST * U8_Lookahead_Compiler::compileCodeUnit(U8_Seq_Kind k, re::CC * unitCC
     return mCodeUnitCompiler[unitPos - 1]->compileCC(unitCC, pb);
 }
 
-Basis_Set U8_Lookahead_Compiler::prepareUnifiedBasis(Range cc_range) {
-    unsigned lgth = mEncoder.encoded_length(cc_range.hi);
-    unsigned total_bits = ceil_log2(mEncoder.max_codepoint_of_length(lgth));
-    unsigned variable_bits = ceil_log2(cc_range.lo ^ cc_range.hi);
-    if (UTF_CompilationTracing) {
-        llvm::errs() << "prepareUnifiedBasis(" << cc_range.hex_string() << ")\n";
-        llvm::errs() << "  total_bits = " << total_bits << "\n";
-        llvm::errs() << "  variable_bits = " << variable_bits << "\n";
-    }
-    Basis_Set UnifiedBasis(total_bits);
-    unsigned bits_per_unit = (lgth == 1) ? 7 : 6;
-    unsigned max_suffix = lgth - 1;
-    for (unsigned i = 0; i < variable_bits; i++) {
-        unsigned suffix_pos = max_suffix - i/bits_per_unit;
-        unsigned scope_bit = i % bits_per_unit;
-        UnifiedBasis[i] = mScopeBasis[suffix_pos][scope_bit];
-    }
-    for (unsigned i = variable_bits; i < total_bits; i++) {
-        unsigned fixed_bit_val = (cc_range.lo >> i) & 1;
-        if (fixed_bit_val == 1) {
-            UnifiedBasis[i] = mPB.createOnes();
-        } else {
-            UnifiedBasis[i] = mPB.createZeroes();
-        }
-    }
-    return UnifiedBasis;
-}
-
 U8_Advance_Compiler::U8_Advance_Compiler(pablo::Var * v, PabloBuilder & pb, pablo::PabloAST * mMask) :
 U8_Compiler(v, pb, mMask), mSuffix(nullptr) {
 }
@@ -987,38 +945,19 @@ const unsigned suffixDataBits = 6;
 
 void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
     if (mSeqData[scope].byte1CC->empty()) return;
-    if (UnifiedBasisBytes > 0) {
-        // For each prior suffix, we need 6 data bits.
-        for (unsigned sfx = 1; sfx < scope; sfx++) {
-            unsigned sfx_bits = mScopeBasis[sfx].size();
-            if (sfx_bits < suffixDataBits) {
-                mScopeBasis[sfx].resize(suffixDataBits);
-                for (unsigned i = sfx_bits; i < suffixDataBits; i++) {
-                    mScopeBasis[sfx][i] = pb.createAdvance(mScopeBasis[sfx-1][i], 1);
-                }
-            }
-        }
-        codepoint_t test_lo = mEncoder.minCodePointWithCommonCodeUnits(mSeqData[scope].actualRange.lo, 1);
-        codepoint_t test_hi = mEncoder.maxCodePointWithCommonCodeUnits(mSeqData[scope].actualRange.hi, 1);
-        Range testRange{test_lo, test_hi};
-        unsigned variable_bits = testRange.significant_bits();
-        unsigned prefix_bits = 0;
-        if (variable_bits > scope * suffixDataBits) {
-            prefix_bits = variable_bits - scope * suffixDataBits;
-            mScopeBasis[scope].resize(prefix_bits);
-            for (unsigned i = 0; i < prefix_bits; i++) {
-                mScopeBasis[scope][i] = pb.createAdvance(mScopeBasis[scope-1][i], 1);
-            }
-        }
-    } else if (AdvanceBasis) {
+    if (AdvanceBasis) {
         const unsigned suffixBits = 8;
         for (unsigned sfx = 1; sfx <= scope; sfx++) {
+            if (UTF_CompilationTracing) {
+                llvm::errs() << "preparing Advanced basis " << sfx << "\n";
+            }
             unsigned sfx_bits = mScopeBasis[sfx].size();
             if (sfx_bits < suffixBits) {
                 mScopeBasis[sfx].resize(suffixBits);
                 for (unsigned i = sfx_bits; i < suffixBits; i++) {
                     mScopeBasis[sfx][i] = pb.createAdvance(mScopeBasis[sfx-1][i], 1);
                 }
+                mCodeUnitCompiler[sfx] = std::make_unique<cc::Parabix_CC_Compiler_Builder>(mScopeBasis[sfx]);
             }
         }
     }
@@ -1044,33 +983,6 @@ PabloAST * U8_Advance_Compiler::compileCodeUnit(U8_Seq_Kind k, re::CC * unitCC, 
 PabloAST *  U8_Advance_Compiler::adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) {
     if (from == to) return t;
     return pb.createAdvance(t, to - from, "adjust" + std::to_string(from) + "_" + std::to_string(to));
-}
-
-Basis_Set U8_Advance_Compiler::prepareUnifiedBasis(Range cc_range) {
-    unsigned lgth = mEncoder.encoded_length(cc_range.hi);
-    unsigned total_bits = cc_range.total_bits(); //ceil_log2(mEncoder.max_codepoint_of_length(lgth));
-    unsigned variable_bits = ceil_log2(cc_range.lo ^ cc_range.hi);
-    if (UTF_CompilationTracing) {
-        llvm::errs() << "prepareUnifiedBasis(" << cc_range.hex_string() << ")\n";
-        llvm::errs() << "  total_bits = " << total_bits << "\n";
-        llvm::errs() << "  variable_bits = " << variable_bits << "\n";
-    }
-    Basis_Set UnifiedBasis(total_bits);
-    unsigned bits_per_unit = (lgth == 1) ? 7 : 6;
-    for (unsigned i = 0; i < variable_bits; i++) {
-        unsigned u8_pos = i/bits_per_unit;
-        unsigned scope_bit = i % bits_per_unit;
-        UnifiedBasis[i] = mScopeBasis[u8_pos][scope_bit];
-    }
-    for (unsigned i = variable_bits; i < total_bits; i++) {
-        unsigned fixed_bit_val = (cc_range.lo >> i) & 1;
-        if (fixed_bit_val == 1) {
-            UnifiedBasis[i] = mPB.createOnes();
-        } else {
-            UnifiedBasis[i] = mPB.createZeroes();
-        }
-    }
-    return UnifiedBasis;
 }
 
 UTF_Compiler::UTF_Compiler(pablo::Var * basisVar, pablo::PabloBuilder & pb,
