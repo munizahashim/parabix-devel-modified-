@@ -439,7 +439,7 @@ class U8_Compiler {
 public:
     const unsigned mCodeUnitBits = 8;
     U8_Compiler(pablo::Var * v, PabloBuilder & pb, pablo::PabloAST * mask) :
-        mBasisVar(v), mPB(pb), mMask(mask), mScopePosition(0) {
+        mBasisVar(v), mPB(pb), mMask(mask) {
         mEncoder.setCodeUnitBits(mCodeUnitBits);
     }
     void compile(Target_List targets, CC_List ccs);
@@ -449,7 +449,6 @@ protected:
     pablo::PabloAST *       mMask;
     UTF_Encoder             mEncoder;
     Target_List             mTargets;
-    unsigned                mScopePosition;
     SeqData                 mSeqData[4];
     Basis_Set               mScopeBasis[4];
     std::unique_ptr<cc::CC_Compiler> mCodeUnitCompiler[4];
@@ -548,7 +547,6 @@ std::vector<UCD::UnicodeSet> U8_Compiler::computeFullBlockSets(CC_List & ccs, un
                 hi_ceil = mEncoder.minCodePointWithCommonCodeUnits(hi, pos) - 1;
             }
             if (lo_unit <= hi_unit) {
-                //fullUnitSet[i].insert_range(lo_unit, hi_unit);
                 fullBlockSet[i].insert_range(lo_base, hi_ceil);
             }
         }
@@ -712,7 +710,6 @@ void U8_Compiler::prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb) 
     if (mSeqData[k].actualRange.is_empty()) return;
     //
     prepareSuffix(k, pb);
-    
     mSeqData[k].seqCCs = prepareFullBlockSets(k, mSeqData[k].seqCCs, mSeqData[k].test, 1, pb);
     mSeqData[k].byte1CC = codeUnitCC(mSeqData[k].seqCCs, 1);
     //
@@ -738,7 +735,7 @@ void U8_Compiler::prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb) 
 //
 // Precondition: partial compilation of CCs within the enclosing.range has
 // been completed and is available as a PabloAST in the enclosing.test.
-// Precondition: code_unit >= 2 and the enclosing.range has a partial
+// Precondition: code_unit >= 1 and the enclosing.range has a partial
 // UTF-8 sequence that is an exact sequence of bytes for prior units.
 void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, unsigned code_unit, PabloBuilder & pb) {
     unsigned lgth = mEncoder.encoded_length(enclosing.range.hi);
@@ -989,7 +986,6 @@ void U8_Advance_Compiler::prepareSuffix(unsigned scope, PabloBuilder & pb) {
 const unsigned suffixDataBits = 6;
 
 void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
-    mScopePosition = scope;
     if (mSeqData[scope].byte1CC->empty()) return;
     if (UnifiedBasisBytes > 0) {
         // For each prior suffix, we need 6 data bits.
@@ -1026,11 +1022,9 @@ void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
             }
         }
     }
-    //mSeqData[scope].test = pb.createAdvance(mSeqData[scope].test, scope);
 }
 
 PabloAST * U8_Advance_Compiler::compileCodeUnit(U8_Seq_Kind k, re::CC * unitCC, unsigned unitPos, PabloBuilder & pb) {
-    //llvm::errs() << "mScopePosition = " << mScopePosition << ", unitPos = " << unitPos << "\n";
     if (SuffixOptimization && (unitPos > 1)) {
         Basis_Set suffixBasis(mCodeUnitBits);
         for (unsigned i = 0; i < 6; i++) {
