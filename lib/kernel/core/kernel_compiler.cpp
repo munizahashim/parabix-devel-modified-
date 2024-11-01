@@ -21,6 +21,43 @@
 #include <llvm/IR/Verifier.h>
 #endif
 
+#include <llvm/IR/PassManager.h>
+#include <llvm/Analysis/AliasAnalysis.h>
+#include <llvm/Analysis/AssumptionCache.h>
+#include <llvm/Analysis/LoopInfo.h>
+#include <llvm/Analysis/MemoryDependenceAnalysis.h>
+#include <llvm/Analysis/MemorySSA.h>
+#include <llvm/Analysis/OptimizationRemarkEmitter.h>
+#include <llvm/Analysis/PhiValues.h>
+#include <llvm/Analysis/PostDominators.h>
+#include <llvm/Analysis/TargetLibraryInfo.h>
+#include <llvm/Analysis/TargetTransformInfo.h>
+#include <llvm/Transforms/AggressiveInstCombine/AggressiveInstCombine.h>
+#include <llvm/Transforms/IPO.h>
+#include <llvm/Transforms/InstCombine/InstCombine.h>
+#include <llvm/Transforms/Scalar.h>
+#include <llvm/Transforms/Scalar/DCE.h>
+#include <llvm/Transforms/Scalar/EarlyCSE.h>
+#include <llvm/Transforms/Scalar/MemCpyOptimizer.h>
+#include <llvm/Transforms/Scalar/NewGVN.h>
+#include <llvm/Transforms/Scalar/SimplifyCFG.h>
+#include <llvm/Transforms/Utils/Local.h>
+
+#if BOOST_VERSION >= 107600
+#include <boost/core/bit.hpp>
+#endif
+
+#if BOOST_VERSION < 107600
+template <typename T> int scan_forward_zeroes(const T x) noexcept;
+template <> inline int scan_forward_zeroes<unsigned int>(const unsigned int x) noexcept { return __builtin_ctz(x); }
+template <> inline int scan_forward_zeroes<unsigned long>(const unsigned long x) noexcept { return __builtin_ctzl(x); }
+template <> inline int scan_forward_zeroes<unsigned long long>(const unsigned long long x) noexcept { return __builtin_ctzll(x); }
+#else
+template <typename T> int scan_forward_zeroes(const T x) noexcept {
+    return boost::core::countr_zero<T>(x);
+}
+#endif
+
 using namespace llvm;
 using namespace boost;
 using boost::intrusive::detail::floor_log2;
@@ -28,6 +65,19 @@ using boost::container::flat_set;
 using boost::container::flat_map;
 
 namespace kernel {
+
+class RemoveRedundantAllocaAndGEPInstructions : public PassInfoMixin<RemoveRedundantAllocaAndGEPInstructions> {
+public:
+  /// Run the pass over the function.
+  PreservedAnalyses run(Function &F, AnalysisManager<Function> &AM);
+};
+
+class PHICanonicalizerPass : public PassInfoMixin<PHICanonicalizerPass> {
+public:
+  /// Run the pass over the function.
+  PreservedAnalyses run(Function &F, AnalysisManager<Function> &AM);
+};
+
 
 using AttrId = Attribute::KindId;
 using Rational = ProcessingRate::Rational;
@@ -105,9 +155,118 @@ void KernelCompiler::generateKernel(KernelBuilder & b) {
     }
     #endif
 
-    runInternalOptimizationPasses(b.getModule());
-    mTarget->runOptimizationPasses(b);
+    Kernel::SelectedOptimizationPasses passes;
+    mTarget->addOptimizationPasses(b, passes);
+    runAllOptimizationPasses(b.getModule(), passes);
     b.setCompiler(oc);
+
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief runAllOptimizationPasses
+ ** ------------------------------------------------------------------------------------------------------------- */
+void KernelCompiler::runAllOptimizationPasses(llvm::Module * const m, Kernel::SelectedOptimizationPasses & passes) {
+
+    enum AnalysisPass : uint64_t {
+        _AAManager,
+        _AssumptionAnalysis,
+        _TargetIRAnalysis,
+        _TargetLibraryAnalysis,
+        _PhiValuesAnalysis,
+        _PostDominatorTreeAnalysis,
+        _MemoryDependenceAnalysis,
+        _MemorySSAAnalysis,
+        _LoopAnalysis,
+        _OptimizationRemarkEmitterAnalysis,
+    };
+
+    FunctionAnalysisManager FAM;
+    FAM.registerPass([&] { return PassInstrumentationAnalysis(); });
+    FAM.registerPass([&] { return DominatorTreeAnalysis(); });
+
+    FunctionPassManager FPM;
+    FPM.addPass(RemoveRedundantAllocaAndGEPInstructions());
+
+    using P = Kernel::OptimizationPass;
+
+    uint64_t requiredPasses = 0;
+
+    #define FLAG(x) (1ULL << (x))
+
+    for (const P pass : passes) {
+        switch (pass) {
+             case P::AggressiveInstCombinePass:
+                requiredPasses |= FLAG(_AAManager) | FLAG(_AssumptionAnalysis) | FLAG(_TargetLibraryAnalysis);
+                FPM.addPass(AggressiveInstCombinePass());
+                break;
+            case P::DCEPass:
+                requiredPasses |= FLAG(_TargetLibraryAnalysis);
+                FPM.addPass(DCEPass());
+                break;
+            case P::EarlyCSEPass:
+                requiredPasses |= FLAG(_AssumptionAnalysis) | FLAG(_TargetIRAnalysis) | FLAG(_TargetLibraryAnalysis);
+                FPM.addPass(EarlyCSEPass());
+                break;
+            case P::MemCpyOptPass:
+                requiredPasses |= FLAG(_AAManager) | FLAG(_AssumptionAnalysis) | FLAG(_TargetIRAnalysis)
+                    | FLAG(_TargetLibraryAnalysis) | FLAG(_PhiValuesAnalysis) | FLAG(_PostDominatorTreeAnalysis)
+                    | FLAG(_MemoryDependenceAnalysis) | FLAG(_MemorySSAAnalysis);
+                FPM.addPass(MemCpyOptPass());
+                break;
+            case P::NewGVNPass:
+                requiredPasses |= FLAG(_AssumptionAnalysis) | FLAG(_AAManager) | FLAG(_TargetLibraryAnalysis) | FLAG(_MemorySSAAnalysis);
+                FPM.addPass(NewGVNPass());
+                break;
+            case P::SimplifyCFGPass:
+                requiredPasses |= FLAG(_AssumptionAnalysis) | FLAG(_TargetIRAnalysis);
+                FPM.addPass(SimplifyCFGPass());
+                break;
+            case P::PHICanonicalizerPass:
+                FPM.addPass(PHICanonicalizerPass());
+                break;
+        }
+    }
+
+    #define CASE_(PASS) case _##PASS: FAM.registerPass([&] { return PASS(); }); break
+
+    while (requiredPasses) {
+        const auto k = scan_forward_zeroes(requiredPasses);
+        assert ((requiredPasses & FLAG(k)) == FLAG(k));
+        requiredPasses ^= FLAG(k);
+        switch (k) {
+            CASE_(AAManager);
+            CASE_(AssumptionAnalysis);
+            CASE_(TargetIRAnalysis);
+            CASE_(TargetLibraryAnalysis);
+            CASE_(PhiValuesAnalysis);
+            CASE_(PostDominatorTreeAnalysis);
+            CASE_(MemoryDependenceAnalysis);
+            CASE_(MemorySSAAnalysis);
+            CASE_(LoopAnalysis);
+            CASE_(OptimizationRemarkEmitterAnalysis);
+        default:
+            llvm_unreachable("error! unknown analysis pass");
+        }
+    }
+
+    #undef CASE_
+    #undef FLAG
+
+    // DCE requires TargetLibraryAnalysis
+
+    // SimplifyCFGPass requires PassInstrumentationAnalysis, DominatorTreeAnalysis, AssumptionAnalysis, TargetIRAnalysis
+
+    // EarlyCSEPass requires PassInstrumentationAnalysis, AssumptionAnalysis, TargetIRAnalysis, TargetLibraryAnalysis
+
+    // MemCpyOptPass requires PassInstrumentationAnalysis, TargetIRAnalysis, TargetLibraryAnalysis, PhiValuesAnalysis,
+    // MemoryDependenceAnalysis, AAManager, AssumptionAnalysis, DominatorTreeAnalysis, PostDominatorTreeAnalysis, MemorySSAAnalysis
+
+    // AggressiveInstCombinePass requires
+
+    for (Function & F : *m) {
+        if (F.empty()) continue;
+        FPM.run(F, FAM);
+    }
 
 }
 
@@ -1560,55 +1719,6 @@ void KernelCompiler::clearInternalStateAfterCodeGen() {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
- * @brief runInternalOptimizationPasses
- ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::runInternalOptimizationPasses(Module * const m) {
-
-    // Attempt to promote all of the allocas in the entry block into PHI nodes
-    // and delete any unnecessary Alloca and GEP instructions.
-
-    SmallVector<AllocaInst *, 32> allocas;
-
-    for (Function & f : *m) {
-        if (f.empty()) continue;
-
-        BasicBlock & bb = f.getEntryBlock();
-
-        Instruction * inst = bb.getFirstNonPHIOrDbgOrLifetime();
-        while (inst) {
-            for (unsigned i = 0; i < inst->getNumOperands(); ++i) {
-                Value * const op = inst->getOperand(i);
-                if (op == nullptr) {
-                    report_fatal_error("null operand");
-                }
-            }
-
-
-            Instruction * const nextNode = inst->getNextNode();
-            if (isa<AllocaInst>(inst) || isa<GetElementPtrInst>(inst)) {
-                if (LLVM_UNLIKELY(inst->getNumUses() == 0)) {
-                    inst->eraseFromParent();
-                    inst = nextNode;
-                    continue;
-                }
-            }
-            if (isa<AllocaInst>(inst)) {
-                if (isAllocaPromotable(cast<AllocaInst>(inst))) {
-                    allocas.push_back(cast<AllocaInst>(inst));
-                }
-            }
-            inst = nextNode;
-        }
-
-        if (allocas.empty()) continue;
-
-        DominatorTree dt(f);
-        PromoteMemToReg(allocas, dt);
-        allocas.clear();
-    }
-}
-
-/** ------------------------------------------------------------------------------------------------------------- *
  * @brief registerIllustrator
  ** ------------------------------------------------------------------------------------------------------------- */
 void KernelCompiler::registerIllustrator(KernelBuilder & b,
@@ -1751,39 +1861,133 @@ KernelCompiler::~KernelCompiler() {
 
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief RemoveRedundantAllocaAndGEPInstructions::run
+ ** ------------------------------------------------------------------------------------------------------------- */
+PreservedAnalyses RemoveRedundantAllocaAndGEPInstructions::run(Function &F,
+                                                 FunctionAnalysisManager &AM) {
 
-//struct AggressiveCSEPass : public ModulePass {
-//    static char ID;
-//    AggressiveCSEPass() : ModulePass(ID) { }
-
-//    void getAnalysisUsage(AnalysisUsage & AU) const override {
-//        AU.addRequired<DominatorTreeWrapperPass>();
-//    }
-
-//    virtual bool runOnModule(Module &M) override;
-//};
-
-//ModulePass * createAggressiveCSEPass() {
-//    return new AggressiveCSEPass();
-//}
-
-//char AggressiveCSEPass::ID = 0;
-
-//bool AggressiveCSEPass::runOnModule(Module & M) {
-
-//    for (Function & F : M) {
-
-//        // ignore declarations
-//        if (F.empty()) continue;
-
-//        DominatorTree & DT = getAnalysis<DominatorTreeWrapperPass>(F).getDomTree();
+    assert (!F.empty());
 
 
-//        DT.dominates()
+    SmallVector<AllocaInst *, 32> allocas;
+
+    BasicBlock & bb = F.getEntryBlock();
+
+    Instruction * inst = bb.getFirstNonPHIOrDbgOrLifetime();
+    while (inst) {
+        #ifndef NDEBUG
+        for (unsigned i = 0; i < inst->getNumOperands(); ++i) {
+            Value * const op = inst->getOperand(i);
+            if (op == nullptr) {
+                report_fatal_error("null operand");
+            }
+        }
+        #endif
+        Instruction * const nextNode = inst->getNextNode();
+        if (isa<AllocaInst>(inst) || isa<GetElementPtrInst>(inst)) {
+            if (LLVM_UNLIKELY(inst->getNumUses() == 0)) {
+                inst->eraseFromParent();
+                inst = nextNode;
+                continue;
+            }
+        }
+        if (isa<AllocaInst>(inst)) {
+            if (isAllocaPromotable(cast<AllocaInst>(inst))) {
+                allocas.push_back(cast<AllocaInst>(inst));
+            }
+        }
+        inst = nextNode;
+    }
+
+    if (!allocas.empty()) {
+        auto &DT = AM.getResult<DominatorTreeAnalysis>(F);
+        PromoteMemToReg(allocas, DT);
+    }
+
+    return PreservedAnalyses::all();
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief PHICanonicalizerPass::run
+ ** ------------------------------------------------------------------------------------------------------------- */
+PreservedAnalyses PHICanonicalizerPass::run(Function &F, FunctionAnalysisManager &AM) {
+
+    assert (!F.empty());
+
+    // LLVM is not aggressive enough with how it deals with phi nodes. To ensure that
+    // we collapse every phi node in which all incoming values are identical into the
+    // incoming value, we execute the following mini optimization pass.
+
+    // TODO: check the newer versions of LLVM to see if any can do this now.
+
+    SmallVector<BasicBlock *, 16> preds;
+    SmallVector<Value *, 16> value;
+
+    bool anyPhis = false;
+
+    for (BasicBlock & bb : F) {
+
+        preds.assign(pred_begin(&bb), pred_end(&bb));
+        const auto n = preds.size();
+        value.resize(n);
+
+        Instruction * inst = &bb.front();
+        while (isa<PHINode>(inst)) {
+            PHINode * const phi = cast<PHINode>(inst);
+            #ifndef NDEBUG
+            if (LLVM_UNLIKELY(phi->getNumIncomingValues() != n || n == 0)) {
+                bb.print(errs(), nullptr, true, false);
+                errs() << "\n\nIllegal PHINode: ";
+                phi->print(errs(), true);
+            }
+            #endif
+            inst = inst->getNextNode();
+            if (LLVM_LIKELY(phi->hasNUsesOrMore(1))) {
+                Value * const value = phi->getIncomingValue(0);
+                assert (value);
+                const auto n = phi->getNumIncomingValues();
+                for (unsigned i = 1; i != n; ++i) {
+                    Value * const op = phi->getIncomingValue(i);
+                    assert (op);
+                    if (LLVM_LIKELY(op != value)) {
+                        goto keep_phi_node;
+                    }
+                }
+                phi->replaceAllUsesWith(value);
+            }
+
+            RecursivelyDeleteDeadPHINode(phi);
+            continue;
+            // ----------------------------------------------------------------------------------
+            //  canonicalize the phi node ordering for the eliminate duplicate phi node function
+            // ----------------------------------------------------------------------------------
+keep_phi_node:
+            bool canonicalize = false;
+            for (unsigned i = 0; i != n; ++i) {
+                const auto f = std::find(preds.begin(), preds.end(), phi->getIncomingBlock(i));
+                assert ("phi-node has invalid incoming block?" && f != preds.end());
+                const auto j = std::distance(preds.begin(), f);
+                canonicalize |= (j != i);
+                value[j] = phi->getIncomingValue(i);
+            }
+            if (canonicalize) {
+                for (unsigned i = 0; i != n; ++i) {
+                    phi->setIncomingBlock(i, preds[i]);
+                    phi->setIncomingValue(i, value[i]);
+                }
+            }
+            anyPhis = true;
+        }
+        if (LLVM_LIKELY(anyPhis)) {
+            EliminateDuplicatePHINodes(&bb);
+        }
+    }
 
 
-//    }
 
-//}
+    // No changes, all analyses are preserved.
+    return PreservedAnalyses::all();
+}
 
 }

@@ -473,7 +473,19 @@ protected:
 
     llvm::Function * addFinalizeDeclaration(KernelBuilder & b) const;
 
-    virtual void runOptimizationPasses(KernelBuilder & b) const;
+    enum class OptimizationPass {
+        DCEPass,
+        SimplifyCFGPass,
+        EarlyCSEPass,
+        MemCpyOptPass,
+        AggressiveInstCombinePass,
+        NewGVNPass,
+        PHICanonicalizerPass
+    };
+
+    using SelectedOptimizationPasses = llvm::SmallVector<OptimizationPass, 6>;
+
+    virtual void addOptimizationPasses(KernelBuilder & b, SelectedOptimizationPasses & passes) const;
 
 protected:
 

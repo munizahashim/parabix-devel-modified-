@@ -396,7 +396,7 @@ private:
 
     void clearInternalStateAfterCodeGen();
 
-    void runInternalOptimizationPasses(llvm::Module * const m);
+    void runAllOptimizationPasses(llvm::Module * const m, Kernel::SelectedOptimizationPasses & passes);
 
 protected:
 

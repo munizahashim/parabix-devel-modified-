@@ -380,9 +380,8 @@ Kernel::ParamMap::PairEntry PipelineKernel::createRepeatingStreamSet(KernelBuild
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief runOptimizationPasses
  ** ------------------------------------------------------------------------------------------------------------- */
-void PipelineKernel::runOptimizationPasses(KernelBuilder & b) const {
-    COMPILER->runOptimizationPasses(b);
-    Kernel::runOptimizationPasses(b);
+void PipelineKernel::addOptimizationPasses(KernelBuilder & b, SelectedOptimizationPasses & passes) const {
+    COMPILER->addOptimizationPasses(b, passes);
 }
 
 #define JOIN3(X,Y,Z) BOOST_JOIN(X,BOOST_JOIN(Y,Z))

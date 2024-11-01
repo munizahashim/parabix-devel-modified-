@@ -173,7 +173,7 @@ public:
     void generateFinalizeMethod(KernelBuilder & b);
     void generateFinalizeThreadLocalMethod(KernelBuilder & b);
     std::vector<Value *> getFinalOutputScalars(KernelBuilder & b) override;
-    void runOptimizationPasses(KernelBuilder & b);
+    void addOptimizationPasses(KernelBuilder & b, Kernel::SelectedOptimizationPasses & passes);
     void bindAdditionalInitializationArguments(KernelBuilder & b, ArgIterator & arg, const ArgIterator & arg_end) override;
     static void linkPThreadLibrary(KernelBuilder & b);
     #ifdef ENABLE_PAPI
@@ -470,7 +470,6 @@ public:
 
 // internal optimization passes
 
-    void simplifyPhiNodes(Module * const m) const;
     void replacePhiCatchWithCurrentBlock(KernelBuilder & b, BasicBlock *& toReplace, BasicBlock * const phiContainer);
 
 // synchronization functions

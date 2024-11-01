@@ -67,5 +67,6 @@ SRC
     program_builder.cpp
 DEPS
     objcache
+    toolchain
     kernel.illustrator
 )

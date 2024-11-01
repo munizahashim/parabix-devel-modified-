@@ -1381,14 +1381,14 @@ Value * Kernel::constructFamilyKernels(KernelBuilder & b, InitArgs & hostArgs, P
  * @brief recursivelyConstructFamilyKernels
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::recursivelyConstructFamilyKernels(KernelBuilder & b, InitArgs & args, ParamMap & params, NestedStateObjs & toFree) const {
-
+    /* do nothing */
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief runOptimizationPasses
  ** ------------------------------------------------------------------------------------------------------------- */
-void Kernel::runOptimizationPasses(KernelBuilder & b) const {
-
+void Kernel::addOptimizationPasses(KernelBuilder & b, SelectedOptimizationPasses & passes) const {
+    /* do nothing */
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

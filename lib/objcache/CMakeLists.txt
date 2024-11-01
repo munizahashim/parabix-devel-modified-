@@ -12,6 +12,7 @@ SRC
     object_cache.cpp
 DEPS
     kernel.core
+    toolchain
 )
 
 add_executable(cachejanitord

@@ -191,7 +191,7 @@ private:
 
     void generateFinalizeMethod(KernelBuilder & b) final;
 
-    void runOptimizationPasses(KernelBuilder & b) const final;
+    void addOptimizationPasses(KernelBuilder & b, SelectedOptimizationPasses & passes) const final;
 
 protected:
 

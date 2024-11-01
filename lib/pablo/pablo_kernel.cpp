@@ -28,7 +28,7 @@
 #include <llvm/Transforms/InstCombine/InstCombine.h>
 #include <llvm/Transforms/AggressiveInstCombine/AggressiveInstCombine.h>
 #include <llvm/Transforms/Scalar/DCE.h>
-#include <llvm/Transforms/Scalar/EarlyCSE.h>
+// #include <llvm/Transforms/Scalar/EarlyCSE.h>
 #include <llvm/Transforms/Scalar/NewGVN.h>
 #include <llvm/Analysis/AssumptionCache.h>
 #include <llvm/Analysis/OptimizationRemarkEmitter.h>
@@ -358,39 +358,13 @@ std::string && annotateKernelNameWithPabloDebugFlags(std::string && name) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief runOptimizationPasses
  ** ------------------------------------------------------------------------------------------------------------- */
-void PabloKernel::runOptimizationPasses(KernelBuilder & b) const {
-
-#if 0
+void PabloKernel::addOptimizationPasses(KernelBuilder & b, SelectedOptimizationPasses & passes) const {
     if (PabloUseLLVMOptimizationPasses) {
-        FunctionAnalysisManager FAM;
-        FAM.registerPass([&] { return PassInstrumentationAnalysis(); });
-        FAM.registerPass([&] { return AssumptionAnalysis(); });
-        FAM.registerPass([&] { return TargetIRAnalysis(); });
-        FAM.registerPass([&] { return TargetLibraryAnalysis(); });
-        FAM.registerPass([&] { return DominatorTreeAnalysis(); });
-        FAM.registerPass([&] { return AAManager(); });
-        FAM.registerPass([&] { return MemorySSAAnalysis(); });
-        FAM.registerPass([&] { return LoopAnalysis(); });
-        FAM.registerPass([&] { return OptimizationRemarkEmitterAnalysis(); });
-
-     //   FAM.registerPass([&] { return ModuleAnalysisManagerFunctionProxy(); });
-
-
-
-        FunctionPassManager FPM;
-        FPM.addPass(EarlyCSEPass());
-    //    FPM.addPass(InstCombinePass());
-        FPM.addPass(AggressiveInstCombinePass());
-        FPM.addPass(NewGVNPass());
-        FPM.addPass(DCEPass());
-        Module * M = b.getModule();
-        for (Function & F : *M) {
-            if (F.empty()) continue;
-            FPM.run(F, FAM);
-        }
+        passes.push_back(OptimizationPass::EarlyCSEPass);
+        passes.push_back(OptimizationPass::AggressiveInstCombinePass);
+        passes.push_back(OptimizationPass::NewGVNPass);
+        passes.push_back(OptimizationPass::DCEPass);
     }
-    Kernel::runOptimizationPasses(b);
-#endif
 }
 
 
