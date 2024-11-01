@@ -53,6 +53,7 @@ static cl::opt<bool> CountOnly("c", cl::desc("CountOnly flag for compatibility w
 static cl::list<std::string> inputFiles(cl::Positional, cl::desc("<input file ...>"), cl::OneOrMore, cl::cat(ucFlags));
 
 static cl::opt<bool> Lookahead("lookahead", cl::desc("Use UTF Compiler lookahead mode"), cl::cat(ucFlags));
+static cl::opt<bool> NoS2P("NoS2P", cl::desc("Don't transpose - use byte data directly"), cl::cat(ucFlags));
 static cl::opt<bool> U21("u21", cl::desc("Use Unicode 21 bits"), cl::cat(ucFlags));
 
 std::vector<fs::path> allFiles;
@@ -75,36 +76,41 @@ UCountFunctionType pipelineGen(CPUDriver & driver, re::Name * CC_name) {
     //  Read the file into the ByteStream.
     P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
 
-    //  Create a set of 8 parallel streams of 1-bit units (bits).
-    StreamSet * BasisBits = P.CreateStreamSet(8, 1);
-    SHOW_BIXNUM(BasisBits);
+    StreamSet * Source = nullptr;
+    if (NoS2P) {
+        Source = ByteStream;
+    } else {
+        //  Create a set of 8 parallel streams of 1-bit units (bits).
+        StreamSet * BasisBits = P.CreateStreamSet(8, 1);
+        SHOW_BIXNUM(BasisBits);
 
-    //  Transpose the ByteSteam into parallel bit stream form.
-    P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+        //  Transpose the ByteSteam into parallel bit stream form.
+        P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
+        
+        Source = BasisBits;
 
-    if (U21) {
-        StreamSet * const u21_Basis = P.CreateStreamSet(21, 1);
-        P.CreateKernelCall<UTF8_Decoder>(BasisBits, u21_Basis, pablo::MovementMode);
-        BasisBits = u21_Basis;
-        if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-            P.captureByteData("bytedata", ByteStream, '.');
-            for (unsigned i = 0; i < 21; i++) {
-                StreamSet * u21_basis_i = streamutils::Select(P, u21_Basis, i);
-                P.captureBitstream("u21_" + std::to_string(i), u21_basis_i);
+        if (U21) {
+            StreamSet * const u21_Basis = P.CreateStreamSet(21, 1);
+            P.CreateKernelCall<UTF8_Decoder>(BasisBits, u21_Basis, pablo::MovementMode);
+            Source = u21_Basis;
+            if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
+                P.captureByteData("bytedata", ByteStream, '.');
+                for (unsigned i = 0; i < 21; i++) {
+                    StreamSet * u21_basis_i = streamutils::Select(P, u21_Basis, i);
+                    P.captureBitstream("u21_" + std::to_string(i), u21_basis_i);
+                }
             }
         }
-
     }
-
 
     //  Create a character class bit stream.
     StreamSet * CCstream = P.CreateStreamSet(1, 1);
-    
+
     std::map<std::string, StreamSet *> propertyStreamMap;
     auto nameString = CC_name->getFullName();
     propertyStreamMap.emplace(nameString, CCstream);
     pablo::BitMovementMode mode = Lookahead ? pablo::BitMovementMode::LookAhead : pablo::BitMovementMode::Advance;
-    P.CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(CC_name, BasisBits, CCstream, mode);
+    P.CreateKernelFamilyCall<UnicodePropertyKernelBuilder>(CC_name, Source, CCstream, mode);
     SHOW_STREAM(CCstream);
 
     P.CreateKernelCall<PopcountKernel>(CCstream, P.getOutputScalar("countResult"));

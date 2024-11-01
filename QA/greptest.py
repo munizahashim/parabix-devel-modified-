@@ -172,7 +172,6 @@ flag_map = {'-CarryMode' : ['Compressed', 'BitBlock'],
             '-segment-size' : ['8192', '16384', '32768'],
             '-ccc-type' : ['ternary'],
             '-colors' : ['always', 'never'],
-            '-EnableCycleCounter' : [],
             '-EnableTernaryOpt' : []}
 
 def add_random_flags(flags, fileLength):
