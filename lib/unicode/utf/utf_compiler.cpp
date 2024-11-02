@@ -452,7 +452,7 @@ protected:
     std::unique_ptr<cc::CC_Compiler> mCodeUnitCompiler[4];
     re::CC * codeUnitCC(re::CC *, unsigned pos = 1);
     re::CC * codeUnitCC(CC_List & ccs, unsigned pos = 1);
-    virtual unsigned costModel(CC_List & ccs, unsigned from_pos);
+    virtual bool costModelExceedsThreshhold(CC_List & ccs, unsigned from_pos, unsigned threshhold);
     std::vector<UCD::UnicodeSet> computeFullBlockSets(CC_List & ccs, unsigned pos);
     void lengthAnalysis(CC_List & ccs);
     void preparePrefixTests(PabloBuilder & pb);
@@ -468,7 +468,7 @@ protected:
     virtual PabloAST * adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) = 0;
 };
 
-unsigned U8_Compiler::costModel(CC_List & ccs, unsigned from_pos) {
+bool U8_Compiler::costModelExceedsThreshhold(CC_List & ccs, unsigned from_pos, unsigned threshhold) {
     Range cc_span = CC_Set_Range(ccs);
     unsigned lgth = mEncoder.encoded_length(cc_span.hi);
     unsigned costSoFar = 0;
@@ -476,8 +476,9 @@ unsigned U8_Compiler::costModel(CC_List & ccs, unsigned from_pos) {
         unsigned ranges = cc->size();
         unsigned logic_cost = ranges * (lgth - from_pos + 1) * BinaryLogicCostPerByte;
         costSoFar += logic_cost;
+        if (costSoFar > threshhold) return true;
     }
-    return costSoFar;
+    return false;
 }
 
 void U8_Compiler::compile(Target_List targets, CC_List ccs) {
@@ -777,7 +778,7 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, 
         unsigned partitions = PartitioningFactor;
         if (units_to_process < partitions) partitions = units_to_process;
         
-        bool nesting = (partitions > 1) && (costModel(rangeCCs, code_unit) > IfEmbeddingCostThreshhold);
+        bool nesting = (partitions > 1) && (costModelExceedsThreshhold(rangeCCs, code_unit, IfEmbeddingCostThreshhold));
         
         codepoint_t partition_base = unit_range_base;
         unsigned units_this_partition = 0;
@@ -841,7 +842,7 @@ public:
     U8_Advance_Compiler(pablo::Var * Var, PabloBuilder & pb, pablo::PabloAST * mask);
 protected:
     PabloAST * mSuffix;
-    unsigned costModel(CC_List & ccs, unsigned from_pos) override;
+    bool costModelExceedsThreshhold(CC_List & ccs, unsigned from_pos, unsigned threshhold) override;
     void prepareSuffix(unsigned scope, PabloBuilder & pb) override;
     void prepareScope(unsigned scope, PabloBuilder & pb) override;
     PabloAST * adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) override;
@@ -908,7 +909,7 @@ U8_Advance_Compiler::U8_Advance_Compiler(pablo::Var * v, PabloBuilder & pb, pabl
 U8_Compiler(v, pb, mMask), mSuffix(nullptr) {
 }
 
-unsigned U8_Advance_Compiler::costModel(CC_List & ccs, unsigned from_pos) {
+bool U8_Advance_Compiler::costModelExceedsThreshhold(CC_List & ccs, unsigned from_pos, unsigned threshhold) {
     Range cc_span = CC_Set_Range(ccs);
     unsigned lgth = mEncoder.encoded_length(cc_span.hi);
     unsigned costSoFar = 0;
@@ -922,8 +923,9 @@ unsigned U8_Advance_Compiler::costModel(CC_List & ccs, unsigned from_pos) {
             unsigned shift_cost = final_shifts * ShiftCostFactor;
             costSoFar += shift_cost;
         }
+        if (costSoFar > threshhold) return true;
     }
-    return costSoFar;
+    return false;
 }
 
 void U8_Advance_Compiler::prepareSuffix(unsigned scope, PabloBuilder & pb) {
