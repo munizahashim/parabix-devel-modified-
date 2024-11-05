@@ -5,8 +5,6 @@
 #include <llvm/Support/DynamicLibrary.h>           // for LoadLibraryPermanently
 #include <llvm/ExecutionEngine/ExecutionEngine.h>  // for EngineBuilder
 #include <llvm/ExecutionEngine/RTDyldMemoryManager.h>
-#include <llvm/IR/LegacyPassManager.h>             // for PassManager
-#include <llvm/IR/IRPrintingPasses.h>
 #include <llvm/InitializePasses.h>                 // for initializeCodeGencd .
 #include <llvm/PassRegistry.h>                     // for PassRegistry
 #include <llvm/Support/CodeGen.h>                  // for Level, Level::None
@@ -14,23 +12,16 @@
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Timer.h>
-#include <llvm/Target/TargetMachine.h>             // for TargetMachine, Tar...
-#include <llvm/Target/TargetOptions.h>             // for TargetOptions
-#include <llvm/Transforms/Scalar.h>
-#include <llvm/Transforms/Utils/Local.h>
-#include <llvm/Transforms/Utils/Cloning.h>
-#include <llvm/Transforms/Scalar/GVN.h>
-#include <llvm/Transforms/Scalar/SROA.h>
-#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
-#include <llvm/Transforms/InstCombine/InstCombine.h>
-#include <llvm/Transforms/Utils.h>
-#endif
 #include <objcache/object_cache.h>
 #include <kernel/core/kernel_builder.h>
 #include <kernel/pipeline/pipeline_builder.h>
 #include <llvm/IR/Verifier.h>
 #include "llvm/IR/Mangler.h"
 #include <llvm/ExecutionEngine/MCJIT.h>
+#include <llvm/IR/LegacyPassManager.h>
+
+#include <llvm/Support/CommandLine.h>
+
 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(7, 0, 0)
 #define OF_None F_None
 #endif
@@ -69,7 +60,6 @@ CPUDriver::CPUDriver(std::string && moduleName)
 , mUnoptimizedIROutputStream{}
 , mIROutputStream{}
 , mASMOutputStream{}
-, mPassManager{}
 , mEngine(nullptr)
 , mTarget(nullptr) {
 
@@ -91,7 +81,6 @@ CPUDriver::CPUDriver(std::string && moduleName)
         for (auto &flag : HostCPUFeatures) {
             if (flag.second) {
                 attrs.push_back("+" + flag.first().str());
-                //llvm::errs() << flag.first().str() << "\n";
             }
         }
         builder.setMAttrs(attrs);
@@ -137,78 +126,6 @@ Function * CPUDriver::addLinkFunction(Module * mod, llvm::StringRef name, Functi
     return f;
 }
 
-inline void CPUDriver::preparePassManager() {
-
-    if (mPassManager) return;
-
-    mPassManager = std::make_unique<legacy::PassManager>();
-
-    PassRegistry * Registry = PassRegistry::getPassRegistry();
-    initializeCore(*Registry);
-    initializeCodeGen(*Registry);
-    initializeLowerIntrinsicsPass(*Registry);
-    if (LLVM_UNLIKELY(codegen::ShowUnoptimizedIROption != codegen::OmittedOption)) {
-        if (LLVM_LIKELY(mIROutputStream == nullptr)) {
-            if (!codegen::ShowUnoptimizedIROption.empty()) {
-                std::error_code error;
-                mUnoptimizedIROutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowUnoptimizedIROption, error, sys::fs::OpenFlags::OF_None);
-            } else {
-                mUnoptimizedIROutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
-            }
-        }
-        mPassManager->add(createPrintModulePass(*mUnoptimizedIROutputStream));
-    }
-    if (IN_DEBUG_MODE || LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::VerifyIR))) {
-        mPassManager->add(createVerifierPass());
-    }
-    if (LLVM_UNLIKELY(!codegen::TraceOption.empty())) {
-        mPassManager->add(createTracePass(mBuilder.get(), codegen::TraceOption));
-    }
-    if (LLVM_UNLIKELY(codegen::ShowIROption != codegen::OmittedOption)) {
-        if (LLVM_LIKELY(mIROutputStream == nullptr)) {
-            if (!codegen::ShowIROption.empty()) {
-                std::error_code error;
-                mIROutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowIROption, error, sys::fs::OpenFlags::OF_None);
-            } else {
-                mIROutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
-            }
-        }
-        mPassManager->add(createPrintModulePass(*mIROutputStream));
-    }
-    mPassManager->add(createPromoteMemoryToRegisterPass());    // Promote stack variables to constants or PHI nodes
-    mPassManager->add(createSROAPass());                       // Promote elements of aggregate allocas whose addresses are not taken to registers.
-    mPassManager->add(createCFGSimplificationPass());          // Remove dead basic blocks and unnecessary branch statements / phi nodes
-    mPassManager->add(createEarlyCSEPass());                   // Simple common subexpression elimination pass
-    mPassManager->add(createInstructionCombiningPass());       // Simple peephole optimizations and bit-twiddling.
-    mPassManager->add(createReassociatePass());                // Canonicalizes commutative expressions
-    mPassManager->add(createGVNPass());                        // Global value numbering redundant expression elimination pass
-    mPassManager->add(createCFGSimplificationPass());          // Repeat CFG Simplification to "clean up" any newly found redundant phi nodes    
-    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
-        mPassManager->add(createRemoveRedundantAssertionsPass());
-    }
-    if (LLVM_UNLIKELY(codegen::ShowASMOption != codegen::OmittedOption)) {
-        if (!codegen::ShowASMOption.empty()) {
-            std::error_code error;
-            mASMOutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowASMOption, error, sys::fs::OpenFlags::OF_None);
-        } else {
-            mASMOutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
-        }
-        #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
-        const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, nullptr, CGFT_AssemblyFile);
-        #elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
-        const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, nullptr, TargetMachine::CGFT_AssemblyFile);
-        #else
-        const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, TargetMachine::CGFT_AssemblyFile);
-        #endif
-        if (r) {
-            report_fatal_error("LLVM error: could not add emit assembly pass");
-        }
-    }
-    if (IN_DEBUG_MODE || LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::VerifyIR))) {
-        mPassManager->add(createVerifierPass());
-    }
-}
-
 void CPUDriver::generateUncachedKernels() {
     if (mUncachedKernel.empty()) return;
 
@@ -217,10 +134,6 @@ void CPUDriver::generateUncachedKernels() {
     // NOTE: we currently require DCE and Mem2Reg for each kernel to eliminate any unnecessary scalar -> value
     // mappings made by the base KernelCompiler. That could be done in a more focused manner, however, as each
     // mapping is known.
-
-    preparePassManager();
-
-    assert (mMainModule);
 
     mCachedKernel.reserve(mUncachedKernel.size());
 
@@ -233,7 +146,6 @@ void CPUDriver::generateUncachedKernels() {
         Module * const module = kernel->getModule(); assert (module);
         module->setTargetTriple(mMainModule->getTargetTriple());
         module->setDataLayout(mMainModule->getDataLayout());
-        mPassManager->run(*module);
         mCachedKernel.emplace_back(kernel.release());
     }
 
@@ -249,6 +161,16 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pk) {
 
     ModuleSet Infrequent;
     ModuleSet Normal;
+
+    // TODO: As far as I can tell, the PassRegistry intrinsics below do not affect the final assembly but I
+    // cannot locate the implementation code for initializeLowerIntrinsicsPass in any file within the llvm
+    // code base. It's called by multiple LLVM tools, however, so must get generated somehow? Look further
+    // into this case.
+
+//    PassRegistry * Registry = PassRegistry::getPassRegistry();
+//    initializeCore(*Registry);
+//    initializeCodeGen(*Registry);
+//    initializeLowerIntrinsicsPass(*Registry);
 
     for (const auto & kernel : mCompiledKernel) {
         kernel->ensureLoaded();
@@ -314,13 +236,47 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pk) {
     } else {
         mPreservedKernel.clear();
     }
-    mCachedKernel.clear();
-    mCompiledKernel.clear();
 
     // return the compiled main method
     mEngine->getTargetMachine()->setOptLevel(CodeGenOpt::None);
     const auto mainModulePtr = mainModule.get();
     mEngine->addModule(std::move(mainModule));
+
+    if (LLVM_UNLIKELY(codegen::ShowASMOption != codegen::OmittedOption)) {
+        if (!codegen::ShowASMOption.empty()) {
+            std::error_code error;
+            mASMOutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowASMOption, error, sys::fs::OpenFlags::OF_None);
+        } else {
+            mASMOutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
+        }
+
+        // TODO: there does not seem to be an ASM printer for the new PassManager?
+        auto pm = std::make_unique<legacy::PassManager>();
+
+        #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
+        const auto r = mTarget->addPassesToEmitFile(*pm, *mASMOutputStream, nullptr, CGFT_AssemblyFile);
+        #elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
+        const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, nullptr, TargetMachine::CGFT_AssemblyFile);
+        #else
+        const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, TargetMachine::CGFT_AssemblyFile);
+        #endif
+        if (r) {
+            report_fatal_error("LLVM error: could not add emit assembly pass");
+        }
+
+        for (const auto & kernel : mCachedKernel) {
+            pm->run(*kernel->getModule());
+        }
+
+        for (const auto & kernel : mCompiledKernel) {
+            pm->run(*kernel->getModule());
+        }
+
+    }
+
+    mCachedKernel.clear();
+    mCompiledKernel.clear();
+
     mEngine->finalizeObject();
     #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(11, 0, 0)
     auto mainFnPtr = mEngine->getFunctionAddress(main->getName().str());
@@ -348,67 +304,3 @@ CPUDriver::~CPUDriver() {
 
 }
 
-class TracePass : public ModulePass {
-public:
-    static char ID;
-    TracePass(kernel::KernelBuilder * kb, StringRef to_trace) : ModulePass(ID), b(*kb), mToTrace(to_trace) { }
-
-    bool addTraceStmt(BasicBlock * BB, BasicBlock::iterator to_trace, BasicBlock::iterator insert_pt) {
-        bool modified = false;
-        Type * t = (*to_trace).getType();
-        //t->dump();
-        if (t == b.getBitBlockType()) {
-            b.SetInsertPoint(BB, insert_pt);
-            b.CallPrintRegister((*to_trace).getName(), &*to_trace);
-            modified = true;
-        }
-        else if (t == b.getInt64Ty()) {
-            b.SetInsertPoint(BB, insert_pt);
-            b.CallPrintInt((*to_trace).getName(), &*to_trace);
-            modified = true;
-        }
-        return modified;
-    }
-
-    virtual bool runOnModule(Module &M) override;
-private:
-    kernel::KernelBuilder & b;
-    StringRef mToTrace;
-};
-
-char TracePass::ID = 0;
-
-bool TracePass::runOnModule(Module & M) {
-    Module * saveModule = b.getModule();
-    b.setModule(&M);
-    bool modified = false;
-    for (auto & F : M) {
-        for (auto & B : F) {
-            std::vector<BasicBlock::iterator> tracedPhis;
-            BasicBlock::iterator i = B.begin();
-            while (isa<PHINode>(*i)) {
-                if ((*i).getName().startswith(mToTrace)) {
-                    tracedPhis.push_back(i);
-                }
-                ++i;
-            }
-            for (auto t : tracedPhis) {
-                modified = addTraceStmt(&B, t, i) || modified;
-            }
-            while (i != B.end()) {
-                auto i0 = i;
-                ++i;
-                if ((*i0).getName().startswith(mToTrace)) {
-                    modified = addTraceStmt(&B, i0, i) || modified;
-                }
-            }
-        }
-    }
-    //if (modified) M.dump();
-    b.setModule(saveModule);
-    return modified;
-}
-
-ModulePass * CPUDriver::createTracePass(kernel::KernelBuilder * kb, StringRef to_trace) {
-    return new TracePass(mBuilder.get(), to_trace);
-}

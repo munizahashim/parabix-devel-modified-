@@ -20,6 +20,7 @@
 #ifndef NDEBUG
 #include <llvm/IR/Verifier.h>
 #endif
+#include <boost/regex.hpp>
 
 #include <llvm/IR/PassManager.h>
 #include <llvm/Analysis/AliasAnalysis.h>
@@ -29,6 +30,7 @@
 #include <llvm/Analysis/MemorySSA.h>
 #include <llvm/Analysis/OptimizationRemarkEmitter.h>
 #include <llvm/Analysis/PhiValues.h>
+#include <llvm/Analysis/ProfileSummaryInfo.h>
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/Analysis/TargetLibraryInfo.h>
 #include <llvm/Analysis/TargetTransformInfo.h>
@@ -38,10 +40,31 @@
 #include <llvm/Transforms/Scalar.h>
 #include <llvm/Transforms/Scalar/DCE.h>
 #include <llvm/Transforms/Scalar/EarlyCSE.h>
+#include <llvm/Transforms/Scalar/GVN.h>
+#include <llvm/Transforms/Scalar/SROA.h>
+#include <llvm/Transforms/Scalar/Reassociate.h>
 #include <llvm/Transforms/Scalar/MemCpyOptimizer.h>
 #include <llvm/Transforms/Scalar/NewGVN.h>
 #include <llvm/Transforms/Scalar/SimplifyCFG.h>
 #include <llvm/Transforms/Utils/Local.h>
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(14, 0, 0)
+#include <llvm/IRPrinter/IRPrintingPasses.h>
+#else
+#include <llvm/IR/IRPrintingPasses.h>
+#endif
+#include <llvm/Support/FileSystem.h>
+
+#include <llvm/Target/TargetMachine.h>             // for TargetMachine, Tar...
+#include <llvm/Target/TargetOptions.h>             // for TargetOptions
+#include <llvm/Transforms/Scalar.h>
+#include <llvm/Transforms/Utils/Local.h>
+#include <llvm/Transforms/Utils/Cloning.h>
+#include <llvm/Transforms/Scalar/GVN.h>
+#include <llvm/Transforms/Scalar/SROA.h>
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
+#include <llvm/Transforms/InstCombine/InstCombine.h>
+#include <llvm/Transforms/Utils.h>
+#endif
 
 #if BOOST_VERSION >= 107600
 #include <boost/core/bit.hpp>
@@ -68,16 +91,24 @@ namespace kernel {
 
 class RemoveRedundantAllocaAndGEPInstructions : public PassInfoMixin<RemoveRedundantAllocaAndGEPInstructions> {
 public:
-  /// Run the pass over the function.
-  PreservedAnalyses run(Function &F, AnalysisManager<Function> &AM);
+    /// Run the pass over the function.
+    PreservedAnalyses run(Function &F, AnalysisManager<Function> &AM);
 };
 
 class PHICanonicalizerPass : public PassInfoMixin<PHICanonicalizerPass> {
 public:
-  /// Run the pass over the function.
-  PreservedAnalyses run(Function &F, AnalysisManager<Function> &AM);
+    /// Run the pass over the function.
+    PreservedAnalyses run(Function &F, AnalysisManager<Function> &AM);
 };
 
+
+class TracePass : public PassInfoMixin<TracePass> {
+public:
+    TracePass(KernelBuilder & b) : b(b) {}
+    PreservedAnalyses run(Function &F, AnalysisManager<Function> &AM);
+private:
+    KernelBuilder & b;
+};
 
 using AttrId = Attribute::KindId;
 using Rational = ProcessingRate::Rational;
@@ -157,7 +188,7 @@ void KernelCompiler::generateKernel(KernelBuilder & b) {
 
     Kernel::SelectedOptimizationPasses passes;
     mTarget->addOptimizationPasses(b, passes);
-    runAllOptimizationPasses(b.getModule(), passes);
+    runAllOptimizationPasses(b, passes);
     b.setCompiler(oc);
 
 }
@@ -165,60 +196,113 @@ void KernelCompiler::generateKernel(KernelBuilder & b) {
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief runAllOptimizationPasses
  ** ------------------------------------------------------------------------------------------------------------- */
-void KernelCompiler::runAllOptimizationPasses(llvm::Module * const m, Kernel::SelectedOptimizationPasses & passes) {
+void KernelCompiler::runAllOptimizationPasses(KernelBuilder & b, Kernel::SelectedOptimizationPasses & passes) {
 
     enum AnalysisPass : uint64_t {
-        _AAManager,
-        _AssumptionAnalysis,
-        _TargetIRAnalysis,
-        _TargetLibraryAnalysis,
-        _PhiValuesAnalysis,
+//        _AAManager,
+//        _PhiValuesAnalysis,
         _PostDominatorTreeAnalysis,
-        _MemoryDependenceAnalysis,
-        _MemorySSAAnalysis,
-        _LoopAnalysis,
+//        _MemoryDependenceAnalysis,
+//        _MemorySSAAnalysis,
+//        _LoopAnalysis,
         _OptimizationRemarkEmitterAnalysis,
+        _VerifierAnalysis
     };
+
+
+
+    ModuleAnalysisManager MAM;
+    MAM.registerPass([&] { return ProfileSummaryAnalysis(); });
 
     FunctionAnalysisManager FAM;
     FAM.registerPass([&] { return PassInstrumentationAnalysis(); });
+    FAM.registerPass([&] { return TargetIRAnalysis(); });
+
+    FAM.registerPass([&] { return AssumptionAnalysis(); });
     FAM.registerPass([&] { return DominatorTreeAnalysis(); });
+    FAM.registerPass([&] { return TargetLibraryAnalysis(); });
+    FAM.registerPass([&] { return AAManager(); });
+
+    FAM.registerPass([&] { return LoopAnalysis(); });
+    FAM.registerPass([&] { return PhiValuesAnalysis(); });
+    FAM.registerPass([&] { return MemoryDependenceAnalysis(); });
+    FAM.registerPass([&] { return MemorySSAAnalysis(); });
+    FAM.registerPass([&] { return ModuleAnalysisManagerFunctionProxy(MAM); });
+
+    FAM.registerPass([&] { return OptimizationRemarkEmitterAnalysis(); });
 
     FunctionPassManager FPM;
-    FPM.addPass(RemoveRedundantAllocaAndGEPInstructions());
 
-    using P = Kernel::OptimizationPass;
+    #ifndef NDEBUG
+    #define ADD_VERIFY_IR_PASS true
+    #else
+    const auto __addVerifyPass = codegen::DebugOptionIsSet(codegen::VerifyIR);
+    #define ADD_VERIFY_IR_PASS  LLVM_UNLIKELY(__addVerifyPass)
+    #endif
+
+    #define FLAG(x) (1ULL << (x))
 
     uint64_t requiredPasses = 0;
 
-    #define FLAG(x) (1ULL << (x))
+    std::unique_ptr<raw_fd_ostream> unoptimizedOut;
+
+    if (LLVM_UNLIKELY(codegen::ShowUnoptimizedIROption != codegen::OmittedOption)) {
+        const auto & options = codegen::ShowUnoptimizedIROption;
+        if (options.empty()) {
+            unoptimizedOut = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
+        } else {
+            std::error_code unoptimizedErr;
+            unoptimizedOut = std::make_unique<raw_fd_ostream>(options, unoptimizedErr, sys::fs::OpenFlags::OF_None);
+        }
+        FPM.addPass(PrintFunctionPass(*unoptimizedOut));
+    }
+
+    if (ADD_VERIFY_IR_PASS) {
+        FPM.addPass(VerifierPass());
+        requiredPasses = FLAG(_VerifierAnalysis);
+    }
+    FPM.addPass(RemoveRedundantAllocaAndGEPInstructions());
+    if (LLVM_UNLIKELY(!codegen::TraceOption.empty())) {
+        FPM.addPass(TracePass(b));
+    }
+
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
+    FPM.addPass(SROAPass(SROAOptions::ModifyCFG));
+    #elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(14, 0, 0)
+    FPM.addPass(SROAPass());
+    #else
+    FPM.addPass(SROA());
+    #endif
+    FPM.addPass(InstCombinePass());
+    FPM.addPass(DCEPass());
+    FPM.addPass(ReassociatePass());
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(14, 0, 0)
+    FPM.addPass(GVNPass());
+    #else
+    FPM.addPass(GVN());
+    #endif
+
+    using P = Kernel::OptimizationPass;
 
     for (const P pass : passes) {
         switch (pass) {
              case P::AggressiveInstCombinePass:
-                requiredPasses |= FLAG(_AAManager) | FLAG(_AssumptionAnalysis) | FLAG(_TargetLibraryAnalysis);
                 FPM.addPass(AggressiveInstCombinePass());
                 break;
             case P::DCEPass:
-                requiredPasses |= FLAG(_TargetLibraryAnalysis);
                 FPM.addPass(DCEPass());
                 break;
             case P::EarlyCSEPass:
-                requiredPasses |= FLAG(_AssumptionAnalysis) | FLAG(_TargetIRAnalysis) | FLAG(_TargetLibraryAnalysis);
                 FPM.addPass(EarlyCSEPass());
                 break;
             case P::MemCpyOptPass:
-                requiredPasses |= FLAG(_AAManager) | FLAG(_AssumptionAnalysis) | FLAG(_TargetIRAnalysis)
-                    | FLAG(_TargetLibraryAnalysis) | FLAG(_PhiValuesAnalysis) | FLAG(_PostDominatorTreeAnalysis)
-                    | FLAG(_MemoryDependenceAnalysis) | FLAG(_MemorySSAAnalysis);
+                requiredPasses |= FLAG(_PostDominatorTreeAnalysis);
                 FPM.addPass(MemCpyOptPass());
                 break;
             case P::NewGVNPass:
-                requiredPasses |= FLAG(_AssumptionAnalysis) | FLAG(_AAManager) | FLAG(_TargetLibraryAnalysis) | FLAG(_MemorySSAAnalysis);
                 FPM.addPass(NewGVNPass());
                 break;
             case P::SimplifyCFGPass:
-                requiredPasses |= FLAG(_AssumptionAnalysis) | FLAG(_TargetIRAnalysis);
                 FPM.addPass(SimplifyCFGPass());
                 break;
             case P::PHICanonicalizerPass:
@@ -234,16 +318,9 @@ void KernelCompiler::runAllOptimizationPasses(llvm::Module * const m, Kernel::Se
         assert ((requiredPasses & FLAG(k)) == FLAG(k));
         requiredPasses ^= FLAG(k);
         switch (k) {
-            CASE_(AAManager);
-            CASE_(AssumptionAnalysis);
-            CASE_(TargetIRAnalysis);
-            CASE_(TargetLibraryAnalysis);
-            CASE_(PhiValuesAnalysis);
             CASE_(PostDominatorTreeAnalysis);
-            CASE_(MemoryDependenceAnalysis);
-            CASE_(MemorySSAAnalysis);
-            CASE_(LoopAnalysis);
             CASE_(OptimizationRemarkEmitterAnalysis);
+            CASE_(VerifierAnalysis);
         default:
             llvm_unreachable("error! unknown analysis pass");
         }
@@ -252,23 +329,110 @@ void KernelCompiler::runAllOptimizationPasses(llvm::Module * const m, Kernel::Se
     #undef CASE_
     #undef FLAG
 
-    // DCE requires TargetLibraryAnalysis
+    std::unique_ptr<raw_fd_ostream> optimizedOut;
 
-    // SimplifyCFGPass requires PassInstrumentationAnalysis, DominatorTreeAnalysis, AssumptionAnalysis, TargetIRAnalysis
+    if (LLVM_UNLIKELY(codegen::ShowIROption != codegen::OmittedOption)) {
+        const auto & options = codegen::ShowIROption;
+        if (options.empty()) {
+            optimizedOut = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
+        } else {
+            std::error_code optimizedErr;
+            optimizedOut = std::make_unique<raw_fd_ostream>(options, optimizedErr, sys::fs::OpenFlags::OF_None);
+        }
+        FPM.addPass(PrintFunctionPass(*optimizedOut));
+    }
 
-    // EarlyCSEPass requires PassInstrumentationAnalysis, AssumptionAnalysis, TargetIRAnalysis, TargetLibraryAnalysis
+    if (ADD_VERIFY_IR_PASS) {
+        FPM.addPass(VerifierPass());
+    }
 
-    // MemCpyOptPass requires PassInstrumentationAnalysis, TargetIRAnalysis, TargetLibraryAnalysis, PhiValuesAnalysis,
-    // MemoryDependenceAnalysis, AAManager, AssumptionAnalysis, DominatorTreeAnalysis, PostDominatorTreeAnalysis, MemorySSAAnalysis
+    #undef ADD_VERIFY_IR_PASS
 
-    // AggressiveInstCombinePass requires
-
-    for (Function & F : *m) {
+    for (Function & F : *b.getModule()) {
         if (F.empty()) continue;
         FPM.run(F, FAM);
     }
 
 }
+
+#if 0
+
+inline void CPUDriver::preparePassManager() {
+
+    if (mPassManager) return;
+
+    mPassManager = std::make_unique<legacy::PassManager>();
+
+    PassRegistry * Registry = PassRegistry::getPassRegistry();
+    initializeCore(*Registry);
+    initializeCodeGen(*Registry);
+    initializeLowerIntrinsicsPass(*Registry);
+    if (LLVM_UNLIKELY(codegen::ShowUnoptimizedIROption != codegen::OmittedOption)) {
+        if (LLVM_LIKELY(mIROutputStream == nullptr)) {
+            if (!codegen::ShowUnoptimizedIROption.empty()) {
+                std::error_code error;
+                mUnoptimizedIROutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowUnoptimizedIROption, error, sys::fs::OpenFlags::OF_None);
+            } else {
+                mUnoptimizedIROutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
+            }
+        }
+        mPassManager->add(createPrintModulePass(*mUnoptimizedIROutputStream));
+    }
+    if (IN_DEBUG_MODE || LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::VerifyIR))) {
+        mPassManager->add(createVerifierPass());
+    }
+    if (LLVM_UNLIKELY(!codegen::TraceOption.empty())) {
+        mPassManager->add(createTracePass(mBuilder.get(), codegen::TraceOption));
+    }
+    if (LLVM_UNLIKELY(codegen::ShowIROption != codegen::OmittedOption)) {
+        if (LLVM_LIKELY(mIROutputStream == nullptr)) {
+            if (!codegen::ShowIROption.empty()) {
+                std::error_code error;
+                mIROutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowIROption, error, sys::fs::OpenFlags::OF_None);
+            } else {
+                mIROutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
+            }
+        }
+        mPassManager->add(createPrintModulePass(*mIROutputStream));
+    }
+    mPassManager->add(createPromoteMemoryToRegisterPass());    // Promote stack variables to constants or PHI nodes
+    mPassManager->add(createSROAPass());                       // Promote elements of aggregate allocas whose addresses are not taken to registers.
+
+
+
+    mPassManager->add(createCFGSimplificationPass());          // Remove dead basic blocks and unnecessary branch statements / phi nodes
+    mPassManager->add(createEarlyCSEPass());                   // Simple common subexpression elimination pass
+    mPassManager->add(createInstructionCombiningPass());       // Simple peephole optimizations and bit-twiddling.
+    mPassManager->add(createReassociatePass());                // Canonicalizes commutative expressions
+    mPassManager->add(createGVNPass());                        // Global value numbering redundant expression elimination pass
+    mPassManager->add(createCFGSimplificationPass());          // Repeat CFG Simplification to "clean up" any newly found redundant phi nodes
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::EnableAsserts))) {
+        mPassManager->add(createRemoveRedundantAssertionsPass());
+    }
+    if (LLVM_UNLIKELY(codegen::ShowASMOption != codegen::OmittedOption)) {
+        if (!codegen::ShowASMOption.empty()) {
+            std::error_code error;
+            mASMOutputStream = std::make_unique<raw_fd_ostream>(codegen::ShowASMOption, error, sys::fs::OpenFlags::OF_None);
+        } else {
+            mASMOutputStream = std::make_unique<raw_fd_ostream>(STDERR_FILENO, false, true);
+        }
+        #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
+        const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, nullptr, CGFT_AssemblyFile);
+        #elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
+        const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, nullptr, TargetMachine::CGFT_AssemblyFile);
+        #else
+        const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, TargetMachine::CGFT_AssemblyFile);
+        #endif
+        if (r) {
+            report_fatal_error("LLVM error: could not add emit assembly pass");
+        }
+    }
+    if (IN_DEBUG_MODE || LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::VerifyIR))) {
+        mPassManager->add(createVerifierPass());
+    }
+}
+
+#endif
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief constructStreamSetBuffers
@@ -1984,10 +2148,57 @@ keep_phi_node:
         }
     }
 
+    // No changes, all analyses are preserved.
+    return PreservedAnalyses::all();
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief TracePass::run
+ ** ------------------------------------------------------------------------------------------------------------- */
+PreservedAnalyses TracePass::run(Function &F, FunctionAnalysisManager & AM) {
+
+    const boost::regex ex(codegen::TraceOption);
+
+    SmallVector<Instruction *, 16> toTrace;
+    for (auto & B : F) {
+
+        assert (toTrace.empty());
+
+        for (Instruction & inst : B) {
+            if (LLVM_UNLIKELY(boost::regex_match(inst.getName().data(), ex))) {
+                toTrace.push_back(&inst);
+            }
+        }
+
+        if (LLVM_LIKELY(toTrace.empty())) {
+            continue;
+        }
+
+        for (Instruction * I : toTrace) {
+            Instruction * N = I;
+            if (LLVM_UNLIKELY(isa<PHINode>(I))) {
+                N = B.getFirstNonPHIOrDbgOrLifetime();
+            } else if (LLVM_LIKELY(I != B.getTerminator())) {
+                assert (I->getNextNode());
+                N = I->getNextNode();
+            }
+            b.SetInsertPoint(N);
+            const Type * ty = I->getType();
+            if (ty->isIntOrPtrTy()) {
+                b.CallPrintInt(I->getName(), I);
+            } else if (ty->isVectorTy()) {
+                b.CallPrintRegister(I->getName(), I);
+            }
+        }
+
+        toTrace.clear();
+    }
 
 
     // No changes, all analyses are preserved.
     return PreservedAnalyses::all();
+
 }
+
 
 }

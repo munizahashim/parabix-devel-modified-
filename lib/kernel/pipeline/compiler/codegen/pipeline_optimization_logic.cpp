@@ -2,7 +2,6 @@
 #ifndef NDEBUG
 #include <llvm/IR/Verifier.h>
 #endif
-#include <llvm/Transforms/Utils/Local.h>
 
 namespace kernel {
 

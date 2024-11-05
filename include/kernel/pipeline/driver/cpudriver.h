@@ -34,7 +34,6 @@ private:
     std::unique_ptr<llvm::raw_fd_ostream>                   mUnoptimizedIROutputStream;
     std::unique_ptr<llvm::raw_fd_ostream>                   mIROutputStream;
     std::unique_ptr<llvm::raw_fd_ostream>                   mASMOutputStream;
-    std::unique_ptr<llvm::legacy::PassManager>              mPassManager;
     std::vector<std::pair<llvm::Function *, void *>>        mCachedFunctionMappings;
     std::unique_ptr<llvm::ExecutionEngine>                  mEngine;
     std::unique_ptr<llvm::TargetMachine>                    mTarget;
