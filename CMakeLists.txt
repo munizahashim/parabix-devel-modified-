@@ -75,7 +75,11 @@ set(PARABIX_TARGETS_TO_BUILD X86)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DPARABIX_X86_TARGET")
 endif()
 
-llvm_map_components_to_libnames(REQ_LLVM_LIBRARIES ${PARABIX_TARGETS_TO_BUILD} mcjit native IRReader Linker)
+if (LLVM_VERSION_MAJOR STRGREATER 13)
+    set(LLVM_IR_PRINTER IRPrinter)
+endif()
+llvm_map_components_to_libnames(REQ_LLVM_LIBRARIES ${PARABIX_TARGETS_TO_BUILD} mcjit native IRReader Linker ${LLVM_IR_PRINTER})
+
 include_directories(${LLVM_INCLUDE_DIRS})
 link_directories(${LLVM_LIBRARY_DIRS})
 add_definitions(${LLVM_DEFINITIONS})

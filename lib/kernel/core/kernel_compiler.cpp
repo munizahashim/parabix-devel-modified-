@@ -17,9 +17,7 @@
 #include <kernel/core/streamsetptr.h>
 #include <codegen/TypeBuilder.h>
 #include <kernel/illustrator/illustrator.h>
-#ifndef NDEBUG
 #include <llvm/IR/Verifier.h>
-#endif
 #include <boost/regex.hpp>
 
 #include <llvm/IR/PassManager.h>
@@ -205,7 +203,7 @@ void KernelCompiler::runAllOptimizationPasses(KernelBuilder & b, Kernel::Selecte
 //        _MemoryDependenceAnalysis,
 //        _MemorySSAAnalysis,
 //        _LoopAnalysis,
-        _OptimizationRemarkEmitterAnalysis,
+//        _OptimizationRemarkEmitterAnalysis,
         _VerifierAnalysis
     };
 
@@ -319,7 +317,6 @@ void KernelCompiler::runAllOptimizationPasses(KernelBuilder & b, Kernel::Selecte
         requiredPasses ^= FLAG(k);
         switch (k) {
             CASE_(PostDominatorTreeAnalysis);
-            CASE_(OptimizationRemarkEmitterAnalysis);
             CASE_(VerifierAnalysis);
         default:
             llvm_unreachable("error! unknown analysis pass");
