@@ -35,6 +35,7 @@ static cl::opt<unsigned> ShiftCostFactor("ShiftCostFactor", cl::init(10), cl::ca
 static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", cl::init(15), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> PartitioningCostThreshhold("PartitioningCostThreshhold", cl::init(12), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(4), cl::cat(codegen::CodeGenOptions));
+static cl::opt<bool> PartitioningRevision("PartitioningRevision", cl::init(true), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> SuffixOptimization("SuffixOptimization", cl::init(false), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> AdvanceBasis("AdvanceBasis", cl::desc("Advance basis bits before compileCodeUnit"), cl::init(false), cl::cat(codegen::CodeGenOptions));
 enum class InitialTestMode {PrefixCC, RangeCC, NonASCII};
@@ -55,9 +56,13 @@ std::string kernelAnnotation() {
     a += "i" + std::to_string(IfEmbeddingCostThreshhold);
     a += "p" + std::to_string(PartitioningCostThreshhold);
     a += "f" + std::to_string(PartitioningFactor);
+    a += "r" + std::to_string(PartitioningRevision);
     a += "m" + std::to_string(PrefixTestMax);
     if (AdvanceBasis) {
         a += "a";
+    }
+    if (SuffixOptimization) {
+        a += "x";
     }
     if (InitialTest == InitialTestMode::NonASCII) {
         a += "+nA";
@@ -436,6 +441,7 @@ struct SeqData {
 class U8_Compiler {
 public:
     const unsigned mCodeUnitBits = 8;
+    const unsigned suffixDataBits = 6;
     U8_Compiler(pablo::Var * v, PabloBuilder & pb, pablo::PabloAST * mask) :
         mBasisVar(v), mPB(pb), mMask(mask) {
         mEncoder.setCodeUnitBits(mCodeUnitBits);
@@ -452,17 +458,18 @@ protected:
     std::unique_ptr<cc::CC_Compiler> mCodeUnitCompiler[4];
     re::CC * codeUnitCC(re::CC *, unsigned pos = 1);
     re::CC * codeUnitCC(CC_List & ccs, unsigned pos = 1);
+    virtual Basis_Set & getBasis(U8_Seq_Kind k, unsigned pos) = 0;
     virtual bool costModelExceedsThreshhold(CC_List & ccs, unsigned from_pos, unsigned threshhold);
     std::vector<UCD::UnicodeSet> computeFullBlockSets(CC_List & ccs, unsigned pos);
     void lengthAnalysis(CC_List & ccs);
     void preparePrefixTests(PabloBuilder & pb);
     void createInitialHierarchy(CC_List & ccs);
     void extendLengthHierarchy(EnclosingInfo & info, PabloBuilder & pb);
-    void prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb);
-    CC_List prepareFullBlockSets(U8_Seq_Kind k, CC_List ccs, PabloAST * enclosing_test, unsigned code_unit, PabloBuilder & pb);
-    void compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, unsigned code_unit, PabloBuilder & pb);
+    void prepareFixedLengthHierarchy(U8_Seq_Kind k, EnclosingInfo & info, PabloBuilder & pb);
+    CC_List prepareFullBlockSets(U8_Seq_Kind k, Range enclosing_range, CC_List ccs, PabloAST * enclosing_test, unsigned code_unit, PabloBuilder & pb);
+    void compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & if_parent, EnclosingInfo & enclosing, unsigned code_unit, PabloBuilder & pb);
     PabloAST * compilePrefix(re::CC * prefixCC, PabloBuilder & pb);
-    virtual PabloAST * compileCodeUnit(U8_Seq_Kind k, re::CC * unitCC, unsigned pos, PabloBuilder & pb) = 0;
+    PabloAST * compileCodeUnit(U8_Seq_Kind k, Range enclosing_range, re::CC * unitCC, unsigned pos, PabloBuilder & pb);
     virtual void prepareSuffix(unsigned scope, PabloBuilder & pb) = 0;
     virtual void prepareScope(unsigned scope, PabloBuilder & pb) = 0;
     virtual PabloAST * adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) = 0;
@@ -519,6 +526,39 @@ re::CC * U8_Compiler::codeUnitCC(CC_List & ccs, unsigned pos) {
         }
     }
     return unitCC;
+}
+
+PabloAST * U8_Compiler::compileCodeUnit(U8_Seq_Kind k, Range enclosing_range, re::CC * unitCC, unsigned unitPos, PabloBuilder & pb) {
+    Basis_Set & basis = getBasis(k, unitPos);
+    if (basis.size() == 1) {
+        // Byte stream - compile with direct CC compiler.
+        return cc::Direct_CC_Compiler(basis[0]).compileCC(unitCC, pb);
+    }
+    if (SuffixOptimization && (unitPos > 1)) {
+        unsigned significant_bits = enclosing_range.significant_bits();
+        unsigned lgth = k + 1;
+        unsigned code_unit_bit_offset = (lgth - unitPos) * suffixDataBits;
+        unsigned significant_suffix_bits = significant_bits - code_unit_bit_offset;
+        if (UTF_CompilationTracing) {
+            llvm::errs() << "compileCodeUnit:" << enclosing_range.hex_string() << ", unitPos = " << unitPos;
+            llvm::errs() << ", significant_suffix_bits = " << significant_suffix_bits << "\n";
+        }
+        Basis_Set suffixBasis(mCodeUnitBits);
+        for (unsigned i = 0; i < significant_suffix_bits; i++) {
+            suffixBasis[i] = basis[i];
+        }
+        for (unsigned i = significant_suffix_bits; i < suffixDataBits; i++) {
+            if ((enclosing_range.lo >> (code_unit_bit_offset + i) & 1) == 1) {
+                suffixBasis[i] = pb.createOnes();
+            } else {
+                suffixBasis[i] = pb.createZeroes();
+            }
+        }
+        suffixBasis[6] = pb.createZeroes();
+        suffixBasis[7] = pb.createOnes();
+        return cc::Parabix_CC_Compiler_Builder(suffixBasis).compileCC(unitCC, pb);
+    }
+    return cc::Parabix_CC_Compiler_Builder(basis).compileCC(unitCC, pb);
 }
 
 std::vector<UCD::UnicodeSet> U8_Compiler::computeFullBlockSets(CC_List & ccs, unsigned pos) {
@@ -603,7 +643,7 @@ void U8_Compiler::createInitialHierarchy(CC_List & ccs) {
         PabloAST * ASCII_test = mCodeUnitCompiler[0]->compileCC(ASCII_CC, mPB);
         Range ASCII_Range{0, 0x7F};
         EnclosingInfo ASCII_info(ASCII_Range, ASCII_test);
-        compileFromCodeUnit(ASCII, ASCII_info, 1, mPB);
+        compileFromCodeUnit(ASCII, ASCII_info, ASCII_info, 1, mPB);
         for (unsigned i = 0; i < ccs.size(); i++) {
             mPB.createAssign(mTargets[i], mSeqData[ASCII].targets[i]);
         }
@@ -654,22 +694,32 @@ void U8_Compiler::createInitialHierarchy(CC_List & ccs) {
 }
 
 void U8_Compiler::extendLengthHierarchy(EnclosingInfo & initialInfo, PabloBuilder & pb) {
-    prepareFixedLengthHierarchy(TwoByte, pb);
+    prepareFixedLengthHierarchy(TwoByte, initialInfo, pb);
     PabloAST * prefix34_test = mSeqData[ThreeByte].combinedTest;
     if (prefix34_test == nullptr) return;  // No code generation required.
     if (prefix34_test == initialInfo.test) {
         // No nesting required.
-        prepareFixedLengthHierarchy(ThreeByte, pb);
-        prepareFixedLengthHierarchy(FourByte, pb);
+        prepareFixedLengthHierarchy(ThreeByte, initialInfo, pb);
+        prepareFixedLengthHierarchy(FourByte, initialInfo, pb);
     } else {
         auto nested = pb.createScope();
         pb.createIf(prefix34_test, nested);
-        prepareFixedLengthHierarchy(ThreeByte, nested);
-        prepareFixedLengthHierarchy(FourByte, nested);
+        if (mSeqData[FourByte].actualRange.is_empty()) {
+            EnclosingInfo threeByteInfo(mSeqData[ThreeByte].testRange, mSeqData[ThreeByte].test);
+            prepareFixedLengthHierarchy(ThreeByte, threeByteInfo, nested);
+        } else if (mSeqData[ThreeByte].actualRange.is_empty()) {
+            EnclosingInfo fourByteInfo(mSeqData[FourByte].testRange, mSeqData[FourByte].test);
+            prepareFixedLengthHierarchy(FourByte, fourByteInfo, nested);
+        } else {
+            Range range34{mSeqData[ThreeByte].testRange.lo, mSeqData[FourByte].testRange.hi};
+            EnclosingInfo enclosing34info(range34, prefix34_test);
+            prepareFixedLengthHierarchy(ThreeByte, enclosing34info, nested);
+            prepareFixedLengthHierarchy(FourByte, enclosing34info, nested);
+        }
     }
 }
 
-CC_List U8_Compiler::prepareFullBlockSets(U8_Seq_Kind k, CC_List ccs, PabloAST * enclosing_test, unsigned code_unit, PabloBuilder & pb) {
+CC_List U8_Compiler::prepareFullBlockSets(U8_Seq_Kind k, Range enclosing_range, CC_List ccs, PabloAST * enclosing_test, unsigned code_unit, PabloBuilder & pb) {
     std::vector<UCD::UnicodeSet> fullBlockSets = computeFullBlockSets(ccs, code_unit);
     CC_List remainingCCs(ccs.size());
     for (unsigned i = 0; i < ccs.size(); i++) {
@@ -684,7 +734,7 @@ CC_List U8_Compiler::prepareFullBlockSets(U8_Seq_Kind k, CC_List ccs, PabloAST *
         if (code_unit == 1) {
             t = adjustPosition(compilePrefix(unitCC, pb), 1, lgth, pb);
         } else {
-            t = compileCodeUnit(k, unitCC, code_unit, pb);
+            t = compileCodeUnit(k, enclosing_range, unitCC, code_unit, pb);
             t = pb.createAnd(enclosing_test, t);
             if (!AdvanceBasis) {
                 t = adjustPosition(t, code_unit, lgth, pb);
@@ -703,26 +753,27 @@ CC_List U8_Compiler::prepareFullBlockSets(U8_Seq_Kind k, CC_List ccs, PabloAST *
     return remainingCCs;
 }
 
-void U8_Compiler::prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb) {
+void U8_Compiler::prepareFixedLengthHierarchy(U8_Seq_Kind k, EnclosingInfo & if_parent, PabloBuilder & pb) {
     // No code generation if there are no CCs within this range.
     if (mSeqData[k].actualRange.is_empty()) return;
     //
     prepareSuffix(k, pb);
-    mSeqData[k].seqCCs = prepareFullBlockSets(k, mSeqData[k].seqCCs, mSeqData[k].test, 1, pb);
-    mSeqData[k].byte1CC = codeUnitCC(mSeqData[k].seqCCs, 1);
-    //
-    Range narrowed = CC_Set_Range(mSeqData[k].seqCCs);
-    if (!narrowed.is_empty()) {
-        PabloAST * t = compilePrefix(mSeqData[k].byte1CC, pb);
-        mSeqData[k].test = t;
-        //auto nested = pb.createScope();
-        //pb.createIf(mSeqData[k].test, nested);
+    CC_List narrowedCCs = prepareFullBlockSets(k, if_parent.range, mSeqData[k].seqCCs, mSeqData[k].test, 1, pb);
+    re::CC * narrowedPrefixCC = codeUnitCC(narrowedCCs, 1);
+    if (mSeqData[k].byte1CC->subset(*narrowedPrefixCC)) {
         prepareScope(k, pb);
-        auto lo_pfx = mSeqData[k].byte1CC->min_codepoint();
-        auto hi_pfx = mSeqData[k].byte1CC->max_codepoint();
-        Range tested{mEncoder.minCodePointWithPrefix(lo_pfx), mEncoder.maxCodePointWithPrefix(hi_pfx)};
-        EnclosingInfo rangeInfo(tested, t);
-        compileFromCodeUnit(k, rangeInfo, 1, pb);
+        compileFromCodeUnit(k, if_parent, if_parent, 1, pb);
+    } else {
+        Range narrowed = CC_Set_Range(narrowedCCs);
+        if (!narrowed.is_empty()) {
+            PabloAST * t = compilePrefix(narrowedPrefixCC, pb);
+            prepareScope(k, pb);
+            auto lo_pfx = mSeqData[k].byte1CC->min_codepoint();
+            auto hi_pfx = mSeqData[k].byte1CC->max_codepoint();
+            Range tested{mEncoder.minCodePointWithPrefix(lo_pfx), mEncoder.maxCodePointWithPrefix(hi_pfx)};
+            EnclosingInfo rangeInfo(tested, t);
+            compileFromCodeUnit(k, if_parent, rangeInfo, 1, pb);
+        }
     }
     for (unsigned i = 0; i < mSeqData[k].seqCCs.size(); i++) {
         PabloAST * CC_test = pb.createAnd(mSeqData[k].targets[i], mSeqData[k].suffixTest);
@@ -735,7 +786,7 @@ void U8_Compiler::prepareFixedLengthHierarchy(U8_Seq_Kind k, PabloBuilder & pb) 
 // been completed and is available as a PabloAST in the enclosing.test.
 // Precondition: code_unit >= 1 and the enclosing.range has a partial
 // UTF-8 sequence that is an exact sequence of bytes for prior units.
-void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, unsigned code_unit, PabloBuilder & pb) {
+void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & if_parent, EnclosingInfo & enclosing, unsigned code_unit, PabloBuilder & pb) {
     unsigned lgth = mEncoder.encoded_length(enclosing.range.hi);
     assert(mEncoder.maxCodePointWithCommonCodeUnits(enclosing.range.lo, code_unit - 1) >= enclosing.range.hi &&
            "compileFromCodeUnit called with range having code unit difference prior to code_unit pos");
@@ -753,7 +804,7 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, 
     if (lgth == code_unit) {  // At the final code unit position
         for (unsigned i = 0; i < rangeCCs.size(); i++) {
             re::CC * unitCC = codeUnitCC(rangeCCs[i], code_unit);
-            PabloAST * compiled = compileCodeUnit(k, unitCC, code_unit, pb);
+            PabloAST * compiled = compileCodeUnit(k, enclosing.range, unitCC, code_unit, pb);
             if (code_unit > 1) {
                 compiled = pb.createAnd(enclosing_test, compiled, "compiled");
             }
@@ -762,7 +813,7 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, 
     } else {
         // First deal with the cases that some CCs are full for entire
         // ranges associated with some code units at this level.
-        rangeCCs = prepareFullBlockSets(k, rangeCCs, enclosing_test, code_unit, pb);
+        rangeCCs = prepareFullBlockSets(k, enclosing.range, rangeCCs, enclosing_test, code_unit, pb);
         //
         // Now process the individual code units and directly compile low cost sequences.
         re::CC * unionCC = rangeCCs[0];
@@ -771,15 +822,20 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, 
         }
         codepoint_t lo = unionCC->min_codepoint();
         codepoint_t unit_range_base = mEncoder.minCodePointWithCommonCodeUnits(lo, code_unit);
+        auto unit_range = mEncoder.maxCodePointWithCommonCodeUnits(lo, code_unit) - unit_range_base + 1;
+        auto if_parent_range = if_parent.range.hi - if_parent.range.lo + 1;
+        bool nesting_allowed = unit_range * PartitioningFactor <= if_parent_range;
+
         re::CC * unit_CC = codeUnitCC(unionCC, code_unit);
         auto lo_unit = unit_CC->min_codepoint();
         auto hi_unit = unit_CC->max_codepoint();
         unsigned units_to_process = unit_CC->count();
         unsigned partitions = PartitioningFactor;
         if (units_to_process < partitions) partitions = units_to_process;
-        
-        bool nesting = (partitions > 1) && (costModelExceedsThreshhold(rangeCCs, code_unit, IfEmbeddingCostThreshhold));
-        
+        if (!PartitioningRevision) nesting_allowed = true;
+
+        bool nesting = nesting_allowed && costModelExceedsThreshhold(rangeCCs, code_unit, IfEmbeddingCostThreshhold);
+
         codepoint_t partition_base = unit_range_base;
         unsigned units_this_partition = 0;
         unsigned unit_count = 0;
@@ -796,7 +852,7 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, 
                 unit_count++;
                 if (unit_count == units_this_partition) {
                     Range partitionRange{partition_base, unit_range_top};
-                    PabloAST * t = compileCodeUnit(k, partitionCC, code_unit, pb);
+                    PabloAST * t = compileCodeUnit(k, enclosing.range, partitionCC, code_unit, pb);
                     if ((code_unit > 1) || (mMask != nullptr)) {
                         t = pb.createAnd(enclosing_test, t, "rg_" + partitionRange.hex_string());
                     }
@@ -805,15 +861,15 @@ void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & enclosing, 
                         auto nested = pb.createScope();
                         pb.createIf(t, nested);
                         if (units_this_partition == 1) {
-                            compileFromCodeUnit(k, partitionInfo, code_unit + 1, nested);
+                            compileFromCodeUnit(k, partitionInfo, partitionInfo, code_unit + 1, nested);
                         } else {
-                            compileFromCodeUnit(k, partitionInfo, code_unit, nested);
+                            compileFromCodeUnit(k, partitionInfo, partitionInfo, code_unit, nested);
                         }
                     } else {
                         if (units_this_partition == 1) {
-                            compileFromCodeUnit(k, partitionInfo, code_unit + 1, pb);
+                            compileFromCodeUnit(k, if_parent, partitionInfo, code_unit + 1, pb);
                         } else {
-                            compileFromCodeUnit(k, partitionInfo, code_unit, pb);
+                            compileFromCodeUnit(k, if_parent, partitionInfo, code_unit, pb);
                         }
                     }
                     // Partition is done; reset for next partition.
@@ -833,8 +889,8 @@ public:
 protected:
     void prepareSuffix(unsigned scope, PabloBuilder & pb) override;
     void prepareScope(unsigned scope, PabloBuilder & pb) override;
+    Basis_Set & getBasis(U8_Seq_Kind k, unsigned pos) override;
     PabloAST * adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) override;
-    PabloAST * compileCodeUnit(U8_Seq_Kind k, re::CC * unitCC, unsigned pos, PabloBuilder & pb) override;
 };
 
 class U8_Advance_Compiler : public U8_Compiler {
@@ -845,8 +901,8 @@ protected:
     bool costModelExceedsThreshhold(CC_List & ccs, unsigned from_pos, unsigned threshhold) override;
     void prepareSuffix(unsigned scope, PabloBuilder & pb) override;
     void prepareScope(unsigned scope, PabloBuilder & pb) override;
+    Basis_Set & getBasis(U8_Seq_Kind k, unsigned pos) override;
     PabloAST * adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) override;
-    PabloAST * compileCodeUnit(U8_Seq_Kind k, re::CC * unitCC, unsigned pos, PabloBuilder & pb) override;
 };
 
 U8_Lookahead_Compiler::U8_Lookahead_Compiler(pablo::Var * v, PabloBuilder & pb, pablo::PabloAST * mask) :
@@ -901,8 +957,8 @@ PabloAST *  U8_Lookahead_Compiler::adjustPosition(PabloAST * t, unsigned from, u
     return t;
 }
 
-PabloAST * U8_Lookahead_Compiler::compileCodeUnit(U8_Seq_Kind k, re::CC * unitCC, unsigned unitPos, PabloBuilder & pb) {
-    return mCodeUnitCompiler[unitPos - 1]->compileCC(unitCC, pb);
+Basis_Set & U8_Lookahead_Compiler::getBasis(U8_Seq_Kind k, unsigned unitPos) {
+    return mScopeBasis[unitPos - 1];
 }
 
 U8_Advance_Compiler::U8_Advance_Compiler(pablo::Var * v, PabloBuilder & pb, pablo::PabloAST * mMask) :
@@ -943,8 +999,6 @@ void U8_Advance_Compiler::prepareSuffix(unsigned scope, PabloBuilder & pb) {
     }
 }
 
-const unsigned suffixDataBits = 6;
-
 void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
     if (mSeqData[scope].byte1CC->empty()) return;
     if (AdvanceBasis) {
@@ -965,21 +1019,12 @@ void U8_Advance_Compiler::prepareScope(unsigned scope, PabloBuilder & pb) {
     }
 }
 
-PabloAST * U8_Advance_Compiler::compileCodeUnit(U8_Seq_Kind k, re::CC * unitCC, unsigned unitPos, PabloBuilder & pb) {
-    if (SuffixOptimization && (unitPos > 1)) {
-        Basis_Set suffixBasis(mCodeUnitBits);
-        for (unsigned i = 0; i < 6; i++) {
-            suffixBasis[i] = mScopeBasis[0][i];
-        }
-        suffixBasis[6] = pb.createZeroes();
-        suffixBasis[7] = pb.createOnes();
-        return cc::Parabix_CC_Compiler_Builder(suffixBasis).compileCC(unitCC, pb);
-    }
+Basis_Set & U8_Advance_Compiler::getBasis(U8_Seq_Kind k, unsigned unitPos) {
     if (AdvanceBasis) {
         unsigned lgth = k + 1;
-        return mCodeUnitCompiler[lgth-unitPos]->compileCC(unitCC, pb);
+        return mScopeBasis[lgth-unitPos];
     }
-    return mCodeUnitCompiler[0]->compileCC(unitCC, pb);
+    return mScopeBasis[0];
 }
 
 PabloAST *  U8_Advance_Compiler::adjustPosition(PabloAST * t, unsigned from, unsigned to, PabloBuilder & pb) {
