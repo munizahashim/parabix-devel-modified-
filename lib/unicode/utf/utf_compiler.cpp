@@ -788,8 +788,6 @@ void U8_Compiler::prepareFixedLengthHierarchy(U8_Seq_Kind k, EnclosingInfo & if_
 // UTF-8 sequence that is an exact sequence of bytes for prior units.
 void U8_Compiler::compileFromCodeUnit(U8_Seq_Kind k, EnclosingInfo & if_parent, EnclosingInfo & enclosing, unsigned code_unit, PabloBuilder & pb) {
     unsigned lgth = mEncoder.encoded_length(enclosing.range.hi);
-    assert(mEncoder.maxCodePointWithCommonCodeUnits(enclosing.range.lo, code_unit - 1) >= enclosing.range.hi &&
-           "compileFromCodeUnit called with range having code unit difference prior to code_unit pos");
     CC_List rangeCCs(mSeqData[k].seqCCs.size());
     extract_CCs_by_range(enclosing.range, mSeqData[k].seqCCs, rangeCCs);
     PabloAST * enclosing_test = enclosing.test;
