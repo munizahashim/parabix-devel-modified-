@@ -106,7 +106,7 @@ link_directories(${Boost_LIBRARY_DIRS})
 
 find_package(Z3 REQUIRED) # libz3-dev
 message(STATUS "Found Z3 ${Z3_VERSION_STRING} in: ${Z3_INCLUDE_DIR}")
-include_directories(${Z3_INCLUDE_DIRS})
+include_directories(${Z3_INCLUDE_DIR})
 string(REGEX REPLACE "([0-9]+)[.].*" "\\1" Z3_VERSION_MAJOR "${Z3_VERSION_STRING}")
 string(REGEX REPLACE "[0-9]+[.]([0-9]+).*" "\\1" Z3_VERSION_MINOR "${Z3_VERSION_STRING}")
 string(REGEX REPLACE "[0-9]+[.][0-9]+[.]([0-9]+).*" "\\1" Z3_VERSION_PATCH "${Z3_VERSION_STRING}")
