@@ -1492,7 +1492,8 @@ Constant * IDISA_Builder::bit_interleave_byteshuffle_table(unsigned fw) {
     return ConstantVector::get(bit_interleave);
 }
 
-IDISA_Builder::IDISA_Builder(LLVMContext & C, unsigned nativeVectorWidth, unsigned vectorWidth, unsigned laneWidth, unsigned maxShiftFw, unsigned minShiftFw)
+IDISA_Builder::IDISA_Builder(LLVMContext & C, const FeatureSet &featureSet, unsigned nativeVectorWidth,
+                             unsigned vectorWidth, unsigned laneWidth, unsigned maxShiftFw, unsigned minShiftFw)
 : CBuilder(C)
 , mNativeBitBlockWidth(nativeVectorWidth)
 , mBitBlockWidth(vectorWidth)
@@ -1502,7 +1503,8 @@ IDISA_Builder::IDISA_Builder(LLVMContext & C, unsigned nativeVectorWidth, unsign
 , mBitBlockType(FixedVectorType::get(IntegerType::get(C, mLaneWidth), vectorWidth / mLaneWidth))
 , mZeroInitializer(Constant::getNullValue(mBitBlockType))
 , mOneInitializer(Constant::getAllOnesValue(mBitBlockType))
-, mPrintRegisterFunction(nullptr) {
+, mPrintRegisterFunction(nullptr)
+, mFeatureSet(featureSet) {
 
 }
 

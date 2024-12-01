@@ -419,13 +419,12 @@ private:
     void initialize() {
         if (!mIsInitialized) {
             std::tie(mBuffer, mSize, mNumElements) = Decoder::decode(mLiteral);
-            // If mBuffer is empty, mBuffer.data() may be a nullptr. Since we
-            // directly pass the result of data() into the pipeline, we force
-            // it to not be a nullptr by forcing the vector to allocate some
-            // memory.
-            if (mBuffer.data() == nullptr) {
-                mBuffer.reserve(1);
-            }
+            // We always assume streamsets will be vector width aligned and that no streamset is null.
+            // Add padding to correct any potential issues.
+            constexpr auto largestVecWidth = (512ULL / 8ULL);
+            constexpr auto byteLength = sizeof(typename Decoder::item_type) * num_elements_v;
+            constexpr auto padding = largestVecWidth - (byteLength % largestVecWidth);
+            mBuffer.reserve(padding / sizeof(typename Decoder::item_type));
             mIsInitialized = true;
         }
     }

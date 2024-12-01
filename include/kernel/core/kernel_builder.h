@@ -281,8 +281,8 @@ private:
 
 protected:
 
-    KernelBuilder(llvm::LLVMContext & C, unsigned nativeVectorWidth, unsigned vectorWidth, unsigned laneWidth)
-    : IDISA::IDISA_Builder(C, nativeVectorWidth, vectorWidth, laneWidth) {
+    KernelBuilder(llvm::LLVMContext & C, const FeatureSet & featureSet, unsigned nativeVectorWidth, unsigned vectorWidth, unsigned laneWidth)
+    : IDISA::IDISA_Builder(C, featureSet, nativeVectorWidth, vectorWidth, laneWidth) {
 
     }
 
@@ -299,10 +299,10 @@ protected:
 template <class SpecifiedArchitectureBuilder>
 class KernelBuilderImpl final : public KernelBuilder, public SpecifiedArchitectureBuilder {
 public:
-    KernelBuilderImpl(llvm::LLVMContext & C, unsigned vectorWidth, unsigned laneWidth)
-    : IDISA::IDISA_Builder(C, SpecifiedArchitectureBuilder::NativeBitBlockWidth, vectorWidth, laneWidth)
-    , KernelBuilder(C, SpecifiedArchitectureBuilder::NativeBitBlockWidth, vectorWidth, laneWidth)
-    , SpecifiedArchitectureBuilder(C, vectorWidth, laneWidth) {
+    KernelBuilderImpl(llvm::LLVMContext & C, const FeatureSet & featureSet, unsigned vectorWidth, unsigned laneWidth)
+    : IDISA::IDISA_Builder(C, featureSet, SpecifiedArchitectureBuilder::NativeBitBlockWidth, vectorWidth, laneWidth)
+    , KernelBuilder(C, featureSet, SpecifiedArchitectureBuilder::NativeBitBlockWidth, vectorWidth, laneWidth)
+    , SpecifiedArchitectureBuilder(C, featureSet, vectorWidth, laneWidth) {
 
     }
 };

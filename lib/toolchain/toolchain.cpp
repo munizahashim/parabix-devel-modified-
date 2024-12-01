@@ -96,19 +96,18 @@ static cl::opt<std::string, true> ASMOutputFilenameOption("ShowASM", cl::locatio
 
 // Enable Debug Options to be specified on the command line
 
-
-static cl::opt<CodeGenOpt::Level, true>
-OptimizationLevel("optimization-level", cl::location(OptLevel), cl::init(CodeGenOpt::None), cl::desc("Set the front-end optimization level:"),
-                  cl::values(clEnumValN(CodeGenOpt::None, "none", "no optimizations (default)"),
-                             clEnumValN(CodeGenOpt::Less, "less", "trivial optimizations"),
-                             clEnumValN(CodeGenOpt::Default, "standard", "standard optimizations"),
-                             clEnumValN(CodeGenOpt::Aggressive, "aggressive", "aggressive optimizations")), cl::cat(CodeGenOptions));
-static cl::opt<CodeGenOpt::Level, true>
-BackEndOptOption("backend-optimization-level", cl::location(BackEndOptLevel), cl::init(CodeGenOpt::None), cl::desc("Set the back-end optimization level:"),
-                  cl::values(clEnumValN(CodeGenOpt::None, "none", "no optimizations (default)"),
-                             clEnumValN(CodeGenOpt::Less, "less", "trivial optimizations"),
-                             clEnumValN(CodeGenOpt::Default, "standard", "standard optimizations"),
-                             clEnumValN(CodeGenOpt::Aggressive, "aggressive", "aggressive optimizations")), cl::cat(CodeGenOptions));
+static cl::opt<CodeGenOptLevel, true>
+OptimizationLevel("optimization-level", cl::location(OptLevel), cl::init(CodeGenOptLevel::None), cl::desc("Set the front-end optimization level:"),
+                  cl::values(clEnumValN(CodeGenOptLevel::None, "none", "no optimizations (default)"),
+                             clEnumValN(CodeGenOptLevel::Less, "less", "trivial optimizations"),
+                             clEnumValN(CodeGenOptLevel::Default, "standard", "standard optimizations"),
+                             clEnumValN(CodeGenOptLevel::Aggressive, "aggressive", "aggressive optimizations")), cl::cat(CodeGenOptions));
+static cl::opt<CodeGenOptLevel, true>
+BackEndOptOption("backend-optimization-level", cl::location(BackEndOptLevel), cl::init(CodeGenOptLevel::None), cl::desc("Set the back-end optimization level:"),
+                  cl::values(clEnumValN(CodeGenOptLevel::None, "none", "no optimizations (default)"),
+                             clEnumValN(CodeGenOptLevel::Less, "less", "trivial optimizations"),
+                             clEnumValN(CodeGenOptLevel::Default, "standard", "standard optimizations"),
+                             clEnumValN(CodeGenOptLevel::Aggressive, "aggressive", "aggressive optimizations")), cl::cat(CodeGenOptions));
 
 PipelineCompilationModeOptions PipelineCompilationMode = PipelineCompilationModeOptions::DefaultFast;
 
@@ -231,8 +230,8 @@ bool UseProcessThreadForIO;
 static cl::opt<bool, true> OptUseProcessThreadForIO("io-thread", cl::location(UseProcessThreadForIO),
                                         cl::desc("Only permit the process thread to perform IO"), cl::init(false));
 
-CodeGenOpt::Level OptLevel;
-CodeGenOpt::Level BackEndOptLevel;
+CodeGenOptLevel OptLevel;
+CodeGenOptLevel BackEndOptLevel;
 
 const char * ObjectCacheDir;
 

@@ -86,7 +86,7 @@ const MDString * getSignature(const llvm::Module * const M) {
 }
 
 inline bool isNonMatchingSignature(const MDString * const received, const StringRef expected) {
-    return !expected.equals(received->getString());
+    return expected.compare(received->getString()) != 0;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

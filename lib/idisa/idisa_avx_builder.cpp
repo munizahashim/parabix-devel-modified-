@@ -18,6 +18,8 @@
 #endif
 using boost::intrusive::detail::floor_log2;
 
+#define ADD_IF_FOUND(Flag, Value) if (features.lookup(Value)) featureSet.set((size_t)Feature::Flag)
+
 using namespace llvm;
 
 namespace IDISA {
@@ -60,20 +62,22 @@ Value * IDISA_AVX_Builder::hsimd_signmask(unsigned fw, Value * a) {
 }
 
 Value * IDISA_AVX_Builder::CreateZeroHiBitsFrom(Value * bits, Value * pos, const Twine Name) {
-    Type * Ty = bits->getType();
-    if (hasBMI1 && (Ty == getInt64Ty())) {
-        Function * bzhi_64 = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_bzhi_64);
-        return CreateCall(bzhi_64->getFunctionType(), bzhi_64, {bits, pos}, Name);
-    }
-    if (hasBMI1 && (Ty == getInt32Ty())) {
-        Function * bzhi_32 = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_bzhi_32);
-        return CreateCall(bzhi_32->getFunctionType(), bzhi_32, {bits, pos}, Name);
+    if (hasFeature(Feature::AVX_BMI)) {
+        Type * const Ty = bits->getType();
+        if (Ty == getInt64Ty()) {
+            Function * bzhi_64 = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_bzhi_64);
+            return CreateCall(bzhi_64->getFunctionType(), bzhi_64, {bits, pos}, Name);
+        }
+        if (Ty == getInt32Ty()) {
+            Function * bzhi_32 = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_bzhi_32);
+            return CreateCall(bzhi_32->getFunctionType(), bzhi_32, {bits, pos}, Name);
+        }
     }
     return CBuilder::CreateZeroHiBitsFrom(bits, pos, Name);
 }
 
 Value * IDISA_AVX_Builder::CreatePextract(Value * bits, Value * mask, const Twine Name) {
-    if (hasBMI2) {
+    if (hasFeature(Feature::AVX_BMI2)) {
         Type * Ty = bits->getType();
         unsigned width = Ty->getPrimitiveSizeInBits();
         if (width == 64) {
@@ -97,7 +101,7 @@ Value * IDISA_AVX_Builder::CreatePextract(Value * bits, Value * mask, const Twin
 }
 
 Value * IDISA_AVX_Builder::CreatePdeposit(Value * bits, Value * mask, const Twine Name) {
-    if (hasBMI2) {
+    if (hasFeature(Feature::AVX_BMI2)) {
         Type * Ty = bits->getType();
         unsigned width = Ty->getPrimitiveSizeInBits();
         if (width == 64) {
@@ -339,7 +343,7 @@ std::pair<Value *, Value *> IDISA_AVX2_Builder::bitblock_advance(Value * a, Valu
 }
 
 std::vector<Value *> IDISA_AVX2_Builder::simd_pext(unsigned fieldwidth, std::vector<Value *> v, Value * extract_mask) {
-    if (hasBMI2) {
+    if (hasFeature(Feature::AVX_BMI2)) {
         const auto n = getVectorBitWidth(v[0]) / fieldwidth;
         std::vector<Value *> mask(n);
         for (unsigned i = 0; i < n; i++) {
@@ -361,7 +365,7 @@ std::vector<Value *> IDISA_AVX2_Builder::simd_pext(unsigned fieldwidth, std::vec
 }
 
 Value * IDISA_AVX2_Builder::simd_pdep(unsigned fieldwidth, Value * v, Value * deposit_mask) {
-    if (hasBMI2) {
+    if (hasFeature(Feature::AVX_BMI2)) {
         const auto n = getVectorBitWidth(v) / fieldwidth;
         Value * result = UndefValue::get(v->getType());
         for (unsigned i = 0; i < n; i++) {
@@ -377,7 +381,7 @@ Value * IDISA_AVX2_Builder::simd_pdep(unsigned fieldwidth, Value * v, Value * de
 
 std::pair<Value *, Value *> IDISA_AVX2_Builder::bitblock_indexed_advance(Value * strm, Value * index_strm, Value * shiftIn, unsigned shiftAmount) {
     const unsigned bitWidth = getSizeTy()->getBitWidth();
-    if (hasBMI2 && ((bitWidth == 64) || (bitWidth == 32))) {
+    if (hasFeature(Feature::AVX_BMI2) && ((bitWidth == 64) || (bitWidth == 32))) {
         Function * PEXT_f = (bitWidth == 64) ? Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pext_64)
                                           : Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pext_32);
         Function * PDEP_f = (bitWidth == 64) ? Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pdep_64)
@@ -605,7 +609,7 @@ llvm::Value * IDISA_AVX2_Builder::mvmd_shuffle2(unsigned fw, llvm::Value * table
 }
 
 Value * IDISA_AVX2_Builder::mvmd_compress(unsigned fw, Value * a, Value * select_mask) {
-    if (hasBMI2 && (mBitBlockWidth == 256)) {
+    if (hasFeature(Feature::AVX_BMI2) && (mBitBlockWidth == 256)) {
 
         if (fw == 64) {
             Function * PDEP_func = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_bmi_pdep_32);
@@ -706,7 +710,7 @@ Value * IDISA_AVX2_Builder::mvmd_compress(unsigned fw, Value * a, Value * select
 }
 
 Value * IDISA_AVX2_Builder::mvmd_expand(unsigned fw, Value * a, Value * select_mask) {
-    if (hasBMI2 && (mBitBlockWidth == 256)) {
+    if (hasFeature(Feature::AVX_BMI2) && (mBitBlockWidth == 256)) {
          if (fw >= 8) {
 
              const auto fieldCount = 256 / fw;
@@ -795,7 +799,7 @@ Value * IDISA_AVX512F_Builder::hsimd_packl(unsigned fw, Value * a, Value * b) {
 }
 
 Value * IDISA_AVX512F_Builder::hsimd_packus(unsigned fw, Value * a, Value * b) {
-    if (hostCPUFeatures.hasAVX512BW && ((fw == 16) || (fw == 32)) && (getVectorBitWidth(a) == AVX512_width)) {
+    if (hasFeature(Feature::AVX512_BW) && ((fw == 16) || (fw == 32)) && (getVectorBitWidth(a) == AVX512_width)) {
         Function * pack_func = Intrinsic::getDeclaration(getModule(), fw == 16 ? Intrinsic::x86_avx512_packuswb_512 : Intrinsic::x86_avx512_packusdw_512);
         Value * packed = CreateCall(pack_func->getFunctionType(), pack_func, {fwCast(fw, a), fwCast(fw, b)});
         auto field_count = AVX512_width/64;
@@ -812,7 +816,7 @@ Value * IDISA_AVX512F_Builder::hsimd_packus(unsigned fw, Value * a, Value * b) {
 }
 
 Value * IDISA_AVX512F_Builder::hsimd_packss(unsigned fw, Value * a, Value * b) {
-    if (hostCPUFeatures.hasAVX512BW && ((fw == 16) || (fw == 32)) && (getVectorBitWidth(a) == AVX512_width)) {
+    if (hasFeature(Feature::AVX512_BW) && ((fw == 16) || (fw == 32)) && (getVectorBitWidth(a) == AVX512_width)) {
         Function * pack_func = Intrinsic::getDeclaration(getModule(), fw == 16 ? Intrinsic::x86_avx512_packsswb_512 : Intrinsic::x86_avx512_packssdw_512);
         Value * packed = CreateCall(pack_func->getFunctionType(), pack_func, {fwCast(fw, a), fwCast(fw, b)});
         auto field_count = AVX512_width/64;
@@ -889,12 +893,12 @@ Value * IDISA_AVX512F_Builder::mvmd_shuffle2(unsigned fw, Value * table0, Value 
             permuteFunc = Intrinsic::getDeclaration(getModule(), AVX512_MASK_PERMUTE_INTRINSIC(var_d_512));
         } else if (fw == 64) {
             permuteFunc = Intrinsic::getDeclaration(getModule(), AVX512_MASK_PERMUTE_INTRINSIC(var_q_512));
-        } else if (fw == 16 && hostCPUFeatures.hasAVX512BW) {
+        } else if (fw == 16 && hasFeature(Feature::AVX512_BW)) {
             permuteFunc = Intrinsic::getDeclaration(getModule(), AVX512_MASK_PERMUTE_INTRINSIC(var_hi_512));
         } else if (fw == 8) {
-            if (hostCPUFeatures.hasAVX512VBMI) {
+            if (hasFeature(Feature::AVX512_VBMI)) {
                 permuteFunc = Intrinsic::getDeclaration(getModule(), AVX512_MASK_PERMUTE_INTRINSIC(var_qi_512));
-            } else if (hostCPUFeatures.hasAVX512BW) {
+            } else if (hasFeature(Feature::AVX512_BW)) {
 
                 // If we have AVX512BW but not AVX512VBMI, we can use 16 bit shuffles to replicate an 8 bit shuffle.
                 // This requires us to split the table look up into a lower and higher "half" table and index vectors
@@ -989,7 +993,7 @@ Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, Value * a, Value * sel
     }
 
     if (mBitBlockWidth == 512 && fw == 8) {
-        if (hostCPUFeatures.hasAVX512VBMI2){
+        if (hasFeature(Feature::AVX512_VBMI2)){
  #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(9, 0, 0)
             Function * compressFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_compress_b_512);
             return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(8, a), fwCast(8, allZeroes()), mask});
@@ -998,7 +1002,7 @@ Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, Value * a, Value * sel
             Function * compressFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_compress, fwVectorType(fw));
             return CreateCall(compressFunc->getFunctionType(), compressFunc, {fwCast(8, a), fwCast(8, allZeroes()), CreateBitCast(mask, maskTy)});
  #endif
-        } else if (hostCPUFeatures.hasAVX512VBMI || hostCPUFeatures.hasAVX512BW) {
+        } else if (hasFeature(Feature::AVX512_VBMI) || hasFeature(Feature::AVX512_BW)) {
 
             // Step 1: Initialize indices as 6-bit bixnum in an array of 64-bit integers
             uint64_t indices[6] = {
@@ -1066,11 +1070,11 @@ Value * IDISA_AVX512F_Builder::mvmd_compress(unsigned fw, Value * a, Value * sel
 Value * IDISA_AVX512F_Builder::mvmd_expand(unsigned fw, Value * a, Value * select_mask) {
     const auto fieldCount = mBitBlockWidth / fw;
     Value * mask = CreateZExtOrTrunc(select_mask, getIntNTy(fieldCount));
-    if (hostCPUFeatures.hasAVX512VBMI2) {
+    if (hasFeature(Feature::AVX512_VBMI2)) {
         Type * maskTy = FixedVectorType::get(getInt1Ty(), fieldCount);
         Function * expandFunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_mask_expand, fwVectorType(fw));
         return CreateCall(expandFunc->getFunctionType(), expandFunc, {fwCast(fw, a), fwCast(fw, allZeroes()), CreateBitCast(mask, maskTy)});
-    } else if (fw > 16 || hostCPUFeatures.hasAVX512VBMI || hostCPUFeatures.hasAVX512BW) {
+    } else if (fw > 16 || hasFeature(Feature::AVX512_VBMI) || hasFeature(Feature::AVX512_BW)) {
 
         uint64_t indices[6] = {
             0xAAAAAAAAAAAAAAAA,
@@ -1130,7 +1134,7 @@ Value * IDISA_AVX512F_Builder:: mvmd_slli(unsigned fw, Value * a, unsigned shift
     } else if (((shift % 2) == 0) && (fw < 32)) {
         return fwCast(fw, mvmd_slli(2 * fw, a, shift / 2));
     }
-    if ((fw == 32) || (hostCPUFeatures.hasAVX512BW && (fw == 16)))   {
+    if ((fw == 32) || (hasFeature(Feature::AVX512_BW) && (fw == 16)))   {
         return mvmd_dslli(fw, a, allZeroes(), shift);
     } else {
         unsigned field32_shift = (shift * fw) / 32;
@@ -1150,7 +1154,7 @@ Value * IDISA_AVX512F_Builder:: mvmd_dslli(unsigned fw, Value * a, Value * b, un
         return fwCast(fw, mvmd_dslli(2 * fw, a, b, shift / 2));
     }
     const unsigned fieldCount = mBitBlockWidth/fw;
-    if ((fw == 32) || (hostCPUFeatures.hasAVX512BW && (fw == 16)))   {
+    if ((fw == 32) || (hasFeature(Feature::AVX512_BW) && (fw == 16)))   {
         //llvm::errs() << " fw = " << fw << ", shift = " << shift << "\n";
         Type * fwTy = getIntNTy(fw);
         SmallVector<Constant *, 16> indices(fieldCount);
@@ -1182,11 +1186,11 @@ Value * IDISA_AVX512F_Builder::simd_popcount(unsigned fw, Value * a) {
          c = CreateCall(horizSADfunc->getFunctionType(), horizSADfunc, {c, zero16xi8});
          return CreateInsertElement(allZeroes(), CreateExtractElement(c, zeroInt32), zeroInt32);
     }
-    if (hostCPUFeatures.hasAVX512VPOPCNTDQ && (fw == 32 || fw == 64)){
+    if (hasFeature(Feature::AVX512_VPOPCNTDQ) && (fw == 32 || fw == 64)){
         //llvm should use vpopcntd or vpopcntq instructions
         return CreatePopcount(fwCast(fw, a));
     }
-    if (hostCPUFeatures.hasAVX512BW && (fw == 64)) {
+    if (hasFeature(Feature::AVX512_BW) && (fw == 64)) {
         Function * horizSADfunc = Intrinsic::getDeclaration(getModule(), Intrinsic::x86_avx512_psad_bw_512);
         return CreateCall(horizSADfunc->getFunctionType(), horizSADfunc, {fwCast(8, simd_popcount(8, a)), fwCast(8, allZeroes())});
     }
@@ -1236,7 +1240,7 @@ Value * IDISA_AVX512F_Builder::hsimd_signmask(unsigned fw, Value * a) {
 }
 
 Value * IDISA_AVX512F_Builder::esimd_mergeh(unsigned fw, Value * a, Value * b) {
-    if (hostCPUFeatures.hasAVX512BW && ((fw == 1) || (fw == 2))) {
+    if (hasFeature(Feature::AVX512_BW) && ((fw == 1) || (fw == 2))) {
         // Bit interleave using shuffle.
         // Make a shuffle table that translates the lower 4 bits of each byte in
         // order to spread out the bits: xxxxdcba => .d.c.b.a
@@ -1270,7 +1274,7 @@ Value * IDISA_AVX512F_Builder::esimd_mergeh(unsigned fw, Value * a, Value * b) {
 }
 
 Value * IDISA_AVX512F_Builder::esimd_mergel(unsigned fw, Value * a, Value * b) {
-    if (hostCPUFeatures.hasAVX512BW && ((fw == 1) || (fw == 2))) {
+    if (hasFeature(Feature::AVX512_BW) && ((fw == 1) || (fw == 2))) {
         // Bit interleave using shuffle.
         // Make a shuffle table that translates the lower 4 bits of each byte in
         // order to spread out the bits: xxxxdcba => .d.c.b.a
@@ -1375,43 +1379,22 @@ std::pair<Value *, Value *> IDISA_AVX512F_Builder::bitblock_advance(Value * a, V
     }
 }
 
-IDISA_AVX_Builder::IDISA_AVX_Builder(LLVMContext & C, unsigned vectorWidth, unsigned laneWidth)
-: IDISA_Builder(C, AVX_width, vectorWidth, laneWidth)
-, IDISA_SSE2_Builder(C, vectorWidth, laneWidth)
-{
-    StringMap<bool> features;
-    hasBMI1 = sys::getHostCPUFeatures(features) && features.lookup("bmi");
-    hasBMI2 = sys::getHostCPUFeatures(features) && features.lookup("bmi2");
+IDISA_AVX_Builder::IDISA_AVX_Builder(LLVMContext & C, const FeatureSet & featureSet, unsigned vectorWidth, unsigned laneWidth)
+: IDISA_Builder(C, featureSet, AVX_width, vectorWidth, laneWidth)
+, IDISA_SSE2_Builder(C, featureSet, vectorWidth, laneWidth) {
+
 }
 
-IDISA_AVX2_Builder::IDISA_AVX2_Builder(LLVMContext & C, unsigned vectorWidth, unsigned laneWidth)
-: IDISA_Builder(C, AVX_width, vectorWidth, laneWidth)
-, IDISA_AVX_Builder(C, vectorWidth, laneWidth) {
+IDISA_AVX2_Builder::IDISA_AVX2_Builder(LLVMContext & C, const FeatureSet & featureSet, unsigned vectorWidth, unsigned laneWidth)
+: IDISA_Builder(C, featureSet, AVX_width, vectorWidth, laneWidth)
+, IDISA_AVX_Builder(C, featureSet, vectorWidth, laneWidth) {
+
 }
 
-IDISA_AVX512F_Builder::IDISA_AVX512F_Builder(LLVMContext & C, unsigned vectorWidth, unsigned laneWidth)
-: IDISA_Builder(C, AVX512_width, vectorWidth, laneWidth)
-, IDISA_AVX2_Builder(C, vectorWidth, laneWidth) {
-    getAVX512Features();
+IDISA_AVX512F_Builder::IDISA_AVX512F_Builder(LLVMContext & C, const FeatureSet & featureSet, unsigned vectorWidth, unsigned laneWidth)
+: IDISA_Builder(C, featureSet, AVX512_width, vectorWidth, laneWidth)
+, IDISA_AVX2_Builder(C, featureSet, vectorWidth, laneWidth) {
+
 }
 
-
-
-void IDISA_AVX512F_Builder::getAVX512Features() {
-    StringMap<bool> features;
-    if (sys::getHostCPUFeatures(features)) {
-        hostCPUFeatures.hasAVX512CD = features.lookup("avx512cd");
-        hostCPUFeatures.hasAVX512BW = features.lookup("avx512bw");
-        hostCPUFeatures.hasAVX512DQ = features.lookup("avx512dq");
-        hostCPUFeatures.hasAVX512VL = features.lookup("avx512vl");
-
-        //hostCPUFeatures.hasAVX512VBMI, hostCPUFeatures.hasAVX512VBMI2,
-        //hostCPUFeatures.hasAVX512VPOPCNTDQ have not been tested as we
-        //did not have hardware support. It should work in theory (tm)
-
-        hostCPUFeatures.hasAVX512VBMI = features.lookup("avx512_vbmi");
-        hostCPUFeatures.hasAVX512VBMI2 = features.lookup("avx512_vbmi2");
-        hostCPUFeatures.hasAVX512VPOPCNTDQ = features.lookup("avx512_vpopcntdq");
-    }
-}
 }

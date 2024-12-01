@@ -557,7 +557,7 @@ Kernel * OptimizationBranchBuilder::makeKernel() {
 StreamSet * PipelineBuilder::getInputStreamSet(const StringRef name) {
     for (Binding & input : mTarget->mInputStreamSets) {
         assert (input.getRelationship());
-        if (name.equals(input.getName())) {
+        if (name.compare(input.getName()) == 0) {
             return cast<StreamSet>(input.getRelationship());
         }
     }
@@ -567,7 +567,7 @@ StreamSet * PipelineBuilder::getInputStreamSet(const StringRef name) {
 StreamSet * PipelineBuilder::getOutputStreamSet(const StringRef name) {
     for (Binding & output : mTarget->mOutputStreamSets) {
         assert (output.getRelationship());
-        if (name.equals(output.getName())) {
+        if (name.compare(output.getName()) == 0) {
             return cast<StreamSet>(output.getRelationship());
         }
     }
@@ -577,7 +577,7 @@ StreamSet * PipelineBuilder::getOutputStreamSet(const StringRef name) {
 Scalar * PipelineBuilder::getInputScalar(const StringRef name) {
     for (Binding & input : mTarget->mInputScalars) {
         assert (input.getRelationship());
-        if (name.equals(input.getName())) {
+        if (name.compare(input.getName()) == 0) {
             return cast<Scalar>(input.getRelationship());
         }
     }
@@ -587,7 +587,7 @@ Scalar * PipelineBuilder::getInputScalar(const StringRef name) {
 Scalar * PipelineBuilder::getOutputScalar(const StringRef name) {
     for (Binding & output : mTarget->mOutputScalars) {
         assert (output.getRelationship());
-        if (name.equals(output.getName())) {
+        if (name.compare(output.getName()) == 0) {
             return cast<Scalar>(output.getRelationship());
         }
     }
@@ -596,7 +596,7 @@ Scalar * PipelineBuilder::getOutputScalar(const StringRef name) {
 
 void PipelineBuilder::setOutputScalar(const StringRef name, Scalar * value) {
     for (Binding & output : mTarget->mOutputScalars) {
-        if (name.equals(output.getName())) {
+        if (name.compare(output.getName()) == 0) {
             output.setRelationship(value);
             return;
         }

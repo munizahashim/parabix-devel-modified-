@@ -6,6 +6,8 @@
  */
 #include <codegen/CBuilder.h>
 #include <llvm/IR/DerivedTypes.h>
+#include <bitset>
+
 namespace llvm { class Constant; }
 namespace llvm { class LoadInst; }
 namespace llvm { class Module; }
@@ -29,10 +31,34 @@ unsigned getStreamFieldWidth (const llvm::Type * const t);
 
 unsigned getVectorBitWidth(llvm::Value * vec);
 
+// not an exhaustive list; can be extended but keep __Count as the last entry
+enum class Feature : size_t {
+    AVX_BMI,
+    AVX_BMI2,
+    // ---------------
+    AVX512_CD,
+    AVX512_BW,
+    AVX512_DQ,
+    AVX512_VL,
+    AVX512_VBMI,
+    AVX512_VBMI2,
+    AVX512_VPOPCNTDQ,
+    // ---------------
+    __Count
+};
+
 class IDISA_Builder : public CBuilder {
+
 public:
 
-    IDISA_Builder(llvm::LLVMContext & C, unsigned nativeVectorWidth, unsigned vectorWidth, unsigned laneWidth, unsigned maxShiftFw = 64, unsigned minShiftFw = 16);
+    using FeatureSet = std::bitset<(size_t)Feature::__Count>;
+
+    IDISA_Builder(llvm::LLVMContext & C, const FeatureSet & featureSet,
+                  unsigned nativeVectorWidth, unsigned vectorWidth, unsigned laneWidth, unsigned maxShiftFw = 64, unsigned minShiftFw = 16);
+
+    bool hasFeature(const IDISA::Feature feature) const LLVM_READNONE {
+        return mFeatureSet.test((size_t)feature);
+    }
 
     virtual ~IDISA_Builder();
 
@@ -70,28 +96,9 @@ public:
         return CreateAlignedLoad(type, ptr, mBitBlockWidth / 8);
     }
 
-//    llvm::LoadInst * CreateBlockAlignedLoad(llvm::Type * type, llvm::Value * const ptr, llvm::Value * const index) {
-//        return CreateBlockAlignedLoad(type, CreateGEP(type, ptr, index));
-//    }
-
-//    llvm::LoadInst * CreateBlockAlignedLoad(llvm::Type * type, llvm::Value * const ptr, std::initializer_list<llvm::Value *> indices) {
-//        llvm::Value * gi = CreateGEP(type, ptr, indices);
-//        return CreateBlockAlignedLoad(gi->getType(), gi);
-//    }
-
     llvm::StoreInst * CreateBlockAlignedStore(llvm::Value * const value, llvm::Value * const ptr) {
         return CreateAlignedStore(value, ptr, mBitBlockWidth / 8);
     }
-
-//    llvm::StoreInst * CreateBlockAlignedStore(llvm::Value * const value, llvm::Value * const ptr, llvm::Value * const index) {
-//        llvm::Type * elemTy = ptr->getType()->getPointerElementType();
-//        return CreateBlockAlignedStore(value, CreateGEP(elemTy, ptr, index));
-//    }
-
-//    llvm::StoreInst * CreateBlockAlignedStore(llvm::Value * const value, llvm::Value * const ptr, std::initializer_list<llvm::Value *> indices) {
-//        llvm::Type * elemTy = ptr->getType()->getPointerElementType();
-//        return CreateBlockAlignedStore(value, CreateGEP(elemTy, ptr, indices));
-//    }
 
     llvm::Value * CreateBlockAlignedMalloc(llvm::Value * size) {
         return CreateAlignedMalloc(size, mBitBlockWidth / 8);
@@ -261,6 +268,7 @@ protected:
     llvm::Constant * const      mZeroInitializer;
     llvm::Constant * const      mOneInitializer;
     llvm::Constant *            mPrintRegisterFunction;
+    const FeatureSet            mFeatureSet;
 };
 
 }

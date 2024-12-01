@@ -19,7 +19,6 @@
 #include "llvm/IR/Mangler.h"
 #include <llvm/ExecutionEngine/MCJIT.h>
 #include <llvm/IR/LegacyPassManager.h>
-
 #include <llvm/Support/CommandLine.h>
 
 #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(7, 0, 0)
@@ -75,16 +74,20 @@ CPUDriver::CPUDriver(std::string && moduleName)
     builder.setTargetOptions(codegen::target_Options);
     builder.setOptLevel(codegen::BackEndOptLevel);
 
-    StringMap<bool> HostCPUFeatures;
-    if (sys::getHostCPUFeatures(HostCPUFeatures)) {
-        std::vector<std::string> attrs;
-        for (auto &flag : HostCPUFeatures) {
-            if (flag.second) {
-                attrs.push_back("+" + flag.first().str());
-            }
+    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(19, 0, 0)
+    StringMap<bool> features;
+    sys::getHostCPUFeatures(features);
+    #else
+    const StringMap<bool> features = sys::getHostCPUFeatures();
+    #endif
+
+    std::vector<std::string> attrs;
+    for (auto & flag : features) {
+        if (flag.second) {
+            attrs.push_back("+" + flag.first().str());
         }
-        builder.setMAttrs(attrs);
     }
+    builder.setMAttrs(attrs);
 
     mTarget.reset(builder.selectTarget());
     if (mTarget == nullptr) {
@@ -105,7 +108,7 @@ CPUDriver::CPUDriver(std::string && moduleName)
     const DataLayout DL(mTarget->createDataLayout());
     mMainModule->setTargetTriple(triple);
     mMainModule->setDataLayout(DL);
-    mBuilder.reset(IDISA::GetIDISA_Builder(*mContext));
+    mBuilder.reset(IDISA::GetIDISA_Builder(*mContext, features));
     mBuilder->setDriver(*this);
     mBuilder->setModule(mMainModule);
 }
@@ -190,7 +193,7 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pk) {
         }
     }
 
-    auto addModules = [&](const ModuleSet & S, const CodeGenOpt::Level level) {
+    auto addModules = [&](const ModuleSet & S, const CodeGenOptLevel level) {
         if (S.empty()) return;
         mEngine->getTargetMachine()->setOptLevel(level);
         for (Module * M : S) {
@@ -207,7 +210,7 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pk) {
 
     // compile any uncompiled kernels
     addModules(Infrequent, codegen::BackEndOptLevel);
-    addModules(Normal, CodeGenOpt::Default);
+    addModules(Normal, CodeGenOptLevel::Default);
 
     // write/declare the "main" method
     auto mainModule = std::make_unique<Module>("main", *mContext);
@@ -238,7 +241,7 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pk) {
     }
 
     // return the compiled main method
-    mEngine->getTargetMachine()->setOptLevel(CodeGenOpt::None);
+    mEngine->getTargetMachine()->setOptLevel(CodeGenOptLevel::None);
     const auto mainModulePtr = mainModule.get();
     mEngine->addModule(std::move(mainModule));
 
@@ -253,7 +256,9 @@ void * CPUDriver::finalizeObject(kernel::Kernel * const pk) {
         // TODO: there does not seem to be an ASM printer for the new PassManager?
         auto pm = std::make_unique<legacy::PassManager>();
 
-        #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
+        #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(18, 0, 0)
+        const auto r = mTarget->addPassesToEmitFile(*pm, *mASMOutputStream, nullptr, CodeGenFileType::AssemblyFile);
+        #elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(10, 0, 0)
         const auto r = mTarget->addPassesToEmitFile(*pm, *mASMOutputStream, nullptr, CGFT_AssemblyFile);
         #elif LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(7, 0, 0)
         const auto r = mTarget->addPassesToEmitFile(*mPassManager, *mASMOutputStream, nullptr, TargetMachine::CGFT_AssemblyFile);
