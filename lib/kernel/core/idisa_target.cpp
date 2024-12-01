@@ -8,6 +8,9 @@
 #include <toolchain/toolchain.h>
 #include <idisa/idisa_i64_builder.h>
 #ifdef PARABIX_ARM_TARGET
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
+#include <llvm/TargetParser/AArch64TargetParser.h>
+#endif
 #include <idisa/idisa_arm_builder.h>
 #endif
 #ifdef PARABIX_X86_TARGET
@@ -56,15 +59,22 @@ Features getHostCPUFeatures(const StringMap<bool> & features) {
 }
 
 bool ARM_available() {
-    #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(19, 0, 0)
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
+    const llvm::AArch64::CpuInfo & info = llvm::AArch64::parseCpu(sys::getHostCPUName());
+    std::vector<StringRef> extNames;
+    llvm::AArch64::getExtensionFeatures(info.Arch.DefaultExts | info.DefaultExtensions, extNames);
+    for (const auto eName : extNames) {
+        //llvm::errs() << "Extension: " << eName << "\n";
+        if (eName == "+neon") return true;
+    }
+    return false;
+#else
     StringMap<bool> features;
     if (LLVM_UNLIKELY(!sys::getHostCPUFeatures(features))) {
         return false;
     }
-    #else
-    const auto features = sys::getHostCPUFeatures();
-    #endif
     return features.lookup("neon");
+#endif
 }
 
 bool AVX2_available() {
@@ -102,7 +112,7 @@ KernelBuilder * GetIDISA_Builder(llvm::LLVMContext & C, const StringMap<bool> & 
     if (LLVM_LIKELY(codegen::BlockSize == 0)) {  // No BlockSize override: use processor SIMD width
         codegen::BlockSize = 128;
     }
-    if (features.lookup("neon")) {
+    if (ARM_available()) {
         return new KernelBuilderImpl<IDISA_ARM_Builder>(C, featureSet, codegen::BlockSize, codegen::LaneWidth);
     }
 #endif
