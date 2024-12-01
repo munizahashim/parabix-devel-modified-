@@ -59,6 +59,7 @@ Features getHostCPUFeatures(const StringMap<bool> & features) {
 }
 
 bool ARM_available() {
+#ifdef PARABIX_ARM_TARGET
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
     const llvm::AArch64::CpuInfo & info = llvm::AArch64::parseCpu(sys::getHostCPUName());
     std::vector<StringRef> extNames;
@@ -75,6 +76,8 @@ bool ARM_available() {
     }
     return features.lookup("neon");
 #endif
+#endif
+    return false;
 }
 
 bool AVX2_available() {
