@@ -19,7 +19,12 @@ String * SymbolGenerator::makeString(const llvm::StringRef prefix) noexcept {
         data[prefix.size()] = '\0';
         llvm::StringRef name(data, prefix.size());
         mPrefixMap.insert(std::make_pair(name, 1));
-        return new (mAllocator) String(llvm::IntegerType::getInt8PtrTy(mContext), name, mAllocator);
+        #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(18, 0, 0)
+        llvm::PointerType * const ptrTy = llvm::PointerType::getUnqual(mContext);
+        #else
+        llvm::PointerType * const ptrTy = llvm::IntegerType::getInt8PtrTy(mContext);
+        #endif
+        return new (mAllocator) String(ptrTy, name, mAllocator);
     } else { // this string already exists; make a new string using the given prefix
 
         // TODO: check FormatInt from "https://github.com/fmtlib/fmt/blob/master/fmt/format.h" for faster integer conversion

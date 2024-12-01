@@ -461,6 +461,20 @@ public:
 
     void CheckAddress(llvm::Value * const Ptr, llvm::Value * const Size, llvm::Constant * const Name);
 
+    // LLVM 18 removed all qualified pointer types but if we want to support earlier LLVM versions, we must still still allow kernels to
+    // construct them.
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(18, 0, 0)
+    #define ADD_POINTER_TYPE_ALIAS(Name) llvm::PointerType * get##Name##PtrTy(unsigned = 0) { return llvm::PointerType::getUnqual(getContext()); }
+
+    ADD_POINTER_TYPE_ALIAS(Int8)
+    ADD_POINTER_TYPE_ALIAS(Int16)
+    ADD_POINTER_TYPE_ALIAS(Int32)
+    ADD_POINTER_TYPE_ALIAS(Int64)
+    ADD_POINTER_TYPE_ALIAS(Void)
+
+    #undef ADD_POINTER_TYPE
+    #endif
+
 protected:
 
     llvm::CallInst * __CreatePrintfCall(llvm::Value * const format, std::initializer_list<llvm::Value *> args);

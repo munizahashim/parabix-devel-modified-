@@ -433,7 +433,7 @@ FieldDepositKernel::FieldDepositKernel(LLVMTypeSystemInterface & ts
 void PDEPFieldDepositLogic(KernelBuilder & b, llvm::Value * const numOfStrides, unsigned fieldWidth, unsigned streamCount, unsigned stride);
 
 void FieldDepositKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * const numOfStrides) {
-    if (AVX2_available() && BMI2_available() && ((mFieldWidth == 32) || (mFieldWidth == 64))) {
+    if (b.hasFeature(IDISA::Feature::AVX_BMI2) && ((mFieldWidth == 32) || (mFieldWidth == 64))) {
         PDEPFieldDepositLogic(b, numOfStrides, mFieldWidth, mStreamCount, getStride());
     } else {
         BasicBlock * entry = b.GetInsertBlock();

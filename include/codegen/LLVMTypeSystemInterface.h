@@ -88,7 +88,11 @@ public:
 
     /// Fetch the type representing a pointer to an 8-bit integer value.
     llvm::PointerType * LLVM_READNONE getInt8PtrTy(unsigned AddrSpace = 0) {
-      return llvm::PointerType::getInt8PtrTy(getContext(), AddrSpace);
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(18, 0, 0)
+        return llvm::PointerType::getUnqual(getContext());
+    #else
+        return llvm::PointerType::getInt8PtrTy(getContext(), AddrSpace);
+    #endif
     }
 
     /// Fetch the type representing a 16-bit integer.
@@ -98,7 +102,11 @@ public:
 
     /// Fetch the type representing a pointer to an 8-bit integer value.
     llvm::PointerType * LLVM_READNONE getInt16PtrTy(unsigned AddrSpace = 0) {
-      return llvm::PointerType::getInt16PtrTy(getContext(), AddrSpace);
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(18, 0, 0)
+        return llvm::PointerType::getUnqual(getContext());
+    #else
+        return llvm::PointerType::getInt16PtrTy(getContext(), AddrSpace);
+    #endif
     }
 
     /// Fetch the type representing a 32-bit integer.
@@ -108,7 +116,11 @@ public:
 
     /// Fetch the type representing a pointer to an 8-bit integer value.
     llvm::PointerType * LLVM_READNONE getInt32PtrTy(unsigned AddrSpace = 0) {
-      return llvm::PointerType::getInt32PtrTy(getContext(), AddrSpace);
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(18, 0, 0)
+        return llvm::PointerType::getUnqual(getContext());
+    #else
+        return llvm::PointerType::getInt32PtrTy(getContext(), AddrSpace);
+    #endif
     }
 
     /// Fetch the type representing a 64-bit integer.
@@ -123,7 +135,11 @@ public:
 
     /// Fetch the type representing a pointer to an 8-bit integer value.
     llvm::PointerType * LLVM_READNONE getInt64PtrTy(unsigned AddrSpace = 0) {
-      return llvm::PointerType::getInt64PtrTy(getContext(), AddrSpace);
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(18, 0, 0)
+        return llvm::PointerType::getUnqual(getContext());
+    #else
+        return llvm::PointerType::getInt64PtrTy(getContext(), AddrSpace);
+    #endif
     }
 
     /// Fetch the type representing a 128-bit integer.

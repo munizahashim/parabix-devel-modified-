@@ -650,11 +650,11 @@ inline void displayCapturedData(const size_t blockWidth) const {
 
         for (size_t j = 0; j < m; ++j) {
             auto & A = roots[j];
-            if (LLVM_UNLIKELY(curStreamName.equals(A.Label))) {
+            if (LLVM_UNLIKELY(curStreamName.compare(A.Label) == 0)) {
                 const auto l = A.Children.size();
                 for (size_t k = 0; k < l; ++k) {
                     auto & B = A.Children[k];
-                    if (LLVM_UNLIKELY(curKernelName.equals(B.Label))) {
+                    if (LLVM_UNLIKELY(curKernelName.compare(B.Label) == 0)) {
                         B.NumOfCopies++;
                         goto updated_trie;
                     }
@@ -727,11 +727,11 @@ updated_trie:
 
             for (size_t j = 0; j < m; ++j) {
                 auto & A = roots[j];
-                if (LLVM_UNLIKELY(curStreamName.equals(A.Label))) {
+                if (LLVM_UNLIKELY(curStreamName.compare(A.Label) == 0)) {
                     const auto l = A.Children.size();
                     for (size_t k = 0; k < l; ++k) {
                         auto & B = A.Children[k];
-                        if (LLVM_UNLIKELY(curKernelName.equals(B.Label))) {
+                        if (LLVM_UNLIKELY(curKernelName.compare(B.Label) == 0)) {
                             const auto c = B.NumOfCopies;
                             if (l == 1 && c == 0) {
                                 cd.Name = curStreamName.str();

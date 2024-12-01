@@ -2139,7 +2139,11 @@ bool RemoveRedundantAssertionsPass::runOnModule(Module & M) {
                             Value * const op0 = icmp->getOperand(0);
                             Value * const op1 = icmp->getOperand(1);
                             if (LLVM_UNLIKELY(isa<Constant>(op0) && isa<Constant>(op1))) {
+                                #if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(19, 0, 0)
                                 static_check = ConstantExpr::getICmp(icmp->getPredicate(), cast<Constant>(op0), cast<Constant>(op1));
+                                #else
+                                static_check = ConstantFoldCompareInstruction(icmp->getPredicate(), cast<Constant>(op0), cast<Constant>(op1));
+                                #endif
                                 ci.setOperand(0, static_check);
                             }
                         }

@@ -492,7 +492,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<CharClassesKernel>(insert_ccs, U21, Insertion_BixNum);
     SHOW_BIXNUM(Insertion_BixNum);
 
-    StreamSet * SpreadMask = InsertionSpreadMask(P, Insertion_BixNum, InsertPosition::After);
+    StreamSet * SpreadMask = InsertionSpreadMask(P, Insertion_BixNum, kernel::InsertPosition::After);
     SHOW_STREAM(SpreadMask);
 
     StreamSet * ExpandedBasis = P.CreateStreamSet(21, 1);

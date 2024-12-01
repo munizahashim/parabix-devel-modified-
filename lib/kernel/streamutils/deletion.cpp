@@ -128,7 +128,7 @@ void FieldCompressKernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value
     std::vector<Value *> maskVec = streamutils::loadInputSelectionsBlock(b, {mMaskOp}, blockOffsetPhi);
     std::vector<Value *> input = streamutils::loadInputSelectionsBlock(b, mInputOps, blockOffsetPhi);
 
-    if (BMI2_available()) {
+    if (b.hasFeature(IDISA::Feature::AVX_BMI2)) {
         Type * fieldTy = b.getIntNTy(mFW);
         const unsigned fieldsPerBlock = b.getBitBlockWidth()/mFW;
         Value * extractionMask = b.fwCast(mFW, maskVec[0]);
@@ -1257,7 +1257,7 @@ FilterByMaskKernel::FilterByMaskKernel(LLVMTypeSystemInterface & ts,
 }
 
 void FilterByMaskKernel::generateMultiBlockLogic(KernelBuilder & kb, llvm::Value * const numOfStrides) {
-    bool Use_BMI_PEXT = BMI2_available();
+    const auto Use_BMI_PEXT = kb.hasFeature(IDISA::Feature::AVX_BMI2);
     assert ((mStride % kb.getBitBlockWidth()) == 0);
     Constant * const sz_BLOCKS_PER_STRIDE = kb.getSize(mStride/kb.getBitBlockWidth());
     Constant * const sz_ZERO = kb.getSize(0);

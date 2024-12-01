@@ -10,10 +10,18 @@
 #include <llvm/Target/TargetOptions.h>
 #include <llvm/Target/TargetMachine.h>
 
+#ifndef LLVM_VERSION_CODE
 // #defines for comparison with LLVM_VERSION_INTEGER
 #define LLVM_VERSION_CODE(major, minor, point) ((10000 * major) + (100 * minor) + point)
+#endif
 
 namespace llvm { namespace cl { class OptionCategory; } }
+
+#if LLVM_VERSION_INTEGER < LLVM_VERSION_CODE(18, 0, 0)
+namespace llvm {
+using CodeGenOptLevel = CodeGenOpt::Level;
+}
+#endif
 
 namespace codegen {
 
@@ -79,8 +87,8 @@ extern std::string ShowASMOption;
 extern const char * ObjectCacheDir;
 extern unsigned CacheDaysLimit;  // set from command line
 extern int FreeCallBisectLimit;  // set from command line
-extern llvm::CodeGenOpt::Level OptLevel;  // set from command line
-extern llvm::CodeGenOpt::Level BackEndOptLevel;  // set from command line
+extern llvm::CodeGenOptLevel OptLevel;  // set from command line
+extern llvm::CodeGenOptLevel BackEndOptLevel;  // set from command line
 const unsigned LaneWidth = 64;
 extern unsigned BlockSize;  // set from command line
 extern unsigned SegmentSize; // set from command line

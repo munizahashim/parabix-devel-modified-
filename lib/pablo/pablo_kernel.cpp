@@ -85,7 +85,7 @@ Var * PabloKernel::getOutputStreamVar(const std::string & name) {
 
 Var * PabloKernel::getOutputScalarVar(const std::string & name) {
     for (Var * out : mScalarOutputVars) {
-        if (out->getName().equals(name)) {
+        if (out->getName().compare(name) == 0) {
             return out;
         }
     }

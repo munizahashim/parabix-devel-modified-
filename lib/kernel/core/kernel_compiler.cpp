@@ -50,6 +50,10 @@
 #else
 #include <llvm/IR/IRPrintingPasses.h>
 #endif
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(19, 0, 0)
+#include <llvm/IR/PassInstrumentation.h>
+#endif
+
 #include <llvm/Support/FileSystem.h>
 
 #include <llvm/Target/TargetMachine.h>             // for TargetMachine, Tar...
