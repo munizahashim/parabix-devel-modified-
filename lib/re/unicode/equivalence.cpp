@@ -6,8 +6,6 @@
 #include <re/unicode/equivalence.h>
 
 #include <string>
-#include <locale>
-#include <codecvt>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
 #include <re/adt/adt.h>
@@ -16,10 +14,10 @@
 #include <re/transforms/re_transformer.h>
 #include <re/unicode/decomposition.h>
 #include <unicode/core/unicode_set.h>
-#include "unicode/data/PropertyAliases.h"
-#include "unicode/data/PropertyObjects.h"
+#include <unicode/data/PropertyAliases.h>
+#include <unicode/data/PropertyObjects.h>
 #include <unicode/data/PropertyObjectTable.h>
-#include "unicode/data/PropertyValueAliases.h"
+#include <unicode/data/PropertyValueAliases.h>
 #include <unicode/data/Equivalence.h>
 #include <unicode/data/PrecomposedMappings.h>
 
@@ -73,8 +71,8 @@ public:
         RE_Transformer("ClusterMatchTransformer"),
         mOptions(opt),
         cccObj(cast<EnumeratedPropertyObject>(getPropertyObject(ccc))),
-        sUCobj(cast<StringPropertyObject>(getPropertyObject(suc))),
-        sLCobj(cast<StringPropertyObject>(getPropertyObject(slc))),
+        sUCobj(cast<CodePointPropertyObject>(getPropertyObject(suc))),
+        sLCobj(cast<CodePointPropertyObject>(getPropertyObject(slc))),
         ccc0set(cccObj->GetCodepointSet(CCC_ns::NR)),
         selfUC(sUCobj->GetReflexiveSet()),
         selfLC(sLCobj->GetReflexiveSet())
@@ -92,8 +90,8 @@ protected:
 private:
     EquivalenceOptions mOptions;
     EnumeratedPropertyObject * cccObj;
-    const StringPropertyObject * sUCobj;
-    const StringPropertyObject * sLCobj;
+    const CodePointPropertyObject * sUCobj;
+    const CodePointPropertyObject * sLCobj;
     const UnicodeSet ccc0set;
     const UnicodeSet selfUC;
     const UnicodeSet selfLC;
@@ -203,7 +201,6 @@ void ClusterMatchTransformer::getMatches(const Trie * t, std::u32string s, std::
 
 void ClusterMatchTransformer::getMatches(const Trie * t, std::u32string NFD_string, std::vector<unsigned> & combining_class,
                                             unsigned pos, bool skip, std::vector<unsigned> positions, std::vector<MatchResult_t> & matches) const {
-    std::wstring_convert<std::codecvt_utf8<char32_t>, char32_t> conv;
     if (t->branches.empty() || pos == NFD_string.size()) return;
     codepoint_t cp = NFD_string[pos];
     // If we have skipped any marks but now find a starter, matching fails.
@@ -212,13 +209,9 @@ void ClusterMatchTransformer::getMatches(const Trie * t, std::u32string NFD_stri
     // If we didn't find the codepoint, check for a caseless match.
     if ((f == t->branches.end()) && hasOption(mOptions, UCD::Caseless)) {
         if (!selfUC.contains(cp)) {
-            std::u32string cp_UC = conv.from_bytes(sUCobj->GetStringValue(cp));
-            assert(cp_UC.size() == 1);  // Simple upper case should alway yields a single codepoint.
-            cp = cp_UC[0];
+            cp = sUCobj->GetCodePointValue(cp);
         } else if (!selfLC.contains(cp)) {
-            std::u32string cp_LC = conv.from_bytes(sLCobj->GetStringValue(cp));
-            assert(cp_LC.size() == 1);  // Simple lower case should alway yields a single codepoint.
-            cp = cp_LC[0];
+            cp = sLCobj->GetCodePointValue(cp);
         }
         f = t->branches.find(cp);
     }
