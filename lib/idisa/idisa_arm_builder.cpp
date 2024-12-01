@@ -3,7 +3,11 @@
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/IntrinsicsAArch64.h>
 #include <llvm/IR/Module.h>
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(17, 0, 0)
+#include <llvm/TargetParser/Host.h>
+#else
 #include <llvm/Support/Host.h>
+#endif
 
 using namespace llvm;
 

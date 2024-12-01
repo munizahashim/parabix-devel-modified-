@@ -61,9 +61,17 @@ Features getHostCPUFeatures(const StringMap<bool> & features) {
 bool ARM_available() {
 #ifdef PARABIX_ARM_TARGET
 #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(16, 0, 0)
+#if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(17, 0, 0)
+    auto info = llvm::AArch64::parseCpu(sys::getHostCPUName());
+    std::vector<StringRef> extNames;
+    if (info) {
+        llvm::AArch64::getExtensionFeatures(info->Arch.DefaultExts | info->DefaultExtensions, extNames);
+    }
+#else
     const llvm::AArch64::CpuInfo & info = llvm::AArch64::parseCpu(sys::getHostCPUName());
     std::vector<StringRef> extNames;
     llvm::AArch64::getExtensionFeatures(info.Arch.DefaultExts | info.DefaultExtensions, extNames);
+#endif
     for (const auto eName : extNames) {
         //llvm::errs() << "Extension: " << eName << "\n";
         if (eName == "+neon") return true;
