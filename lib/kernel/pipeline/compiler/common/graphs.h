@@ -1,6 +1,10 @@
 #pragma once
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
 #include <boost/graph/adjacency_list.hpp>
+#pragma GCC diagnostic pop
+
 #include <boost/graph/adjacency_matrix.hpp>
 #include <boost/container/flat_set.hpp>
 #include <boost/container/flat_map.hpp>
