@@ -3,7 +3,6 @@
  *  SPDX-License-Identifier: OSL-3.0
  */
 
-
 #include <cstdio>
 #include <vector>
 #include <llvm/Support/CommandLine.h>
@@ -48,7 +47,7 @@ static cl::opt<int> columnNo(cl::Positional, cl::desc("column number (1-based)")
 static cl::opt<std::string> inputFile(cl::Positional, cl::desc("<input file>"), cl::Required, cl::cat(CSV_Options));
 static cl::opt<bool> HeaderSpecNamesFile("f", cl::desc("Interpret headers parameter as file name with header line"), cl::init(false), cl::cat(CSV_Options));
 static cl::opt<std::string> HeaderSpec("headers", cl::desc("CSV column headers (explicit string or filename"), cl::init(""), cl::cat(CSV_Options));
-
+static cl::opt<bool> FilterBasisBits("FilterBasisBits", cl::desc("Perform filtering on basis bits rather than on byte stream"), cl::init(false), cl::cat(CSV_Options));
 
 class SelectField : public PabloKernel {
 public:
@@ -93,6 +92,10 @@ void SelectField::generatePabloMethod() {
 
 typedef void (*CSVFunctionType)(uint32_t fd);
 
+#define SHOW_STREAM(name) if (codegen::EnableIllustrator) P.captureBitstream(#name, name)
+#define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
+#define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
+
 CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::string> & headers) {
 
     // A Parabix program is build as a set of kernel calls called a pipeline.
@@ -110,10 +113,8 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
     //  S2P stands for serial-to-parallel.
     StreamSet * BasisBits = P.CreateStreamSet(8);
     P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        P.captureBitstream("ByteStream", ByteStream, '_');
-        P.captureBitstream("BasisBits", BasisBits);
-    }
+    SHOW_BYTES(ByteStream);
+    SHOW_BIXNUM(BasisBits);
 
     //  We need to know which input positions are dquotes and which are not.
     StreamSet * csvCCs = P.CreateStreamSet(5);
@@ -126,26 +127,24 @@ CSVFunctionType generatePipeline(CPUDriver & driver, const std::vector<std::stri
 
     StreamSet * Selected = P.CreateStreamSet(1);
     P.CreateKernelCall<SelectField>(csvCCs, recordSeparators, fieldSeparators, Selected, columnNo);
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        P.captureBitstream("recordSeparators", recordSeparators);
-        P.captureBitstream("fieldSeparators", fieldSeparators);
-        P.captureBitstream("Selected", Selected);
-    }
+    SHOW_STREAM(recordSeparators);
+    SHOW_STREAM(fieldSeparators);
+    SHOW_STREAM(Selected);
 
-    
-    StreamSet * filteredBasis = P.CreateStreamSet(8);
-    FilterByMask(P, Selected, BasisBits, filteredBasis);
     StreamSet * Filtered = P.CreateStreamSet(1, 8);
-    P.CreateKernelCall<P2SKernel>(filteredBasis, Filtered);
-    if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
-        P.captureBixNum("filteredBasis", filteredBasis);
-        P.captureByteData("Filtered", Filtered, '_');
+    if (FilterBasisBits) {
+        StreamSet * filteredBasis = P.CreateStreamSet(8);
+        FilterByMask(P, Selected, BasisBits, filteredBasis);
+        P.CreateKernelCall<P2SKernel>(filteredBasis, Filtered);
+        SHOW_BIXNUM(filteredBasis);
+    } else {
+        FilterByMask(P, Selected, ByteStream, Filtered);
     }
+    SHOW_BYTES(Filtered);
     //  The StdOut kernel writes a byte stream to standard output.
     P.CreateKernelCall<StdOutKernel>(Filtered);
     return P.compile();
 }
-
 
 const unsigned MaxHeaderSize = 24;
 

@@ -19,6 +19,11 @@
 #include "llvm/IR/LLVMContext.h"
 #include <climits>
 
+#ifndef LLVM_VERSION_CODE
+// #defines for comparison with LLVM_VERSION_INTEGER
+#define LLVM_VERSION_CODE(major, minor, point) ((10000 * major) + (100 * minor) + point)
+#endif
+
 namespace llvm {
 
 /// TypeBuilder - This provides a uniform API for looking up types
@@ -235,28 +240,44 @@ public:
 template<> class TypeBuilder<void*, false> {
 public:
     static PointerType * get(LLVMContext &Context) {
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(18, 0, 0)
+        return PointerType::getUnqual(Context);
+    #else
         return PointerType::getInt8PtrTy(Context);
+    #endif
     }
 };
 
 template<> class TypeBuilder<const void*, false> {
 public:
     static PointerType * get(LLVMContext &Context) {
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(18, 0, 0)
+        return PointerType::getUnqual(Context);
+    #else
         return PointerType::getInt8PtrTy(Context);
+    #endif
     }
 };
 
 template<> class TypeBuilder<volatile void*, false> {
 public:
     static PointerType * get(LLVMContext &Context) {
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(18, 0, 0)
+        return PointerType::getUnqual(Context);
+    #else
         return PointerType::getInt8PtrTy(Context);
+    #endif
     }
 };
 
 template<> class TypeBuilder<const volatile void*, false> {
 public:
     static PointerType * get(LLVMContext &Context) {
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(18, 0, 0)
+        return PointerType::getUnqual(Context);
+    #else
         return PointerType::getInt8PtrTy(Context);
+    #endif
     }
 };
 
@@ -278,24 +299,32 @@ struct is_known_type<T, std::void_t<decltype(T::get)>> : std::true_type {};
 template<typename T, bool cross>
 class TypeBuilder<T*, cross> {
 public:
-  static PointerType * get(LLVMContext &Context) {
-      if constexpr (is_known_type<TypeBuilder<T, cross>>::value) {
+    static PointerType * get(LLVMContext &Context) {
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(18, 0, 0)
+        return PointerType::getUnqual(Context);
+    #else
+        if constexpr (is_known_type<TypeBuilder<T, cross>>::value) {
             return PointerType::getUnqual(TypeBuilder<T,cross>::get(Context));
-      } else {
-          return PointerType::getInt8PtrTy(Context);
-      }
-  }
+        } else {
+            return PointerType::getInt8PtrTy(Context);
+        }
+    #endif
+    }
 };
 
 // References
 template<typename T, bool cross> class TypeBuilder<T&, cross> {
 public:
     static PointerType * get(LLVMContext &Context) {
+    #if LLVM_VERSION_INTEGER >= LLVM_VERSION_CODE(18, 0, 0)
+        return PointerType::getUnqual(Context);
+    #else
         if constexpr (is_known_type<TypeBuilder<T, cross>>::value) {
-              return PointerType::getUnqual(TypeBuilder<T,cross>::get(Context));
+            return PointerType::getUnqual(TypeBuilder<T,cross>::get(Context));
         } else {
             return PointerType::getInt8PtrTy(Context);
         }
+    #endif
     }
 };
 

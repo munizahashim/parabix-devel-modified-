@@ -846,7 +846,7 @@ void GrepEngine::applyColorization(PipelineBuilder & P,
 
         StreamSet * const InsertBixNum = E.CreateStreamSet(insertLengthBits, 1);
         E.CreateKernelCall<ZeroInsertBixNum>(insertAmts, SpanMarks, InsertBixNum);
-        StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, InsertPosition::Before);
+        StreamSet * const SpreadMask = InsertionSpreadMask(E, InsertBixNum, kernel::InsertPosition::Before);
         if (LLVM_UNLIKELY(codegen::EnableIllustrator)) {
             E.captureBitstream("SpreadMask", SpreadMask);
         }

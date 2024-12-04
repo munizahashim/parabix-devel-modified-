@@ -10,13 +10,14 @@
 
 namespace IDISA {
 
-    const unsigned AVX_width = 256;
-    const unsigned AVX512_width = 512;
+constexpr unsigned AVX_width = 256;
+
+constexpr unsigned AVX512_width = 512;
 
 class IDISA_AVX_Builder : public IDISA_SSE2_Builder {
 public:
     static const unsigned NativeBitBlockWidth = AVX_width;
-    IDISA_AVX_Builder(llvm::LLVMContext & C, unsigned vectorWidth, unsigned laneWidth);
+    IDISA_AVX_Builder(llvm::LLVMContext & C, const FeatureSet &featureSet, unsigned vectorWidth, unsigned laneWidth);
 
     virtual std::string getBuilderUniqueName() override;
 
@@ -26,15 +27,13 @@ public:
     llvm::Value * CreatePdeposit(llvm::Value * v, llvm::Value * mask, const llvm::Twine Name = "") override;
 
     ~IDISA_AVX_Builder() override {}
-protected:
-    bool hasBMI1;
-    bool hasBMI2;
+
 };
 
 class IDISA_AVX2_Builder : public IDISA_AVX_Builder {
 public:
     static const unsigned NativeBitBlockWidth = AVX_width;
-    IDISA_AVX2_Builder(llvm::LLVMContext & C, unsigned vectorWidth, unsigned laneWidth);
+    IDISA_AVX2_Builder(llvm::LLVMContext & C, const FeatureSet & featureSet, unsigned vectorWidth, unsigned laneWidth);
 
     virtual std::string getBuilderUniqueName() override;
     llvm::Value * hsimd_packh(unsigned fw, llvm::Value * a, llvm::Value * b) override;
@@ -64,10 +63,9 @@ public:
 class IDISA_AVX512F_Builder : public IDISA_AVX2_Builder {
 public:
     static const unsigned NativeBitBlockWidth = AVX512_width;
-    IDISA_AVX512F_Builder(llvm::LLVMContext & C, unsigned vectorWidth, unsigned laneWidth);
+    IDISA_AVX512F_Builder(llvm::LLVMContext & C, const FeatureSet & featureSet, unsigned vectorWidth, unsigned laneWidth);
 
     virtual std::string getBuilderUniqueName() override;
-    void getAVX512Features();
     llvm::Value * hsimd_packh(unsigned fw, llvm::Value * a, llvm::Value * b) override;
     llvm::Value * hsimd_packl(unsigned fw, llvm::Value * a, llvm::Value * b) override;
     llvm::Value * hsimd_packus(unsigned fw, llvm::Value * a, llvm::Value * b) override;
@@ -91,18 +89,7 @@ public:
 
     ~IDISA_AVX512F_Builder() override {
     }
-private:
-    struct Features {
-        //not an exhaustive list, can be extended if needed
-        bool hasAVX512CD = false;
-        bool hasAVX512BW = false;
-        bool hasAVX512DQ = false;
-        bool hasAVX512VL = false;
-        bool hasAVX512VBMI = false;
-        bool hasAVX512VBMI2 = false;
-        bool hasAVX512VPOPCNTDQ = false;
-    };
-    Features hostCPUFeatures;
+
 };
 
 }

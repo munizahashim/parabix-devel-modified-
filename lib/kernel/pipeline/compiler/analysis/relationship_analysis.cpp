@@ -158,14 +158,14 @@ void PipelineAnalysis::generateInitialPipelineGraph(KernelBuilder & b) {
         const Bindings & inputs = kernel->getInputStreamSetBindings();
         const auto n = inputs.size();
         for (unsigned i = 0; i != n; ++i) {
-            if (ref.equals(inputs[i].getName())) {
+            if (ref.compare(inputs[i].getName()) == 0) {
                 return StreamSetPort{PortType::Input, i};
             }
         }
         const Bindings & outputs = kernel->getOutputStreamSetBindings();
         const auto m = outputs.size();
         for (unsigned i = 0; i != m; ++i) {
-            if (ref.equals(outputs[i].getName())) {
+            if (ref.compare(outputs[i].getName()) == 0) {
                 return StreamSetPort{PortType::Output, i};
             }
         }

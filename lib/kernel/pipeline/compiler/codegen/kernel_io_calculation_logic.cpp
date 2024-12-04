@@ -1587,7 +1587,7 @@ void PipelineCompiler::splatMultiStepPartialSumValues(KernelBuilder & b) {
 
         const auto bw = b.getBitBlockWidth();
         const auto fw = b.getSizeTy()->getIntegerBitWidth();
-        assert ((bw % fw) == 0 && bw > fw);
+        assert ((bw % fw) == 0 && bw >= fw);
         const auto stepsPerBlock = bw / fw;
         const auto spanLength = bn.PartialSumSpanLength;
 

@@ -4,15 +4,17 @@
 
 namespace IDISA {
 
-const unsigned ARM_width = 128;
+constexpr unsigned ARM_width = 128;
 
 class IDISA_ARM_Builder : public virtual IDISA_Builder {
 public:
-    static const unsigned NativeBitBlockWidth = ARM_width;
-    IDISA_ARM_Builder(llvm::LLVMContext & C, unsigned bitBlockWidth, unsigned laneWidth)
-    : IDISA_Builder(C, ARM_width, bitBlockWidth, laneWidth) {
+    static constexpr unsigned NativeBitBlockWidth = ARM_width;
+
+    IDISA_ARM_Builder(llvm::LLVMContext & C, const FeatureSet & featureSet, unsigned bitBlockWidth, unsigned laneWidth)
+    : IDISA_Builder(C, featureSet, ARM_width, bitBlockWidth, laneWidth) {
 
     }
+
     virtual std::string getBuilderUniqueName() override;
     llvm::Value* simd_popcount(unsigned fw, llvm::Value* a) override;
     llvm::Value* simd_bitreverse(unsigned fw, llvm::Value* a) override;
