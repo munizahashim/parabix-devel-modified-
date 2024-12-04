@@ -837,7 +837,7 @@ updated_trie:
 
                     for (size_t i = 0; i < numOfRows; ++i) {
                         auto & toFill = FormattedOutput[i];
-                        std::fill(toFill.begin(), toFill.end(), ' ');
+                        std::fill(toFill.begin(), toFill.end(), 0);
                     }
 
                     auto position = startPosition;
@@ -859,7 +859,7 @@ updated_trie:
                             continue;
                         }
 
-                        if (from > endPosition) {
+                        if (from >= endPosition) {
                             break;
                         }
 
@@ -870,17 +870,22 @@ updated_trie:
 
                         const auto chunkSize = G.Rows * rowSize;
 
+                        assert (from <= position);
                         const auto offset = position - from;
 
                         const uint8_t * blockData = E->Data + ((offset / blockWidth) * chunkSize);
                         const size_t readStart = (offset & (blockWidth - 1));
                         const size_t writeStart = (position % charsPerRow);
 
+                        assert (readStart <= blockWidth);
+                        assert (writeStart <= charsPerRow);
+
                         const size_t blockDataLimit = std::min(blockWidth - readStart, charsPerRow - writeStart);
+
+                        assert (position <= to);
 
                         const size_t length = std::min(blockDataLimit, to - position);
                         assert (length > 0);
-
                         assert ((readStart + length) <= blockWidth);
                         assert ((writeStart + length) <= charsPerRow);
 
@@ -921,22 +926,18 @@ updated_trie:
                                 auto & toFill = FormattedOutput[x];
                                 assert (toFill.size() == charsPerRow);
 
-                                for (size_t k = 0; k < length; ++k) {
-                                    const auto out = (writeStart + k);
-                                    assert (out < charsPerRow);
-                                    toFill[out] = 0;
-                                }
-
                                 for (size_t r = 0; r < t; ++r) {
                                     const uint8_t * rowData = blockData + ((s + r) * rowSize);
                                     for (size_t k = 0; k < length; ++k) {
                                         const auto in = (readStart + k);
                                         assert (in < blockWidth);
-                                        const uint8_t v = ( rowData[in / CHAR_BIT] & (1UL << (in & (CHAR_BIT - 1))) ) != 0;
+                                        assert ((1 << (in & 7)) < 256);
+                                        const uint8_t v = ( rowData[in >> 3UL] & (1 << (in & 7)) ) != 0;
                                         assert (v == 0 || v == 1);
                                         const auto out = (writeStart + k);
                                         assert (out < charsPerRow);
-                                        const auto z = (uint8_t)(v << r);
+                                        const auto z = v << r;
+                                        assert (z < 256);
                                         assert ((toFill[out] & z) == 0);
                                         toFill[out] |= z;
                                     }
@@ -1084,7 +1085,6 @@ inline void StreamDataCapture::append(StreamDataStateObject * stateObjectEntry,
     assert (CurrentIndex < ELEMENTS_PER_ALLOCATION);
     StreamDataElement & E = C->Data[CurrentIndex++];
     E.StrideNum = strideNum;
-    E.From = from;
     E.To = to;
     E.SequenceNum = (++stateObjectEntry->SequenceLength);
     #ifndef NDEBUG
@@ -1092,6 +1092,8 @@ inline void StreamDataCapture::append(StreamDataStateObject * stateObjectEntry,
     #endif
     assert (stateObjectEntry == StateObject);
     assert (from <= to);
+
+    auto modFrom = from;
 
     if (LLVM_UNLIKELY(from == to)) {
         E.Data = nullptr;
@@ -1113,9 +1115,10 @@ inline void StreamDataCapture::append(StreamDataStateObject * stateObjectEntry,
         if (LLVM_UNLIKELY(blockSize == 0)) {
             E.Data = nullptr;
         } else {
+            modFrom = from & (~(blockWidth - 1UL));
             const auto offset = (udiv(from, blockWidth) * blockSize);
             const uint8_t * start = streamData + offset;
-            const auto end = (from & (blockWidth - 1)) + (to - from);
+            const auto end = (modFrom & (blockWidth - 1)) + (to - modFrom);
             const auto length = udiv(end + blockWidth - 1, blockWidth) * blockSize;
             assert (length > 0);
             E.Data = A.aligned_allocate(length, blockWidth / CHAR_BIT);
@@ -1123,6 +1126,8 @@ inline void StreamDataCapture::append(StreamDataStateObject * stateObjectEntry,
             std::memcpy(E.Data, start, length);
         }
     }
+
+    E.From = modFrom;
 
     if (stateObjectEntry->InKernel) {
         const auto & L = stateObjectEntry->LoopIteration;
