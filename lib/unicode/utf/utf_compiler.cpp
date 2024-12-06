@@ -139,7 +139,7 @@ re::CC * reduceCC(re::CC * cc, codepoint_t mask, cc::Alphabet & a) {
 }
 //
 // Determine the actual range of codepoints encountered in a CC_List.
-// If all the CCs are empty, return the impossible range {0x10FFF, 0}.
+// If all the CCs are empty, return the impossible range {0x10FFFF, 0}.
 Range CC_Set_Range(CC_List ccs) {
     codepoint_t lo = 0x10FFFF;
     codepoint_t hi = 0;
@@ -198,7 +198,12 @@ unsigned Unicode_Range_Compiler::costModel(CC_List & ccs) {
 
 void Unicode_Range_Compiler::subrangePartitioning(CC_List & ccs, EnclosingInfo & enclosing, PabloBuilder & pb) {
     unsigned range_bits = enclosing.range.significant_bits();
-    codepoint_t partition_size = (1U << (range_bits - 1))/PartitioningFactor;
+    CC_List subrangeCCs(ccs.size());
+    extract_CCs_by_range(enclosing.range, ccs, subrangeCCs);
+    Range actual_subrange = CC_Set_Range(subrangeCCs);
+    codepoint_t partition_size = (actual_subrange.hi - actual_subrange.lo + PartitioningFactor)/PartitioningFactor;
+
+    //codepoint_t partition_size = (1U << (range_bits - 1))/PartitioningFactor;
     if (UTF_CompilationTracing) {
         llvm::errs() << "URC::subrangePartitioning(" << enclosing.range.hex_string() << ")\n";
         llvm::errs() << "  partition_size = " << partition_size << "\n";
@@ -213,30 +218,28 @@ void Unicode_Range_Compiler::subrangePartitioning(CC_List & ccs, EnclosingInfo &
     BixNum rangeBasis = bnc.Truncate(mBasis, range_bits);
     std::unique_ptr<cc::CC_Compiler> rangeCompiler;
     rangeCompiler = std::make_unique<cc::Parabix_CC_Compiler_Builder>(rangeBasis);
-    codepoint_t range_mask = (1U << range_bits) - 1;
-    codepoint_t partition_mask = partition_size - 1;
-    codepoint_t base = enclosing.range.lo & ~partition_mask;
-    for (unsigned partition_lo = base; partition_lo <= enclosing.range.hi; partition_lo += partition_size) {
-        unsigned partition_hi = std::min(partition_lo + partition_size - 1, enclosing.range.hi);
+
+    for (unsigned partition_lo = actual_subrange.lo; partition_lo <= actual_subrange.hi; partition_lo += partition_size) {
+        unsigned partition_hi = std::min(partition_lo + partition_size - 1, actual_subrange.hi);
         Range partition{partition_lo, partition_hi};
         CC_List partitionCCs(ccs.size());
         extract_CCs_by_range(partition, ccs, partitionCCs);
-        Range actual_subrange = CC_Set_Range(partitionCCs);
-        if (!actual_subrange.is_empty()) {
-            unsigned subpartition_bits = actual_subrange.significant_bits();
-            codepoint_t mask = (1u << subpartition_bits) - 1;
-            Range subpartition{actual_subrange.lo & ~mask, actual_subrange.hi | mask};
+        Range partition_actual = CC_Set_Range(partitionCCs);
+        if (!partition_actual.is_empty()) {
+            unsigned subpartition_bits = partition_actual.significant_bits();
+            //codepoint_t mask = (1u << subpartition_bits) - 1;
+            //Range subpartition{actual_subrange.lo & ~mask, actual_subrange.hi | mask};
             if (UTF_CompilationTracing) {
                 llvm::errs() << "partition.significant_bits() = " << partition.significant_bits() << "\n";
-                llvm::errs() << "actual_subrange: " << actual_subrange.hex_string() << "\n";
-                llvm::errs() << "subpartition: " << subpartition.hex_string() << "\n";
-                llvm::errs() << "actual_subrange.significant_bits() = " << subpartition_bits << "\n";
+                llvm::errs() << "actual_subrange: " << partition_actual.hex_string() << "\n";
+                //llvm::errs() << "subpartition: " << subpartition.hex_string() << "\n";
+                llvm::errs() << "partition_actual.significant_bits() = " << subpartition_bits << "\n";
             }
-            re::CC * subpartitionCC = re::makeCC(subpartition.lo & range_mask, subpartition.hi & range_mask, &CodeAlpha);
+            re::CC * subpartitionCC = re::makeCC(partition_actual.lo, partition_actual.hi, &CodeAlpha);
             PabloAST * subpartitionTest = rangeCompiler->compileCC(subpartitionCC, pb);
-            subpartitionTest = pb.createAnd(enclosing.test, subpartitionTest, "Range_" + subpartition.hex_string());
-            EnclosingInfo narrowed(subpartition, subpartitionTest);
-            compileSubrange(partitionCCs, narrowed, actual_subrange, pb);
+            subpartitionTest = pb.createAnd(enclosing.test, subpartitionTest, "Range_" + partition_actual.hex_string());
+            EnclosingInfo narrowed(partition_actual, subpartitionTest);
+            compileSubrange(partitionCCs, narrowed, partition_actual, pb);
         }
     }
 }
