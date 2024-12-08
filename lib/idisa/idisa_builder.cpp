@@ -1182,29 +1182,16 @@ Value * IDISA_Builder::mvmd_expand(unsigned fw, Value * v, Value * select_mask) 
     }
 }
 
-#if 1
 Value * IDISA_Builder::bitblock_any(Value * a) {
     Type * aType = a->getType();
     if (aType->isIntegerTy()) {
         return CreateICmpNE(a, ConstantInt::getNullValue(aType));
     } else {
-        assert (aType == mBitBlockType);
         Value * r = simd_ne(mLaneWidth, a,  ConstantInt::getNullValue(mBitBlockType));
         r = hsimd_signmask(mLaneWidth, r);
-        assert (r->getType()->isIntegerTy());
         return CreateICmpNE(r, ConstantInt::getNullValue(r->getType()), "bitblock_any");
     }
 }
-#else
-Value * IDISA_Builder::bitblock_any(Value * a) {
-    if (a->getType()->isIntegerTy()) {
-        return CreateICmpNE(a, ConstantInt::getNullValue(a->getType()));
-    } else {
-        Type * iBitBlock = getIntNTy(getVectorBitWidth(a));
-        return CreateICmpNE(CreateBitCast(a, iBitBlock),  ConstantInt::getNullValue(iBitBlock), "bitblock_any");
-    }
-}
-#endif
 
 // full add producing {carryout, sum}
 std::pair<Value *, Value *> IDISA_Builder::bitblock_add_with_carry(Value * a, Value * b, Value * carryin) {
