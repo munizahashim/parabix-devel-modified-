@@ -67,7 +67,9 @@ void UnicodePropertyKernelBuilder::generatePabloMethod() {
 
 UnicodePropertyBasis::UnicodePropertyBasis(LLVMTypeSystemInterface & ts, UCD::EnumeratedPropertyObject * enumObj, StreamSet * Source, StreamSet * PropertyBasis)
 : PabloKernel(ts,
-"UCD:" + getPropertyFullName(enumObj->getPropertyCode()) + "_basis",
+              std::to_string(Source->getNumElements()) +
+              "x" + std::to_string(Source->getFieldWidth()) +
+              "UCD:" + getPropertyFullName(enumObj->getPropertyCode()) + "_basis",
 {Binding{"source", Source}},
 {Binding{"property_basis", PropertyBasis}})
 , mEnumObj(enumObj) {
