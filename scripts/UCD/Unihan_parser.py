@@ -15,8 +15,8 @@ from unicode_set import *
 # The value part encodes one or more values separated by spaces.
 # Values have their own syntax depending on the field name.
 #
-Unihan_entry_regexp = re.compile("^U\+([A-F0-9]{4,6})\t([a-zA-Z_]+)\t(.*)$")
-Unihan_skip = re.compile("^#.*$|^\s*$")
+Unihan_entry_regexp = re.compile("^U\\+([A-F0-9]{4,6})\t([a-zA-Z_]+)\t(.*)$")
+Unihan_skip = re.compile("^#.*$|^\\s*$")
 
 def parse_Unihan_file(unihan_file):
     f = open(UCD_config.UCD_src_dir + "/Unihan/" + unihan_file)
@@ -37,7 +37,7 @@ def parse_Unihan_file(unihan_file):
         Unihan_map[field_name][cp] = value_part
     return Unihan_map
 
-kRSUnicode_regexp = re.compile("^([0-9]{1,3}'{0,2})\.(-?[0-9]+)$")
+kRSUnicode_regexp = re.compile("^([0-9]{1,3}'{0,3})\\.(-?[0-9]+)$")
 
 def generate_Radical_sets():
     Unihan_prop_map = parse_Unihan_file("Unihan_IRGSources.txt")
@@ -50,22 +50,21 @@ def generate_Radical_sets():
             m = kRSUnicode_regexp.match(v)
             if not m: raise Exception("Unexpected kRSUnicode value: '%s'" % v)
             radical = m.group(1)
+            if nonChineseform.match(radical): # skip non-Chinese form
+                continue
             if not radical in radical_map.keys():
                 radical_map[radical] = cp_set
             else:
                 radical_map[radical] = uset_union(radical_map[radical], cp_set)
     return radical_map
 
-CJKradicals_regexp = re.compile("^([0-9]{1,3}'{0,2});\s+([0-9A-F]{0,6});\s+([0-9A-F]{4,6})\s*$")
-
+CJKradicals_regexp = re.compile("^([0-9]{1,3}'{0,3});\\s+([0-9A-F]{0,6});\\s+([0-9A-F]{4,6})\\s*$")
+nonChineseform = re.compile("^[0-9]{1,3}'{2,3}")
 
 def radicalIdent(radicalCode):
     radical_id = radicalCode
-    if radicalCode[-1] == "'":  # traditional or simplified
-        if radicalCode[-2] == "'":  # traditional radical
-            radical_id = radical_id[:-2] + "t"
-        else:  # simplified radical
-            radical_id = radical_id[:-1] + "s"
+    if radicalCode[-1] == "'":  # simplified form
+        radical_id = radical_id[:-1] + "s"
     return "kangXi_" + radical_id
 
 def parse_CJK_Radicals_txt():
@@ -80,6 +79,8 @@ def parse_CJK_Radicals_txt():
         m = CJKradicals_regexp.match(t)
         if not m: raise Exception("Unexpected CJKRadicals syntax: %s" % t)
         radical = m.group(1)
+        if nonChineseform.match(radical):
+            continue
         g2 = m.group(2)
         if g2 != "":
             rad_cp = int(g2, 16)
