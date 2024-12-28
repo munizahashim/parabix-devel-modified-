@@ -36,6 +36,12 @@ static cl::opt<unsigned> IfEmbeddingCostThreshhold("IfEmbeddingCostThreshhold", 
 static cl::opt<unsigned> PartitioningCostThreshhold("PartitioningCostThreshhold", cl::init(12), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> PartitioningFactor("PartitioningFactor", cl::init(4), cl::cat(codegen::CodeGenOptions));
 static cl::opt<unsigned> RangeMaskFactor("RangeMaskFactor", cl::init(4), cl::cat(codegen::CodeGenOptions));
+enum class PartitioningKind {Linear, Logarithmic, Geometric, Gaps};
+static cl::opt<PartitioningKind> Partitioning("Partitioning", cl::ValueOptional,
+cl::values(
+           clEnumValN(PartitioningKind::Linear, "Linear", "Partitioning based on linear division."),
+           clEnumValN(PartitioningKind::Logarithmic, "Logarithmic", "Partitioning based on logarithmic division")),
+                                                                               cl::cat(codegen::CodeGenOptions), cl::init(PartitioningKind::Linear));
 static cl::opt<bool> PartitioningRevision("PartitioningRevision", cl::init(true), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> SuffixOptimization("SuffixOptimization", cl::init(false), cl::cat(codegen::CodeGenOptions));
 static cl::opt<bool> AdvanceBasis("AdvanceBasis", cl::desc("Advance basis bits before compileCodeUnit"), cl::init(false), cl::cat(codegen::CodeGenOptions));
@@ -71,6 +77,11 @@ std::string kernelAnnotation() {
     }
     if (SuffixOptimization) {
         a += "x";
+    }
+    if (Partitioning == PartitioningKind::Linear) {
+        a += "lP";
+    } else if (Partitioning == PartitioningKind::Logarithmic) {
+        a += "+gP";
     }
     if (InitialTest == InitialTestMode::NonASCII) {
         a += "+nA";
@@ -169,28 +180,6 @@ void extract_CCs_by_range(Range r, CC_List & ccs, CC_List & in_range) {
     }
 }
 
-std::vector<Range> largestInteriorRanges(re::CC * theCC, unsigned numRanges) {
-    std::vector<Range> rgs(numRanges);
-    for (const auto range : *theCC) {
-        auto lo = re::lo_codepoint(range);
-        auto hi = re::hi_codepoint(range);
-        if ((lo == 0) | (hi = 0x10FFFF)) continue; // skip non-interior ranges.
-        for (unsigned i = 0; i < numRanges; i++) {
-            if (i >= rgs.size()) {
-                rgs.push_back(Range{lo, hi});
-            } else {
-                if ((rgs[i].hi - rgs[i].lo) < (hi - lo)) {
-                    for (unsigned j = rgs.size() - 1; j > i; j--) {
-                        rgs[j] = rgs[j-1];
-                    }
-                    rgs[i] = Range{lo, hi};
-                }
-            }
-        }
-    }
-    return rgs;
-}
-
 struct EnclosingInfo {
     Range       range;
     PabloAST *  test;
@@ -210,6 +199,7 @@ protected:
     PabloBuilder &          mPB;
     unsigned costModel(CC_List & ccs);
     Basis_Set RangeBasis(Range enclosing_range, PabloBuilder & pb);
+    std::vector<Range> selectPartitions(CC_List & ccs, EnclosingInfo & enclosing, PabloBuilder & pb);
     void subrangePartitioning(CC_List & ccs, EnclosingInfo & enclosing, PabloBuilder & pb);
     void compileUnguardedSubrange(CC_List & ccs, EnclosingInfo & enclosing, PabloBuilder & pb);
     PabloAST * compileCodeRange(EnclosingInfo & enclosing, Range & codepointRange, PabloBuilder & pb);
@@ -244,29 +234,52 @@ Basis_Set Unicode_Range_Compiler::RangeBasis(Range enclosing_range, PabloBuilder
     return rb;
 }
 
-void Unicode_Range_Compiler::subrangePartitioning(CC_List & ccs, EnclosingInfo & enclosing, PabloBuilder & pb) {
+std::vector<Range> Unicode_Range_Compiler::selectPartitions(CC_List & ccs, EnclosingInfo & enclosing, PabloBuilder & pb) {
+    std::vector<Range> partitions;
     Range actual_subrange = CC_Set_Range(ccs);
-    if (actual_subrange.is_empty()) return;
-    codepoint_t partition_size = (actual_subrange.hi - actual_subrange.lo + PartitioningFactor)/PartitioningFactor;
     if (UTF_CompilationTracing) {
-        llvm::errs() << "URC::subrangePartitioning(" << enclosing.range.hex_string() << ")\n";
-        llvm::errs() << "  partition_size = " << partition_size << "\n";
+        llvm::errs() << "URC::selectPartitions(" << enclosing.range.hex_string() << ")\n";
     }
-    if (partition_size <= 32) {
+    if (actual_subrange.is_empty()) return partitions;
+    unsigned working_bits = actual_subrange.significant_bits();
+    if (working_bits <= PartitioningFactor) {
+        return {enclosing.range};
+    }
+    unsigned working_bitmask = (1u << working_bits) - 1u;
+    if (Partitioning == PartitioningKind::Linear) {
+        unsigned partition_bits = ceil_log2(PartitioningFactor);
+        unsigned partition_size = 1u << (working_bits - partition_bits);
+        unsigned partition_lo = actual_subrange.lo &~working_bitmask;
+        for (unsigned i = 0; i < PartitioningFactor; i++) {
+            unsigned partition_hi = std::min(partition_lo + partition_size - 1, actual_subrange.hi);
+            partitions.push_back(Range{partition_lo, partition_hi});
+            if (UTF_CompilationTracing) {
+                llvm::errs() << "URC::selectPartitions: partition " << i << ": " << partitions[i].hex_string() << ")\n";
+            }
+            partition_lo = partition_hi + 1;
+        }
+        partitions[PartitioningFactor - 1].hi = actual_subrange.hi;
+    } else if (Partitioning == PartitioningKind::Logarithmic) {
+        unsigned pcount = working_bits > PartitioningFactor ? PartitioningFactor : 1;
+        unsigned partition_lo = actual_subrange.lo;
+        for (unsigned i = 0; i < pcount; i++) {
+            unsigned shift = pcount - i - 1;
+            unsigned partition_hi = partition_lo | (working_bitmask >> shift);
+            partitions.push_back(Range{partition_lo, partition_hi});
+            if (UTF_CompilationTracing) {
+                llvm::errs() << "URC::selectPartitions: partition " << i << ": " << partitions[i].hex_string() << ")\n";
+            }
+            partition_lo = partition_hi + 1;
+        }
+    }    return partitions;
+}
+
+void Unicode_Range_Compiler::subrangePartitioning(CC_List & ccs, EnclosingInfo & enclosing, PabloBuilder & pb) {
+    std::vector<Range> partitions = selectPartitions(ccs, enclosing, pb);
+    if (partitions.size() < 2) {
         compileUnguardedSubrange(ccs, enclosing, pb);
         return;
     }
-    std::vector<Range> partitions(PartitioningFactor);
-    unsigned partition_lo = actual_subrange.lo;
-    for (unsigned i = 0; i < PartitioningFactor; i++) {
-        unsigned partition_hi = std::min(partition_lo + partition_size - 1, actual_subrange.hi);
-        partitions[i] = Range{partition_lo, partition_hi};
-        if (UTF_CompilationTracing) {
-            llvm::errs() << "URC::subrangePartitioning: partition " << i << ": " << partitions[i].hex_string() << ")\n";
-        }
-        partition_lo = partition_hi + 1;
-    }
-
     Basis_Set basis = RangeBasis(enclosing.range, pb);
     cc::Parabix_CC_Compiler_Builder rangeCompiler(basis);
     std::vector<EnclosingInfo> partitionInfo;
