@@ -252,8 +252,11 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
             for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
                 const auto streamSet = target(output, mBufferGraph);
-                const BufferNode & bn = mBufferGraph[streamSet];
+                if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
+                    continue;
+                }
 
+                const BufferNode & bn = mBufferGraph[streamSet];
                 if (bn.isThreadLocal()) {
                     // determine the number of bytes this streamset requires per *root kernel* stride
                     const BufferPort & producerRate = mBufferGraph[output];
@@ -352,8 +355,13 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
 
     // update threadlocal status of sources for truncated buffers
 
+    if (LLVM_UNLIKELY(FirstStreamSet == PipelineOutput)) {
+        assert (LastStreamSet == PipelineOutput);
+        return;
+    }
+
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        BufferNode & bn = mBufferGraph[streamSet];
+        const BufferNode & bn = mBufferGraph[streamSet];
         if (LLVM_UNLIKELY(bn.isTruncated())) {
             mNonThreadLocalStreamSets.insert(streamSet);
             unsigned srcStreamSet = 0;
@@ -367,7 +375,7 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
             }
             assert (srcStreamSet);
             const BufferNode & bn = mBufferGraph[srcStreamSet];
-            if (LLVM_UNLIKELY(bn.isConstant())) {
+            if (LLVM_UNLIKELY(bn.isConstant() || bn.hasZeroElementsOrWidth())) {
                 continue;
             }
 
@@ -380,6 +388,54 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
                     mNonThreadLocalStreamSets.insert(srcStreamSet);
                     break;
                 }
+            }
+        }
+
+        if (LLVM_UNLIKELY(bn.isConstant() || bn.hasZeroElementsOrWidth())) {
+            continue;
+        }
+
+        const auto producer = parent(streamSet, mBufferGraph);
+        const auto partId = KernelPartitionId[producer];
+
+        for (const auto input : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
+            const auto consumer = target(input, mBufferGraph);
+            if (partId != KernelPartitionId[consumer]) {
+                mNonThreadLocalStreamSets.insert(streamSet);
+                break;
+            }
+        }
+    }
+
+    if (num_edges(InOutStreamSetReplacement) > 0) {
+        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+            if (LLVM_UNLIKELY(out_degree(streamSet, InOutStreamSetReplacement) >0 && in_degree(streamSet, InOutStreamSetReplacement) == 0)) {
+                auto toCheck = streamSet;
+                bool isNonThreadLocal = false;
+                for (;;) {
+                    assert (FirstStreamSet <= toCheck && toCheck <= LastStreamSet);
+                    if (mNonThreadLocalStreamSets.count(toCheck)) {
+                        isNonThreadLocal = true;
+                        break;
+                    }
+                    if (out_degree(toCheck, InOutStreamSetReplacement) == 0) {
+                        break;
+                    }
+                    toCheck = child(toCheck, InOutStreamSetReplacement);
+                }
+
+                if (isNonThreadLocal) {
+                    auto toUpdate = streamSet;
+                    for (;;) {
+                        assert (FirstStreamSet <= toUpdate && toUpdate <= LastStreamSet);
+                        mNonThreadLocalStreamSets.insert(toUpdate);
+                        if (out_degree(toUpdate, InOutStreamSetReplacement) == 0) {
+                            break;
+                        }
+                        toUpdate = child(toUpdate, InOutStreamSetReplacement);
+                    }
+                }
+
             }
         }
     }
@@ -439,6 +495,7 @@ void PipelineAnalysis::updateInterPartitionThreadLocalBuffers() {
         }
 
     }
+
 }
 
 

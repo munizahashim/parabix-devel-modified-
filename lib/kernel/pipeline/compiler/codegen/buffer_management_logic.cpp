@@ -12,7 +12,12 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isTruncated())) continue;
+        if (LLVM_UNLIKELY(bn.isTruncated())) {
+            continue;
+        }
+        if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
+            continue;
+        }
 
         const BufferPort & rd = mBufferGraph[e];
         const auto prefix = makeBufferName(kernelId, rd.Port);
@@ -86,6 +91,9 @@ void PipelineCompiler::loadInternalStreamSetHandles(KernelBuilder & b, const boo
     }
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
+            continue;
+        }
         const BufferNode & bn = mBufferGraph[streamSet];
         if (LLVM_UNLIKELY(bn.isTruncated())) continue;
         // external buffers already have a buffer handle
@@ -181,6 +189,9 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const exp
 
     // and allocate any output buffers
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
+            continue;
+        }
         const BufferNode & bn = mBufferGraph[streamSet];
         if (LLVM_UNLIKELY(bn.isTruncated() || bn.hasZeroElementsOrWidth())) continue;
         if (bn.isNonThreadLocal() == nonLocal && bn.isOwned()) {
@@ -243,6 +254,9 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const exp
 void PipelineCompiler::releaseOwnedBuffers(KernelBuilder & b) {
     loadInternalStreamSetHandles(b, true);
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
+            continue;
+        }
         const BufferNode & bn = mBufferGraph[streamSet];
         if (LLVM_LIKELY(bn.isDeallocatable())) {
             StreamSetBuffer * const buffer = bn.Buffer;
@@ -258,6 +272,9 @@ void PipelineCompiler::releaseOwnedBuffers(KernelBuilder & b) {
 void PipelineCompiler::freePendingFreeableDynamicBuffers(KernelBuilder & b) {
     if (LLVM_LIKELY(isMultithreaded())) {
         for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+            if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
+                continue;
+            }
             const BufferNode & bn = mBufferGraph[streamSet];
             if (LLVM_LIKELY(bn.isDeallocatable())) {
                 StreamSetBuffer * const buffer = bn.Buffer;
@@ -484,20 +501,40 @@ void PipelineCompiler::readProcessedItemCounts(KernelBuilder & b) {
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
         const auto inputPort = br.Port;
-        const auto prefix = makeBufferName(mKernelId, inputPort);
-        const auto & suffix = (mCurrentKernelIsStateFree) ?
-            STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
 
-        auto prodRef = b.getScalarFieldPtr(prefix + suffix);
-        mProcessedItemCountPtr[inputPort] = prodRef.first;
-        Value * itemCount = b.CreateLoad(prodRef.second, prodRef.first);
-        mInitiallyProcessedItemCount[inputPort] = itemCount;
-        if (br.isDeferred()) {
-            auto defRef = b.getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
-            mProcessedDeferredItemCountPtr[inputPort] = defRef.first;
-            itemCount = b.CreateLoad(defRef.second, defRef.first);
-            mInitiallyProcessedDeferredItemCount[inputPort] = itemCount;
+        if (LLVM_UNLIKELY(br.isRelative())) {
+
+            const auto ref = getReference(br.Port);
+            assert (ref.Type == PortType::Input);
+            Value * itemCount = mInitiallyProcessedItemCount[ref];
+            itemCount = b.CreateMulRational(itemCount, br.getRate().getRate());
+            mInitiallyProcessedItemCount[inputPort] = itemCount;
+            if (br.isDeferred()) {
+                Value * itemCount = mInitiallyProcessedDeferredItemCount[ref];
+                itemCount = b.CreateMulRational(itemCount, br.getRate().getRate());
+                mInitiallyProcessedDeferredItemCount[inputPort] = itemCount;
+            }
+
+        } else {
+
+            const auto prefix = makeBufferName(mKernelId, inputPort);
+            const auto & suffix = (mCurrentKernelIsStateFree) ?
+                STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
+
+            auto prodRef = b.getScalarFieldPtr(prefix + suffix);
+            mProcessedItemCountPtr[inputPort] = prodRef.first;
+            Value * itemCount = b.CreateLoad(prodRef.second, prodRef.first);
+            mInitiallyProcessedItemCount[inputPort] = itemCount;
+            if (br.isDeferred()) {
+                auto defRef = b.getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+                mProcessedDeferredItemCountPtr[inputPort] = defRef.first;
+                itemCount = b.CreateLoad(defRef.second, defRef.first);
+                mInitiallyProcessedDeferredItemCount[inputPort] = itemCount;
+            }
         }
+
+
+
     }
 }
 
@@ -509,21 +546,58 @@ void PipelineCompiler::readProducedItemCounts(KernelBuilder & b) {
 
         const BufferPort & br = mBufferGraph[e];
         const auto outputPort = br.Port;
-        const auto prefix = makeBufferName(mKernelId, outputPort);
-        const auto & suffix = (mCurrentKernelIsStateFree) ?
-            STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
-
-        auto prodRef = b.getScalarFieldPtr(prefix + suffix);
-        mProducedItemCountPtr[outputPort] = prodRef.first;
-        Value * const itemCount = b.CreateLoad(prodRef.second, prodRef.first);
         const auto streamSet = target(e, mBufferGraph);
-        mInitiallyProducedItemCount[streamSet] = itemCount;
-        if (br.isDeferred()) {
-            auto defRef = b.getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
-            mProducedDeferredItemCountPtr[outputPort] = defRef.first;
-            Value * const itemCount = b.CreateLoad(defRef.second, defRef.first);
-            mInitiallyProducedDeferredItemCount[streamSet] = itemCount;
+
+        if (LLVM_UNLIKELY(br.isRelative())) {
+
+            const auto ref = getReference(br.Port);
+
+            if (ref.Type == PortType::Input) {
+                Value * itemCount = mInitiallyProcessedItemCount[ref];
+                itemCount = b.CreateMulRational(itemCount, br.getRate().getRate());
+                mInitiallyProducedItemCount[streamSet] = itemCount;
+                if (br.isDeferred()) {
+                    Value * itemCount = mInitiallyProcessedDeferredItemCount[ref];
+                    itemCount = b.CreateMulRational(itemCount, br.getRate().getRate());
+                    mInitiallyProducedDeferredItemCount[streamSet] = itemCount;
+                }
+            } else {
+                const auto refStreamSet = getOutputBufferVertex(ref);
+                Value * itemCount = mInitiallyProducedItemCount[refStreamSet];
+                itemCount = b.CreateMulRational(itemCount, br.getRate().getRate());
+                mInitiallyProducedItemCount[streamSet] = itemCount;
+                if (br.isDeferred()) {
+                    Value * itemCount = mInitiallyProducedDeferredItemCount[refStreamSet];
+                    itemCount = b.CreateMulRational(itemCount, br.getRate().getRate());
+                    mInitiallyProducedDeferredItemCount[streamSet] = itemCount;
+                }
+            }
+
+        } else {
+
+            const auto prefix = makeBufferName(mKernelId, outputPort);
+            const auto & suffix = (mCurrentKernelIsStateFree) ?
+                STATE_FREE_INTERNAL_ITEM_COUNT_SUFFIX : ITEM_COUNT_SUFFIX;
+
+            auto prodRef = b.getScalarFieldPtr(prefix + suffix);
+            Value * itemCountPtr = prodRef.first;
+            Value * itemCount = b.CreateLoad(prodRef.second, itemCountPtr);
+
+            mProducedItemCountPtr[outputPort] = itemCountPtr;
+            mInitiallyProducedItemCount[streamSet] = itemCount;
+
+            if (br.isDeferred()) {
+                auto defRef = b.getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
+                Value * itemCountPtr = defRef.first;
+                Value * itemCount = b.CreateLoad(defRef.second, itemCountPtr);
+                mProducedDeferredItemCountPtr[outputPort] = itemCountPtr;
+                mInitiallyProducedDeferredItemCount[streamSet] = itemCount;
+            }
+
         }
+
+
+
     }
 }
 
@@ -534,19 +608,10 @@ void PipelineCompiler::writeUpdatedItemCounts(KernelBuilder & b) {
 
     for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
+        if (LLVM_UNLIKELY(br.isRelative())) {
+           continue;
+        }
         const StreamSetPort inputPort = br.Port;
-//        const Binding & binding = br.Binding;
-
-//        if (br.IsDeferred || isAddressable(binding)) {
-////            if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
-////                continue;
-////            }
-//        } else if (LLVM_UNLIKELY(!isCountable(binding))) {
-//            continue;
-//        }
-
-//        const auto streamSet = source(e, mBufferGraph);
-
         Value * ptr = nullptr;
         if (mCurrentKernelIsStateFree) {
             const auto prefix = makeBufferName(mKernelId, inputPort);
@@ -570,19 +635,10 @@ void PipelineCompiler::writeUpdatedItemCounts(KernelBuilder & b) {
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
+        if (LLVM_UNLIKELY(br.isRelative())) {
+           continue;
+        }
         const StreamSetPort outputPort = br.Port;
-//        const Binding & binding = br.Binding;
-
-//        if (br.IsDeferred || isAddressable(binding)) {
-////            if (LLVM_UNLIKELY(mKernelIsInternallySynchronized)) {
-////                continue;
-////            }
-//        } else if (LLVM_UNLIKELY(!isCountable(binding))) {
-//            continue;
-//        }
-
-//        const auto streamSet = target(e, mBufferGraph);
-
         Value * ptr = nullptr;
         if (mCurrentKernelIsStateFree) {
             const auto prefix = makeBufferName(mKernelId, outputPort);

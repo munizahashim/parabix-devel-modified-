@@ -654,7 +654,6 @@ protected:
     const std::vector<unsigned>                 MinimumNumOfStrides;
     const std::vector<unsigned>                 MaximumNumOfStrides;
     const std::vector<Rational>                 PartitionRootStridesPerThreadLocalPage;
-    const std::vector<Rational>                 NumOfPartitionOverflowVectors;
     const RelationshipGraph                     mStreamGraph;
     const RelationshipGraph                     mScalarGraph;
     const BufferGraph                           mBufferGraph;
@@ -668,6 +667,7 @@ protected:
     const FamilyScalarGraph                     mFamilyScalarGraph;
     const IllustratedStreamSetMap               mIllustratedStreamSetBindings;
     const ZeroInputGraph                        mZeroInputGraph;
+    const InOutGraph                            InOutStreamSetReplacement;
 
     // pipeline state
     bool                                        mIsIOProcessThread = false;
@@ -968,11 +968,9 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , MinimumNumOfStrides(std::move(P.MinimumNumOfStrides))
 , MaximumNumOfStrides(std::move(P.MaximumNumOfStrides))
 , PartitionRootStridesPerThreadLocalPage(std::move(P.PartitionRootStridesPerThreadLocalPage))
-, NumOfPartitionOverflowVectors(std::move(P.NumOfPartialOverflowStridesPerPartitionRootStride))
 , mStreamGraph(std::move(P.mStreamGraph))
 , mScalarGraph(std::move(P.mScalarGraph))
 , mBufferGraph(std::move(P.mBufferGraph))
-
 , PartitionJumpTargetId(std::move(P.PartitionJumpTargetId))
 , mConsumerGraph(std::move(P.mConsumerGraph))
 , mPartialSumStepFactorGraph(std::move(P.mPartialSumStepFactorGraph))
@@ -981,9 +979,9 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mInternallyGeneratedStreamSetGraph(std::move(P.mInternallyGeneratedStreamSetGraph))
 , HasTerminationSignal(std::move(P.HasTerminationSignal))
 , mFamilyScalarGraph(std::move(P.mFamilyScalarGraph))
-
 , mIllustratedStreamSetBindings(std::move(P.mIllustratedStreamSetBindings))
 , mZeroInputGraph(std::move(P.mZeroInputGraph))
+, InOutStreamSetReplacement(std::move(P.InOutStreamSetReplacement))
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mKernelIsClosed(FirstKernel, LastKernel, mAllocator)

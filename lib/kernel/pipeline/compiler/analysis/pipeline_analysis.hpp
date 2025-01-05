@@ -315,9 +315,9 @@ public:
     std::vector<unsigned>           MaximumNumOfStrides;
     std::vector<unsigned>           StrideRepetitionVector;
     std::vector<Rational>           PartitionRootStridesPerThreadLocalPage;
-    std::vector<Rational>           NumOfPartialOverflowStridesPerPartitionRootStride;
 
     BufferGraph                     mBufferGraph;
+    InOutGraph                      InOutStreamSetReplacement;
 
     std::vector<unsigned>           PartitionJumpTargetId;
     RedundantStreamSetMap           RedundantStreamSets;

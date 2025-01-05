@@ -91,7 +91,7 @@ void UntilNkernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * cons
     localIndex->addIncoming(ZERO, strideLoop);
     Value * const blockIndex = b.CreateAdd(baseBlockIndex, localIndex);
     Value * inputValue = b.loadInputStreamBlock("bits", ZERO, blockIndex);
-    b.storeOutputStreamBlock("uptoN", ZERO, blockIndex, inputValue);
+//    b.storeOutputStreamBlock("uptoN", ZERO, blockIndex, inputValue);
     Value * const inputPackValue = b.simd_any(packSize, inputValue);
     Value * iteratorMask = b.CreateZExtOrTrunc(b.hsimd_signmask(packSize, inputPackValue), sizeTy);
     iteratorMask = b.CreateShl(iteratorMask, b.CreateMul(localIndex, PACKS_PER_BLOCK));
@@ -169,12 +169,12 @@ void UntilNkernel::generateMultiBlockLogic(KernelBuilder & b, llvm::Value * cons
     Value * const blockOffset = b.CreateOr(basePosition, packPosition);
     Value * const priorProducedItemCount = b.getProducedItemCount("uptoN");
 
-    if ((mMode == Mode::ZeroAfterN) || (mMode == Mode::TerminateAtN)) {
-        Value * const inputValue2 = b.loadInputStreamBlock("bits", ZERO, blockIndex2);
-        Value * const mask = b.bitblock_mask_to(blockOffset, true);
-        Value * const maskedInputValue = b.CreateAnd(inputValue2, mask, "untilNmasked");
-        b.storeOutputStreamBlock("uptoN", ZERO, blockIndex2, maskedInputValue);
-    }
+//    if ((mMode == Mode::ZeroAfterN) || (mMode == Mode::TerminateAtN)) {
+//        Value * const inputValue2 = b.loadInputStreamBlock("bits", ZERO, blockIndex2);
+//        Value * const mask = b.bitblock_mask_to(blockOffset, true);
+//        Value * const maskedInputValue = b.CreateAnd(inputValue2, mask, "untilNmasked");
+//        b.storeOutputStreamBlock("uptoN", ZERO, blockIndex2, maskedInputValue);
+//    }
 
     const auto log2BlockWidth = floor_log2(b.getBitBlockWidth());
     Value * positionOfNthItem = nullptr;
@@ -230,7 +230,7 @@ UntilNkernel::UntilNkernel(LLVMTypeSystemInterface & ts, Scalar * N, StreamSet *
 }(),
 {Binding{"bits", Markers}},
 // outputs
-{Binding{"uptoN", FirstN}},
+{Binding{"uptoN", FirstN, FixedRate(), InOut("bits")}},
 // input scalar
 {Binding{"N", N}}, {},
 // internal state

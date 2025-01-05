@@ -372,7 +372,9 @@ void PipelineCompiler::checkForSufficientInputData(KernelBuilder & b, const Buff
     // simply have to trust that the root determined the correct number or we'd be forced to have an
     // under/overflow capable of containing an entire segment rather than a single stride.
 
-    Value * const strideLength = calculateStrideLength(b, port, mCurrentProcessedItemCountPhi[port.Port], mStrideStepSize, "hasSufficient");
+    Value * processed = mCurrentProcessedItemCountPhi[port.Port];
+
+    Value * const strideLength = calculateStrideLength(b, port, processed, mStrideStepSize, "hasSufficient");
 
     const auto prefix = makeBufferName(mKernelId, inputPort);
 
@@ -798,7 +800,7 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
 
     const BufferNode & bn = mBufferGraph[streamSet];
 
-    if (bn.isThreadLocal() || bn.isUnowned() || bn.isTruncated() || bn.hasZeroElementsOrWidth()) {
+    if (bn.isThreadLocal() || bn.isUnowned() || bn.isInOutRedirect() || bn.isTruncated() || bn.hasZeroElementsOrWidth()) {
         return;
     }
 
@@ -852,9 +854,28 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
     // we can proceed.
 
     // TODO: can we determine which locks will always dominate another?
-    if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
-        assert (!mIsIOProcessThread);
-        acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+
+    assert (in_degree(streamSet, InOutStreamSetReplacement) == 0);
+
+    if (LLVM_LIKELY(out_degree(streamSet, InOutStreamSetReplacement) == 0)) {
+
+        if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
+            assert (!mIsIOProcessThread);
+            acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
+        }
+
+    } else {
+        auto kernelLock = mKernelId;
+        auto id = streamSet;
+        for (;;) {
+            id = child(id, InOutStreamSetReplacement);
+            if (out_degree(id, InOutStreamSetReplacement) == 0) {
+                break;
+            }
+        }
+        kernelLock = parent(id, mBufferGraph);
+        const auto lockType = mIsStatelessKernel.test(kernelLock) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
+        acquireSynchronizationLockWithTimingInstrumentation(b, kernelLock, lockType, mSegNo);
     }
 
     Value * const produced = mCurrentProducedItemCountPhi[outputPort]; assert (produced);
@@ -1298,7 +1319,8 @@ Value * PipelineCompiler::getInputStrideLength(KernelBuilder & b, const BufferPo
     if (mFirstInputStrideLength[inputPort.Port]) {
         return mFirstInputStrideLength[inputPort.Port];
     } else {
-        Value * const strideLength = calculateStrideLength(b, inputPort, mCurrentProcessedItemCountPhi[inputPort.Port], nullptr, location);
+        Value * processed = mCurrentProcessedItemCountPhi[inputPort.Port];
+        Value * const strideLength = calculateStrideLength(b, inputPort, processed, nullptr, location);
         mFirstInputStrideLength[inputPort.Port] = strideLength;
         return strideLength;
     }
@@ -1308,10 +1330,12 @@ Value * PipelineCompiler::getInputStrideLength(KernelBuilder & b, const BufferPo
  * @brief getOutputStrideLength
  ** ------------------------------------------------------------------------------------------------------------- */
 Value * PipelineCompiler::getOutputStrideLength(KernelBuilder & b, const BufferPort & outputPort, const StringRef location) {
+
     if (mFirstOutputStrideLength[outputPort.Port]) {
         return mFirstOutputStrideLength[outputPort.Port];
     } else {
-        Value * const strideLength = calculateStrideLength(b, outputPort, mCurrentProducedItemCountPhi[outputPort.Port], nullptr, location);
+        Value * produced = mCurrentProducedItemCountPhi[outputPort.Port];
+        Value * const strideLength = calculateStrideLength(b, outputPort, produced, nullptr, location);
         mFirstOutputStrideLength[outputPort.Port] = strideLength;
         return strideLength;
     }
@@ -1655,7 +1679,8 @@ Value * PipelineCompiler::calculateStrideLength(KernelBuilder & b, const BufferP
         const auto refPort = getReference(port.Port);
         const auto refInput = getInput(mKernelId, refPort);
         const BufferPort & ref = mBufferGraph[refInput];
-        Value * const baseRate = calculateStrideLength(b, ref, previouslyTransferred, strideIndex, location);
+        Value * itemCount = b.CreateUDivRational(previouslyTransferred, rate.getRate());
+        Value * const baseRate = calculateStrideLength(b, ref, itemCount, strideIndex, location);
         return b.CreateMulRational(baseRate, rate.getRate());
     }
     llvm_unreachable("unexpected rate type");
@@ -1681,17 +1706,10 @@ Value * PipelineCompiler::calculateNumOfLinearItems(KernelBuilder & b, const Buf
         }
         return getPartialSumItemCount(b, port, priorItemCount, linearStrides, location);
     } else if (rate.isRelative()) {
-        auto getRefPort = [&] () {
-            const auto refPort = getReference(port.Port);
-            if (LLVM_LIKELY(refPort.Type == PortType::Input)) {
-                return getInput(mKernelId, refPort);
-            } else {
-                return getOutput(mKernelId, refPort);
-            }
-        };
-        const BufferPort & ref = mBufferGraph[getRefPort()];
-        Value * const baseCount = calculateNumOfLinearItems(b, ref, linearStrides, location);
-        return b.CreateMulRational(baseCount, rate.getRate());
+        const auto refPort = getReference(port.Port);
+        const auto refInput = getInput(mKernelId, refPort);
+        const BufferPort & ref = mBufferGraph[refInput];
+        return calculateNumOfLinearItems(b, ref, linearStrides, location);
     }
     llvm_unreachable("unexpected rate type");
 }

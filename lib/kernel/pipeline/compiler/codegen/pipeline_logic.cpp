@@ -169,6 +169,10 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
 
     for (const auto e : make_iterator_range(in_edges(kernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
+        // If this is relative, the processed and produced counts can be computed from the original stream
+        if (LLVM_UNLIKELY(br.isRelative())) {
+            continue;
+        }
         const auto prefix = makeBufferName(kernelId, br.Port);
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
         if (LLVM_UNLIKELY(isStateless)) {
@@ -181,6 +185,9 @@ void PipelineCompiler::addInternalKernelProperties(KernelBuilder & b, const unsi
 
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
         const BufferPort & br = mBufferGraph[e];
+        if (LLVM_UNLIKELY(br.isRelative())) {
+            continue;
+        }
         const auto prefix = makeBufferName(kernelId, br.Port);
         mTarget->addInternalScalar(sizeTy, prefix + ITEM_COUNT_SUFFIX, groupId);
         if (LLVM_UNLIKELY(isStateless)) {

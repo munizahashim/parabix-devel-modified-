@@ -174,9 +174,16 @@ Range CC_Set_Range(CC_List ccs) {
 }
 
 void extract_CCs_by_range(Range r, CC_List & ccs, CC_List & in_range) {
-    re::CC * rangeCC = re::makeCC(r.lo, r.hi, &Unicode);
-    for (unsigned i = 0; i < ccs.size(); i++) {
-        in_range[i] = re::intersectCC(ccs[i], rangeCC);
+    if (r.hi < r.lo) {
+        re::CC * const emptySet = re::makeCC(&Unicode);
+        for (unsigned i = 0; i < ccs.size(); i++) {
+            in_range[i] = emptySet;
+        }
+    } else {
+        re::CC * const rangeCC = re::makeCC(r.lo, r.hi, &Unicode);
+        for (unsigned i = 0; i < ccs.size(); i++) {
+            in_range[i] = re::intersectCC(ccs[i], rangeCC);
+        }
     }
 }
 
