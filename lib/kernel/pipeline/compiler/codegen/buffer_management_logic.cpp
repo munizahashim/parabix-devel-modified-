@@ -12,10 +12,7 @@ void PipelineCompiler::addBufferHandlesToPipelineKernel(KernelBuilder & b, const
     for (const auto e : make_iterator_range(out_edges(kernelId, mBufferGraph))) {
         const auto streamSet = target(e, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isTruncated())) {
-            continue;
-        }
-        if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
+        if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect())) {
             continue;
         }
 
@@ -91,11 +88,8 @@ void PipelineCompiler::loadInternalStreamSetHandles(KernelBuilder & b, const boo
     }
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
-            continue;
-        }
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isTruncated())) continue;
+        if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect())) continue;
         // external buffers already have a buffer handle
         StreamSetBuffer * const buffer = bn.Buffer;
         if (bn.isNonThreadLocal() == nonLocal) {
@@ -189,11 +183,8 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const exp
 
     // and allocate any output buffers
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
-            continue;
-        }
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (LLVM_UNLIKELY(bn.isTruncated() || bn.hasZeroElementsOrWidth())) continue;
+        if (LLVM_UNLIKELY(bn.isTruncated() || bn.isInOutRedirect() || bn.hasZeroElementsOrWidth())) continue;
         if (bn.isNonThreadLocal() == nonLocal && bn.isOwned()) {
             StreamSetBuffer * const buffer = bn.Buffer;
 
@@ -254,9 +245,6 @@ void PipelineCompiler::allocateOwnedBuffers(KernelBuilder & b, Value * const exp
 void PipelineCompiler::releaseOwnedBuffers(KernelBuilder & b) {
     loadInternalStreamSetHandles(b, true);
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-        if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
-            continue;
-        }
         const BufferNode & bn = mBufferGraph[streamSet];
         if (LLVM_LIKELY(bn.isDeallocatable())) {
             StreamSetBuffer * const buffer = bn.Buffer;
@@ -272,9 +260,6 @@ void PipelineCompiler::releaseOwnedBuffers(KernelBuilder & b) {
 void PipelineCompiler::freePendingFreeableDynamicBuffers(KernelBuilder & b) {
     if (LLVM_LIKELY(isMultithreaded())) {
         for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
-            if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
-                continue;
-            }
             const BufferNode & bn = mBufferGraph[streamSet];
             if (LLVM_LIKELY(bn.isDeallocatable())) {
                 StreamSetBuffer * const buffer = bn.Buffer;

@@ -855,27 +855,15 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
 
     // TODO: can we determine which locks will always dominate another?
 
-    assert (in_degree(streamSet, InOutStreamSetReplacement) == 0);
-
-    if (LLVM_LIKELY(out_degree(streamSet, InOutStreamSetReplacement) == 0)) {
-
+    if (LLVM_LIKELY(bn.LockId == 0)) {
         if (LLVM_UNLIKELY(mAllowDataParallelExecution)) {
             assert (!mIsIOProcessThread);
             acquireSynchronizationLockWithTimingInstrumentation(b, mKernelId, SYNC_LOCK_POST_INVOCATION, mSegNo);
         }
-
     } else {
-        auto kernelLock = mKernelId;
-        auto id = streamSet;
-        for (;;) {
-            id = child(id, InOutStreamSetReplacement);
-            if (out_degree(id, InOutStreamSetReplacement) == 0) {
-                break;
-            }
-        }
-        kernelLock = parent(id, mBufferGraph);
-        const auto lockType = mIsStatelessKernel.test(kernelLock) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
-        acquireSynchronizationLockWithTimingInstrumentation(b, kernelLock, lockType, mSegNo);
+        assert (bn.LockId > mKernelId);
+        const auto lockType = mIsStatelessKernel.test(bn.LockId) ? SYNC_LOCK_POST_INVOCATION : SYNC_LOCK_FULL;
+        acquireSynchronizationLockWithTimingInstrumentation(b, bn.LockId, lockType, mSegNo);
     }
 
     Value * const produced = mCurrentProducedItemCountPhi[outputPort]; assert (produced);

@@ -110,6 +110,8 @@ public:
 
         P.scanFamilyKernelBindings();
 
+        P.setStreamSetLockIds();
+
         P.gatherInfo();
 
         if (codegen::DebugOptionIsSet(codegen::PrintPipelineGraph)) {
@@ -209,6 +211,8 @@ private:
 
     void addFlowControlAnnotations();
 
+    void setStreamSetLockIds();
+
     // thread local analysis
 
     void determineInitialThreadLocalBufferLayout(KernelBuilder & b, pipeline_random_engine & rng);
@@ -268,6 +272,7 @@ public:
 
     // Debug functions
     void printBufferGraph(KernelBuilder & b, raw_ostream & out) const;
+
     static void printRelationshipGraph(const RelationshipGraph & G, raw_ostream & out, const StringRef name = "G");
 
 public:
@@ -314,7 +319,6 @@ public:
     std::vector<unsigned>           MinimumNumOfStrides;
     std::vector<unsigned>           MaximumNumOfStrides;
     std::vector<unsigned>           StrideRepetitionVector;
-    std::vector<Rational>           PartitionRootStridesPerThreadLocalPage;
 
     BufferGraph                     mBufferGraph;
     InOutGraph                      InOutStreamSetReplacement;

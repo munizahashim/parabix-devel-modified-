@@ -311,6 +311,7 @@ struct BufferNode {
     unsigned PartialSumSpanLength = 0;
 
     unsigned OutputItemCountId = 0;
+    unsigned LockId = 0;
 
 
     bool permitSlidingWindow() const {
@@ -375,7 +376,7 @@ struct BufferNode {
     }
 
     bool isDeallocatable() const {
-        return !(isUnowned() || isThreadLocal() ||isConstant() || isTruncated() || isReturned());
+        return !(isUnowned() || isThreadLocal() ||isConstant() || isTruncated() || isInOutRedirect() || isReturned());
     }
 };
 

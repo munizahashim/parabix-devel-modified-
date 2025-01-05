@@ -914,4 +914,30 @@ void PipelineAnalysis::buildZeroInputGraph() {
     mZeroInputGraph = G;
 }
 
+/** ------------------------------------------------------------------------------------------------------------- *
+ * @brief setStreamSetLockIds
+ ** ------------------------------------------------------------------------------------------------------------- */
+void PipelineAnalysis::setStreamSetLockIds() {
+    for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+        BufferNode & bn = mBufferGraph[streamSet];
+
+        if (bn.isThreadLocal() || bn.isInOutRedirect()) {
+            continue;
+        }
+
+        if (LLVM_UNLIKELY(out_degree(streamSet, InOutStreamSetReplacement) > 0)) {
+            auto id = streamSet;
+            for (;;) {
+                id = child(id, InOutStreamSetReplacement);
+                if (out_degree(id, InOutStreamSetReplacement) == 0) {
+                    break;
+                }
+            }
+            const auto kernelLock = parent(id, mBufferGraph);
+            assert (FirstKernel <= kernelLock && kernelLock <= LastKernel);
+            bn.LockId = kernelLock;
+        }
+    }
+}
+
 }
