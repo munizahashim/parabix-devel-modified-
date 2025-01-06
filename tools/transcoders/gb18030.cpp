@@ -345,7 +345,7 @@ GB_18030_DoubleByteRangeKernel::GB_18030_DoubleByteRangeKernel
               // input
 {Binding{"GB_2byte", GB_2byte}, Binding{"gb15_index", gb15_index}, Binding{"u16_in", u16_in}},
               // output
-{Binding{"u16_out", u16_out}}), mRangeBase(rangeBase), mRangeBits(rangeBits) {
+{Binding{"u16_out", u16_out, FixedRate(), InOut("u16_in")}}), mRangeBase(rangeBase), mRangeBits(rangeBits) {
 }
 
 void GB_18030_DoubleByteRangeKernel::generatePabloMethod() {

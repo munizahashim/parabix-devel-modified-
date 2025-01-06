@@ -213,7 +213,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
 
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const BufferNode & bn = mBufferGraph[streamSet];
-        if (bn.isThreadLocal()) {
+        if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
             mapping[streamSet - FirstStreamSet] = numOfThreadLocalStreamSets;
             ++numOfThreadLocalStreamSets;
         }
@@ -330,20 +330,43 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
     // Can we quantify it based on the buffer graph order? Currently, we just take
     // the first one.
     const auto intervals = BA.getIntervals(O, rng);
+
+    bool hasThreadLocalInOut = false;
+
     for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
         const auto i = streamSet - FirstStreamSet;
         BufferNode & bn = mBufferGraph[streamSet];
         if (bn.isThreadLocal()) {
-            const auto j = mapping[i];
-            const auto & interval = intervals[j];
-            bn.BufferStart = interval.lower();
-            assert ((bn.BufferStart % pageSize) == 0);
-            bn.BufferEnd = interval.upper();
-            assert ((bn.BufferEnd % pageSize) == 0);
-            assert (bn.BufferEnd <= requiredMemory);
+            if (LLVM_UNLIKELY(bn.isInOutRedirect())) {
+                hasThreadLocalInOut = true;
+            } else {
+                const auto j = mapping[i];
+                const auto & interval = intervals[j];
+                bn.BufferStart = interval.lower();
+                assert ((bn.BufferStart % pageSize) == 0);
+                bn.BufferEnd = interval.upper();
+                assert ((bn.BufferEnd % pageSize) == 0);
+                assert (bn.BufferEnd <= requiredMemory);
+            }
 
         }
     }
+    if (LLVM_UNLIKELY(hasThreadLocalInOut)) {
+        for (auto streamSet = FirstStreamSet; streamSet <= LastStreamSet; ++streamSet) {
+            BufferNode & bn = mBufferGraph[streamSet];
+            assert (bn.isInOutRedirect() ^ (in_degree(streamSet, InOutStreamSetReplacement) == 0));
+            if (LLVM_UNLIKELY(bn.isThreadLocal() && bn.isInOutRedirect())) {
+                auto src = streamSet;
+                do {
+                    src = parent(src, InOutStreamSetReplacement);
+                } while (in_degree(src, InOutStreamSetReplacement) != 0);
+                const BufferNode & bs = mBufferGraph[src];
+                bn.BufferStart = bs.BufferStart;
+                bn.BufferEnd = bs.BufferEnd;
+            }
+        }
+    }
+
     RequiredThreadLocalStreamSetMemory = requiredMemory;
 
 }
