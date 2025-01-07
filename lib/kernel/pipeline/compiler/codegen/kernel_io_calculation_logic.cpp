@@ -1030,6 +1030,11 @@ Value * PipelineCompiler::getWritableOutputItems(KernelBuilder & b, const Buffer
         const auto id = getTruncatedStreamSetSourceId(streamSet);
         Value * const avail = mLocallyAvailableItems[id];
         writable = b.CreateSaturatingSub(avail, produced);
+    } else if (LLVM_UNLIKELY(bn.isInOutRedirect())) {
+        const auto src = parent(streamSet, InOutStreamSetReplacement);
+        assert (FirstStreamSet <= src && src <= LastStreamSet);
+        Value * const avail = mLocallyAvailableItems[src];
+        writable = b.CreateSaturatingSub(avail, produced);
     } else {
 
         Value * const consumed = readConsumedItemCount(b, streamSet); assert (consumed);

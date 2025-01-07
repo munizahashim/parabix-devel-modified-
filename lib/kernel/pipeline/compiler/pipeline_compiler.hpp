@@ -666,6 +666,7 @@ protected:
     const FamilyScalarGraph                     mFamilyScalarGraph;
     const IllustratedStreamSetMap               mIllustratedStreamSetBindings;
     const ZeroInputGraph                        mZeroInputGraph;
+    const InOutGraph                            InOutStreamSetReplacement;
 
     // pipeline state
     bool                                        mIsIOProcessThread = false;
@@ -977,6 +978,7 @@ inline PipelineCompiler::PipelineCompiler(PipelineKernel * const pipelineKernel,
 , mFamilyScalarGraph(std::move(P.mFamilyScalarGraph))
 , mIllustratedStreamSetBindings(std::move(P.mIllustratedStreamSetBindings))
 , mZeroInputGraph(std::move(P.mZeroInputGraph))
+, InOutStreamSetReplacement(std::move(P.InOutStreamSetReplacement))
 
 , mInitiallyAvailableItemsPhi(FirstStreamSet, LastStreamSet, mAllocator)
 , mKernelIsClosed(FirstKernel, LastKernel, mAllocator)

@@ -582,14 +582,13 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
     #ifndef TEST_ALL_KERNEL_INPUTS
     auto currentPartitionId = -1U;
     #endif
-//    flat_set<unsigned> fixedPartitionInputs;
+
     for (auto kernel = FirstKernel; kernel <= LastKernel; ++kernel) {
         #ifndef TEST_ALL_KERNEL_INPUTS
         const auto partitionId = KernelPartitionId[kernel];
         const bool isPartitionRoot = (partitionId != currentPartitionId);
         currentPartitionId = partitionId;
         #endif
-//        assert (fixedPartitionInputs.empty());
         for (const auto e : make_iterator_range(in_edges(kernel, mBufferGraph))) {
             BufferPort & inputRate = mBufferGraph[e];
             #ifdef TEST_ALL_KERNEL_INPUTS
@@ -602,12 +601,46 @@ void PipelineAnalysis::identifyPortsThatModifySegmentLength() {
             }
             #endif
         }
-        for (const auto e : make_iterator_range(out_edges(kernel, mBufferGraph))) {
-            BufferPort & outputRate = mBufferGraph[e];
-            const auto streamSet = target(e, mBufferGraph);
+        for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+            BufferPort & outputRate = mBufferGraph[output];
+            const auto streamSet = target(output, mBufferGraph);
             const BufferNode & N = mBufferGraph[streamSet];
+
             if (N.isUnowned()) {
                 outputRate.Flags |= BufferPortType::CanModifySegmentLength;
+            } else if (LLVM_UNLIKELY(in_degree(streamSet, InOutStreamSetReplacement) != 0)) {
+                const auto srcStreamSet = parent(streamSet, InOutStreamSetReplacement);
+                bool canModifyLength = false;
+                for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+                    if (source(input, mBufferGraph) == srcStreamSet) {
+                        const BufferPort & inputRate = mBufferGraph[input];
+                        const ProcessingRate & I = inputRate.getRate();
+                        const ProcessingRate & O = outputRate.getRate();
+                        if (O.isFixed()) {
+                            if (LLVM_LIKELY(I.isFixed() && I.getRate() == O.getRate())) {
+                                continue;
+                            }
+                        } else if (O.isRelative()) {
+                            if (LLVM_LIKELY(O.getRate() == Rational{1})) {
+                                const auto ref = getReference(kernel, outputRate.Port);
+                                if (LLVM_LIKELY(ref == inputRate.Port)) {
+                                    continue;
+                                }
+                            }
+                        } else if (O.isPartialSum()) {
+                            if (I.isPartialSum()) {
+                                if (LLVM_LIKELY(getReference(kernel, inputRate.Port) == getReference(kernel, outputRate.Port))) {
+                                    continue;
+                                }
+                            }
+                        }
+                        canModifyLength = true;
+                        break;
+                    }
+                }
+                if (canModifyLength) {
+                    outputRate.Flags |= BufferPortType::CanModifySegmentLength;
+                }
             }
         }
 
