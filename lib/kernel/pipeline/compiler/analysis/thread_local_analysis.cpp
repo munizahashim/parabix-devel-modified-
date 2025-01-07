@@ -257,7 +257,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                 }
 
                 const BufferNode & bn = mBufferGraph[streamSet];
-                if (bn.isThreadLocal()) {
+                if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
                     // determine the number of bytes this streamset requires per *root kernel* stride
                     const BufferPort & producerRate = mBufferGraph[output];
                     const Binding & outputRate = producerRate.Binding;
@@ -298,7 +298,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                 for (const auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
                     const auto streamSet = target(output, mBufferGraph);
                     const BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal()) {
+                    if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
                         const auto j = mapping[streamSet - FirstStreamSet];
                         assert (j != -1U);
                         assert (remaining[j] > 0);
@@ -308,7 +308,7 @@ void PipelineAnalysis::determineInitialThreadLocalBufferLayout(KernelBuilder & b
                 for (const auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
                     const auto streamSet = source(input, mBufferGraph);
                     const BufferNode & bn = mBufferGraph[streamSet];
-                    if (bn.isThreadLocal()) {
+                    if (bn.isThreadLocal() && !bn.isInOutRedirect()) {
                         const auto j = mapping[streamSet - FirstStreamSet];
                         assert (j != -1U);
                         assert (remaining[j] > 0);
