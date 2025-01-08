@@ -416,10 +416,7 @@ namespace audio
         
         AmplifiedStreams[bitsPerSample-1] = inputStreams[bitsPerSample-1];
 
-        Var * result = getOutputStreamVar("outputStreams");
-        for (unsigned i = 0; i < bitsPerSample; i++) {
-            pb.createAssign(pb.createExtract(result, pb.getInteger(i)), AmplifiedStreams[i]);
-        }
+        writeOutputStreamSet("outputStreams", AmplifiedStreams);
     }
 
     Stereo2MonoPabloKernel::Stereo2MonoPabloKernel(LLVMTypeSystemInterface &b, StreamSet *const firstInputStreams, StreamSet *const secondInputStreams, StreamSet *const outputStreams)
