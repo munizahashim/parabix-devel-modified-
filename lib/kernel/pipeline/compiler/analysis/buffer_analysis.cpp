@@ -147,35 +147,37 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                         bn.RequiredCapacity = std::max(bn.RequiredCapacity, 1U);
                         break;
                     case AttrId::InOut:
-                        if (LLVM_UNLIKELY(port.Type == PortType::Input)) {
-                            SmallVector<char, 256> tmp;
-                            raw_svector_ostream msg(tmp);
-                            msg << "InOut attribute on " << kernelObj->getName() << "." << bindingNode.Binding.get().getName()
-                                << " may only be applied to an output binding.";
-                            report_fatal_error(msg.str());
-                        } else {
-                            const auto & inputs = kernelObj->getInputStreamSetBindings();
-                            for (unsigned j = 0; j < inputs.size(); ++j) {
-                                if (attr.label().equals(inputs[j].getName())) {
-                                    for (auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
-                                        const BufferPort & refPort = mBufferGraph[input];
-                                        if (refPort.Port.Number == j) {
-                                            const auto refStreamSet = source(input, mBufferGraph);
-                                            assert (FirstStreamSet <= refStreamSet && refStreamSet < streamSet);
-                                            if (LLVM_UNLIKELY(out_degree(refStreamSet, InOutStreamSetReplacement) != 0)) {
-                                                SmallVector<char, 256> tmp;
-                                                raw_svector_ostream msg(tmp);
-                                                msg << "InOut attribute on " << kernelObj->getName() << "." << bindingNode.Binding.get().getName()
-                                                    << " may not be applied to the same streamset more than once.";
-                                                report_fatal_error(msg.str());
+                        if (LLVM_LIKELY(!codegen::DebugOptionIsSet(codegen::DisableInOutAttributes))) {
+                            if (LLVM_UNLIKELY(port.Type == PortType::Input)) {
+                                SmallVector<char, 256> tmp;
+                                raw_svector_ostream msg(tmp);
+                                msg << "InOut attribute on " << kernelObj->getName() << "." << bindingNode.Binding.get().getName()
+                                    << " may only be applied to an output binding.";
+                                report_fatal_error(msg.str());
+                            } else {
+                                const auto & inputs = kernelObj->getInputStreamSetBindings();
+                                for (unsigned j = 0; j < inputs.size(); ++j) {
+                                    if (attr.label().equals(inputs[j].getName())) {
+                                        for (auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+                                            const BufferPort & refPort = mBufferGraph[input];
+                                            if (refPort.Port.Number == j) {
+                                                const auto refStreamSet = source(input, mBufferGraph);
+                                                assert (FirstStreamSet <= refStreamSet && refStreamSet < streamSet);
+                                                if (LLVM_UNLIKELY(out_degree(refStreamSet, InOutStreamSetReplacement) != 0)) {
+                                                    SmallVector<char, 256> tmp;
+                                                    raw_svector_ostream msg(tmp);
+                                                    msg << "InOut attribute on " << kernelObj->getName() << "." << bindingNode.Binding.get().getName()
+                                                        << " may not be applied to the same streamset more than once.";
+                                                    report_fatal_error(msg.str());
+                                                }
+                                                add_edge(refStreamSet, streamSet, InOutStreamSetReplacement);
+                                                bp.Flags |= (refPort.Flags & BufferPortType::IsDeferred);
+                                                bn.Type |= BufferType::InOutRedirect;
+                                                break;
                                             }
-                                            add_edge(refStreamSet, streamSet, InOutStreamSetReplacement);
-                                            bp.Flags |= (refPort.Flags & BufferPortType::IsDeferred);
-                                            bn.Type |= BufferType::InOutRedirect;
-                                            break;
                                         }
+                                        break;
                                     }
-                                    break;
                                 }
                             }
                         }

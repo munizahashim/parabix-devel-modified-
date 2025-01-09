@@ -276,6 +276,8 @@ struct RelationshipGraphBuilder {
      ** ------------------------------------------------------------------------------------------------------------- */
     void mapInOutStreamSets(KernelVertexVec & kernelList) {
 
+
+        assert (!codegen::DebugOptionIsSet(codegen::DisableInOutAttributes));
         assert (kernelList.size() == mKernels.size());
 
         const auto n = kernelList.size();
@@ -954,7 +956,9 @@ struct RelationshipGraphBuilder {
         const Kernel * const K = mKernels[i].Object;
         B.addConsumerStreamSets(PortType::Input, vertex[i], K->getInputStreamSetBindings(), false);
     }
-    B.mapInOutStreamSets(vertex);
+    if (LLVM_LIKELY(!codegen::DebugOptionIsSet(codegen::DisableInOutAttributes))) {
+        B.mapInOutStreamSets(vertex);
+    }
     for (unsigned i = 0; i < n; ++i) {
         const Kernel * const K = mKernels[i].Object;
         B.addReferenceRelationships(PortType::Input, vertex[i], K->getInputStreamSetBindings());
