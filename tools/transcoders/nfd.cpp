@@ -345,14 +345,8 @@ void Hangul_VT_Indices::generatePabloMethod() {
         nested.createAssign(T_indexVar[i], T_index[i]);
     }
     //
-    Var * V_out = getOutputStreamVar("V_index");
-    for (unsigned i = 0; i < 5; i++) {
-        pb.createAssign(pb.createExtract(V_out, pb.getInteger(i)), V_indexVar[i]);
-    }
-    Var * T_out = getOutputStreamVar("T_index");
-    for (unsigned i = 0; i < 5; i++) {
-        pb.createAssign(pb.createExtract(T_out, pb.getInteger(i)), T_indexVar[i]);
-    }
+    writeOutputStreamSet("V_index", V_indexVar);
+    writeOutputStreamSet("T_index", T_indexVar);
 }
 
 class Hangul_NFD : public pablo::PabloKernel {
@@ -418,10 +412,7 @@ void Hangul_NFD::generatePabloMethod() {
         bit = nested.createSel(T_position, TPart[i], bit);
         nested.createAssign(basisVar[i], bit);
     }
-    Var * NFD_Basis_Var = getOutputStreamVar("NFD_Basis");
-    for (unsigned i = 0; i < 21; i++) {
-        pb.createAssign(pb.createExtract(NFD_Basis_Var, pb.getInteger(i)), basisVar[i]);
-    }
+    writeOutputStreamSet("NFD_Basis", basisVar);
 }
 
 
