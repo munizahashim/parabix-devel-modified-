@@ -122,6 +122,8 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
         outerProcessedPhis.resize(indeg);
         outerProcessedDeferredPhis.resize(indeg);
 
+        bool hasRelativeInput = false;
+
         for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & br = mBufferGraph[e];
             PHINode * const phi = b.CreatePHI(sizeTy, 2);
@@ -398,14 +400,13 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
 
     auto addItemCountArg = [&](const BufferPort & port,
                                const bool forceAddressability,
-                               Value * const itemCount) {
-        const Binding & binding = port.Binding;
-        const ProcessingRate & rate = binding.getRate();
+                               Value * const itemCount) -> Value * {
 
-        Value * ptr = nullptr;
-        if (LLVM_UNLIKELY(rate.isRelative())) {
-            return ptr;
+        if (LLVM_UNLIKELY(port.isRelative())) {
+            return nullptr;
         }
+        const Binding & binding = port.Binding;
+        Value * ptr = nullptr;
         if (forceAddressability || isAddressable(binding)) {
             if (LLVM_UNLIKELY(numOfAddressableItemCount == mAddressableItemCountPtr.size())) {
                 auto aic = b.CreateAllocaAtEntryPoint(b.getSizeTy());
@@ -457,18 +458,21 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
         const StreamSetPort inputPort{PortType::Input, i};
         const auto port = getInput(mKernelId, inputPort);
         const BufferPort & rt = mBufferGraph[port];
+
         assert (rt.Port.Number == inputPort.Number);
         if (LLVM_LIKELY(rt.Port.Reason == ReasonType::Explicit)) {
             Value * processed = nullptr;
+
             if (rt.isDeferred()) {
-                processed = mCurrentProcessedDeferredItemCountPhi[inputPort];
+                processed = mCurrentProcessedDeferredItemCountPhi[rt.Port];
             } else {
-                processed = mCurrentProcessedItemCountPhi[inputPort];
+                processed = mCurrentProcessedItemCountPhi[rt.Port];
             }
             assert (processed);
 
             Value * const addr = mInputVirtualBaseAddressPhi[inputPort]; assert (addr);
             #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, makeBufferName(mKernelId, inputPort) + "_processed = %" PRIu64, processed);
             debugPrint(b, makeBufferName(mKernelId, inputPort) + "_addr = %" PRIx64, addr);
             #endif
             addNextArg(b.CreatePointerCast(addr, voidPtrTy));
@@ -509,7 +513,14 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
         const auto streamSet = target(port, mBufferGraph);
         const BufferNode & bn = mBufferGraph[streamSet];
         const StreamSetBuffer * const buffer = bn.Buffer;
-        Value * produced = mCurrentProducedItemCountPhi[rt.Port];
+
+        Value * produced = nullptr;
+        if (rt.isDeferred()) {
+            produced = mCurrentProducedDeferredItemCountPhi[rt.Port];
+        } else {
+            produced = mCurrentProducedItemCountPhi[rt.Port];
+        }
+        assert (produced);
 
         if (LLVM_UNLIKELY(rt.isShared())) {
             addNextArg(b.CreatePointerCast(buffer->getHandle(), voidPtrTy));
@@ -522,13 +533,16 @@ void PipelineCompiler::buildKernelCallArgumentList(KernelBuilder & b, ArgVec & a
             ptr = b.CreatePointerCast(ptr, buffer->getPointerType()->getPointerTo());
             b.CreateStore(buffer->getBaseAddress(b), ptr);
             #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_produced = %" PRIu64, produced);
             debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_ba = %" PRIx64, buffer->getBaseAddress(b));
             #endif
             addNextArg(b.CreatePointerCast(ptr, voidPtrPtrTy));
             mReturnedOutputVirtualBaseAddressPtr[rt.Port] = ptr;
         } else {
+
             Value * const vba = getVirtualBaseAddress(b, rt, bn, produced, bn.isNonThreadLocal(), true);
             #ifdef PRINT_DEBUG_MESSAGES
+            debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_produced = %" PRIu64, produced);
             debugPrint(b, makeBufferName(mKernelId, rt.Port) + "_vba = %" PRIx64, vba);
             #endif
             addNextArg(b.CreatePointerCast(vba, voidPtrTy));
@@ -687,19 +701,24 @@ void PipelineCompiler::updateProcessedAndProducedItemCounts(KernelBuilder & b) {
             assert (mReturnedProducedItemCountPtr[outputPort]);
             produced = b.CreateLoad(b.getSizeTy(), mReturnedProducedItemCountPtr[outputPort]);
         } else if (rate.isRelative()) {
-            auto getRefPort = [&] () {
-                const auto refPort = getReference(outputPort);
-                if (LLVM_LIKELY(refPort.Type == PortType::Input)) {
-                    return getInput(mKernelId, refPort);
-                } else {
-                    return getOutput(mKernelId, refPort);
+            const auto refPort = getReference(outputPort);
+            Value * itemCount = nullptr;
+            Value * deferredItemCount = nullptr;
+            if (LLVM_LIKELY(refPort.Type == PortType::Input)) {
+                itemCount = mProcessedItemCount[refPort];
+                if (mProcessedDeferredItemCount[refPort]) {
+                    deferredItemCount = mProcessedDeferredItemCount[refPort];
                 }
-            };
-            const BufferPort & ref = mBufferGraph[getRefPort()];
-            if (mProducedDeferredItemCount[ref.Port]) {
-                mProducedDeferredItemCount[outputPort] = b.CreateMulRational(mProducedDeferredItemCount[ref.Port], rate.getRate());
+            } else {
+                itemCount = mProducedItemCount[refPort];
+                if (mProducedDeferredItemCount[refPort]) {
+                    deferredItemCount = mProducedDeferredItemCount[refPort];
+                }
             }
-            produced = b.CreateMulRational(mProducedItemCount[ref.Port], rate.getRate());
+            if (deferredItemCount) {
+                mProducedDeferredItemCount[outputPort] = b.CreateMulRational(deferredItemCount, rate.getRate());
+            }
+            produced = b.CreateMulRational(itemCount, rate.getRate());
         } else {
             SmallVector<char, 256> tmp;
             raw_svector_ostream out(tmp);

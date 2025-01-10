@@ -1515,6 +1515,9 @@ std::string Kernel::getFamilyName() const {
     if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::DisableCacheAlignedKernelStructs))) {
         buffer << "_DCacheAlign";
     }
+    if (LLVM_UNLIKELY(codegen::DebugOptionIsSet(codegen::DisableInOutAttributes))) {
+        buffer << "_NoIOAttr";
+    }
     if (LLVM_UNLIKELY(codegen::FreeCallBisectLimit >= 0)) {
         buffer << "_FreeLimit";
     }
