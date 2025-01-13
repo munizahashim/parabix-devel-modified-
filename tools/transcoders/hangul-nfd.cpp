@@ -1,6 +1,6 @@
 /*
- *  Copyright (c) 2022 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
 
 #include <fcntl.h>
@@ -56,6 +56,11 @@ const unsigned Hangul_TCount = 28;
 const unsigned Hangul_NCount = 588;
 const unsigned Hangul_SCount = 11172;
 
+const unsigned S_Index_bits = 14;
+const unsigned L_Index_bits = 5;
+const unsigned V_Index_bits = 5;
+const unsigned T_Index_bits = 5;
+
 std::vector<re::CC *> NFD_Hangul_LV_LVT_CCs() {
     UCD::codepoint_t Max_Hangul_Precomposed = Hangul_SBase + Hangul_SCount - 1;
     UCD::UnicodeSet Hangul_Precomposed(Hangul_SBase, Max_Hangul_Precomposed);
@@ -68,50 +73,6 @@ std::vector<re::CC *> NFD_Hangul_LV_LVT_CCs() {
     return {re::makeCC(Hangul_Precomposed_LV, &cc::Unicode),
             re::makeCC(Hangul_Precomposed_LVT, &cc::Unicode)};
 }
-
-const unsigned S_Index_bits = 14;
-const unsigned L_Index_bits = 5;
-const unsigned V_Index_bits = 5;
-const unsigned T_Index_bits = 5;
-
-class Hangul_Precomposed : public pablo::PabloKernel {
-public:
-    Hangul_Precomposed(LLVMTypeSystemInterface & ts, StreamSet * U21_Basis, StreamSet * LV_LVT);
-protected:
-    void generatePabloMethod() override;
-};
-
-Hangul_Precomposed::Hangul_Precomposed (LLVMTypeSystemInterface & ts, StreamSet * U21_Basis, StreamSet * LV_LVT)
-: PabloKernel(ts, "Hangul::Hangul_Precomposed_21x1",
-// inputs
-{Binding{"basis", U21_Basis}},
-// output
-{Binding{"LV_LVT", LV_LVT}}) {
-}
-
-void Hangul_Precomposed::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    std::vector<PabloAST *> basis = getInputStreamSet("basis");
-    std::vector<Var *> LV_LVT_Var(2);
-    for (unsigned i = 0; i < LV_LVT_Var.size(); i++) {
-        LV_LVT_Var[i] = pb.createVar("LV_LVT_var" + std::to_string(i), pb.createZeroes());
-    }
-    BixNumCompiler bnc0(pb);
-    PabloAST * Hangul_precomposed = pb.createAnd(bnc0.UGE(basis, Hangul_SBase), bnc0.ULT(basis, Hangul_SBase + Hangul_SCount));
-    auto nested = pb.createScope();
-    pb.createIf(Hangul_precomposed, nested);
-    BixNumCompiler bnc(nested);
-    BixNum S_Index = bnc.SubModular(basis, Hangul_SBase);
-    S_Index = bnc.Truncate(S_Index, S_Index_bits);
-    BixNum LV_index;
-    BixNum T_index;
-    bnc.Div(S_Index, Hangul_TCount, LV_index, T_index);
-    PabloAST * T0 = bnc.EQ(T_index, 0);
-    nested.createAssign(LV_LVT_Var[0], nested.createAnd(Hangul_precomposed, T0));
-    nested.createAssign(LV_LVT_Var[1], nested.createAnd(Hangul_precomposed, nested.createNot(T0)));
-    writeOutputStreamSet("LV_LVT", LV_LVT_Var);
-}
-
 
 class LVT_Indexes : public pablo::PabloKernel {
 public:
@@ -260,61 +221,86 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<ReadSourceKernel>(fileDescriptor, ByteStream);
     SHOW_BYTES(ByteStream);
 
+    //  The Parabix basis bits representation is created by the Parabix S2P kernel.
+    //  S2P stands for serial-to-parallel.
     StreamSet * BasisBits = P.CreateStreamSet(8, 1);
     P.CreateKernelCall<S2PKernel>(ByteStream, BasisBits);
     SHOW_BIXNUM(BasisBits);
 
+    //  The u8index stream marks the final byte of each UTF-8 character sequence.
     StreamSet * u8index = P.CreateStreamSet(1, 1);
     P.CreateKernelCall<UTF8_index>(BasisBits, u8index);
     SHOW_STREAM(u8index);
 
+    //  To make Unicode calculations simpler, we will construct a stream set of
+    //  all 21 Unicode bits.   As a first step we calculate these bits at
+    //  the u8index positions.
     StreamSet * U21_u8indexed = P.CreateStreamSet(21, 1);
     P.CreateKernelCall<UTF8_Decoder>(BasisBits, U21_u8indexed);
 
+    //  Now we construct a compressed stream set which is one-to-one with
+    //  Unicode characters, by filtering out non u8index positions.
     StreamSet * U21 = P.CreateStreamSet(21, 1);
     FilterByMask(P, u8index, U21_u8indexed, U21);
     SHOW_BIXNUM(U21);
 
+    //  Hangul precomposed characters are of two types, LV and LVT, which
+    //  decompose respectively into <L, V> and <L, V, T> sequences.
+    //  We determine a 2-bit bixnum having the value 1 at LV positions and
+    //  2 at LVT positions, in order to identify the number of additional
+    //  positions that are needed in creating the decomposed representations.
     auto LV_LVT_ccs = NFD_Hangul_LV_LVT_CCs();
-
     StreamSet * LV_LVT =  P.CreateStreamSet(2);
-    StreamSet * LV_LVT1 =  P.CreateStreamSet(2);
     P.CreateKernelCall<CharClassesKernel>(LV_LVT_ccs, U21, LV_LVT);
-    P.CreateKernelCall<Hangul_Precomposed>(U21, LV_LVT1);
     SHOW_BIXNUM(LV_LVT);
-    SHOW_BIXNUM(LV_LVT1);
 
+    //  We now calculate a spreadmask that can be used to insert positions
+    //  after each LV and LVT character.   This spreadmask will have an
+    //  extra 0 bit inserted after each LV character and two extra 0 bits
+    //  inserted after each LVT character.
     StreamSet * SpreadMask = InsertionSpreadMask(P, LV_LVT, kernel::InsertPosition::After);
     SHOW_STREAM(SpreadMask);
 
+    //  The SpreadByMask operation uses the calculated spreadmask to produce
+    //  a final set of 21 basis bits, with zeroes where V and T positions will be
+    //  inserted.
     StreamSet * ExpandedBasis = P.CreateStreamSet(21, 1);
     SpreadByMask(P, SpreadMask, U21, ExpandedBasis);
     SHOW_BIXNUM(ExpandedBasis);
 
+    //  The Hangul decomposition algorithm calculates replacements for LV and
+    //  LVT characters using calculations based on three 5-bit indexes for
+    //  the L, V and T characters.
     StreamSet * LIndexBixNum = P.CreateStreamSet(L_Index_bits);
     StreamSet * VIndexBixNum = P.CreateStreamSet(V_Index_bits);
     StreamSet * TIndexBixNum = P.CreateStreamSet(T_Index_bits);
-
     P.CreateKernelCall<LVT_Indexes>(ExpandedBasis, LIndexBixNum, VIndexBixNum, TIndexBixNum);
     SHOW_BIXNUM(LIndexBixNum);
     SHOW_BIXNUM(VIndexBixNum);
     SHOW_BIXNUM(TIndexBixNum);
 
+    // Given the L, V and T indexes, the replacements for LV and LVT characters
+    // can be calculated to determine the correct 21-bit representations at
+    // <L, V> and <L, V, T> positions.
     StreamSet * Hangul_NFD_Basis = P.CreateStreamSet(21, 1);
     P.CreateKernelCall<LVT2NFD>(ExpandedBasis, LIndexBixNum, VIndexBixNum, TIndexBixNum, Hangul_NFD_Basis);
     SHOW_BIXNUM(Hangul_NFD_Basis);
 
+    // Given the 21-bit basis representation, we can now transform back
+    // to a UTF-8 representation.
     StreamSet * const OutputBasis = P.CreateStreamSet(8);
     U21_to_UTF8(P, Hangul_NFD_Basis, OutputBasis);
 
+    //  The P2SKernel transforms the basis bit streams into the corresponding
+    //  byte stream, inverting the S2P process.
     StreamSet * OutputBytes = P.CreateStreamSet(1, 8);
     P.CreateKernelCall<P2SKernel>(OutputBasis, OutputBytes);
 
+    // The program output is generated by writing the output bytes to stdout.
     P.CreateKernelCall<StdOutKernel>(OutputBytes);
 
     return P.compile();
 }
-
 
 int main(int argc, char *argv[]) {
     //  ParseCommandLineOptions uses the LLVM CommandLine processor, but we also add
