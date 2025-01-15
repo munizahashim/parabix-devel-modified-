@@ -157,7 +157,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                             } else {
                                 const auto & inputs = kernelObj->getInputStreamSetBindings();
                                 for (unsigned j = 0; j < inputs.size(); ++j) {
-                                    if (attr.label().equals(inputs[j].getName())) {
+                                    if (attr.label().compare(inputs[j].getName())==0) {
                                         for (auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
                                             const BufferPort & refPort = mBufferGraph[input];
                                             if (refPort.Port.Number == j) {

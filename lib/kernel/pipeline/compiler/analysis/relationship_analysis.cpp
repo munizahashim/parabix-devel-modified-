@@ -306,7 +306,7 @@ struct RelationshipGraphBuilder {
                         bool notFound = true;
                         for (unsigned j = 0; j < inputs.size(); ++j) {
                             const Binding & input = inputs[j];
-                            if (attr.label().equals(input.getName())) {
+                            if (attr.label().compare(input.getName())==0) {
 
                                 if (LLVM_UNLIKELY(InOutRemap.count(input.getRelationship()) != 0)) {
                                     SmallVector<char, 256> tmp;
