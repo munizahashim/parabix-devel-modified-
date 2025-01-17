@@ -1,4 +1,4 @@
-﻿#include "../pipeline_compiler.hpp"
+#include "../pipeline_compiler.hpp"
 
 namespace kernel {
 
@@ -122,7 +122,7 @@ void PipelineCompiler::writeKernelCall(KernelBuilder & b) {
         outerProcessedPhis.resize(indeg);
         outerProcessedDeferredPhis.resize(indeg);
 
-        bool hasRelativeInput = false;
+        //bool hasRelativeInput = false;
 
         for (const auto e : make_iterator_range(in_edges(mKernelId, mBufferGraph))) {
             const BufferPort & br = mBufferGraph[e];
