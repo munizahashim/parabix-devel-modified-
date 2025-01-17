@@ -1587,46 +1587,48 @@ void PipelineCompiler::splatMultiStepPartialSumValues(KernelBuilder & b) {
     // "final" value but since the PopCountKernel is unaware of the step factor, the pipeline becomes
     // responsible for splat-ing this value to the appropriate slots.
 
+    if (LLVM_LIKELY(out_degree(mKernelId, mPartialSumStepFactorGraph) == 0)) {
+        return;
+    }
 
+    ConstantInt * const sz_ZERO = b.getSize(0);
+    ConstantInt * const sz_ONE = b.getSize(1);
+
+    const auto bw = b.getBitBlockWidth();
+    const auto fw = b.getSizeTy()->getIntegerBitWidth();
+    assert ((bw % fw) == 0 && bw >= fw);
+    const auto stepsPerBlock = bw / fw;
+
+    ConstantInt * const sz_stepsPerBlock = b.getSize(stepsPerBlock);
 
     for (const auto e : make_iterator_range(out_edges(mKernelId, mPartialSumStepFactorGraph))) {
 
         const auto streamSet = target(e, mPartialSumStepFactorGraph);
         const auto output = in_edge(streamSet, mBufferGraph);
         const BufferPort & outputPort = mBufferGraph[output];
+
+        Value * const initial = mInitiallyProducedItemCount[streamSet];
         Value * const produced = mProducedAtTermination[outputPort.Port];
+
         const BufferNode & bn = mBufferGraph[streamSet];
 
-        // TODO: if all of the consumers of this streamset belong to the same partition as
-        // the producer, we probably don't need to splat it to increase it.
-
-        //if (bn.isNonThreadLocal()) {
-
-        const auto bw = b.getBitBlockWidth();
-        const auto fw = b.getSizeTy()->getIntegerBitWidth();
-        assert ((bw % fw) == 0 && bw >= fw);
-        const auto stepsPerBlock = bw / fw;
-        const auto spanLength = bn.PartialSumSpanLength;
-
-        ConstantInt * const sz_stepsPerBlock = b.getSize(stepsPerBlock);
-        ConstantInt * const sz_ONE = b.getSize(1);
-        Value * const index = b.CreateSaturatingSub(produced, sz_ONE);
-        Value * const start = b.CreateRoundDown(index, sz_stepsPerBlock);
         StreamSetBuffer * const buffer = mBufferGraph[streamSet].Buffer;
         VectorType * const vecTy = b.fwVectorType(fw);
         PointerType * const vecPtrTy = vecTy->getPointerTo();
 
-        ConstantInt * const sz_ZERO = b.getSize(0);
-
+        const auto spanLength = bn.PartialSumSpanLength;
+        // If we produced no items but invoked the popcount kernel, it will have left the sum
+        // in the stream[produced] position. This is the only safe position to read as we may
+        // have executed a final block with 0 input items.
+        Value * const unchanged = b.CreateICmpEQ(produced, initial);
+        Value * index = b.CreateSelect(unchanged, produced, b.CreateSub(produced, sz_ONE));
+        Value * const start = b.CreateRoundDown(index, sz_stepsPerBlock);
         Value * const addr = buffer->getRawItemPointer(b, sz_ZERO, start);
         Value * const vecAddr = b.CreatePointerCast(addr, vecPtrTy);
         Value * const baseValue = b.CreateBlockAlignedLoad(vecTy, vecAddr);
-
         Value * const offset = b.CreateURem(index, sz_stepsPerBlock);
         Value * const total = b.CreateExtractElement(baseValue, offset);
         Value * const splat = b.simd_fill(fw, total);
-
-
         Value * const mask = b.mvmd_sll(fw, ConstantInt::getAllOnesValue(vecTy), offset);
         Value * const maskedSplat = b.CreateAnd(splat, mask);
         Value * const mergedValue = b.CreateOr(baseValue, maskedSplat);
