@@ -19,7 +19,7 @@ std::string uniqueBinaryOperationName(std::string op, StreamSet * a, StreamSet *
     return out.str();
 }
 
-std::string uniqueBinaryOperationName(std::string op, StreamSet * a, unsigned b, StreamSet * rslt) {
+std::string uniqueBinaryImmediateName(std::string op, StreamSet * a, unsigned b, StreamSet * rslt) {
     std::string tmp;
     llvm::raw_string_ostream out(tmp);
     out << op << "_" << a->shapeString();
@@ -109,4 +109,22 @@ void Mul_immediate::generatePabloMethod() {
         pb.createAssign(pb.createExtract(productVar, i), product[i]);
     }
 }
+
+#define compare_immediate(OP) \
+void OP##_immediate::generatePabloMethod() { \
+    pablo::PabloBuilder pb(getEntryScope()); \
+    pablo::BixNumCompiler bnc(pb);\
+    pablo::BixNum a = getInputStreamSet("a");\
+    pablo::PabloAST * comparison = bnc.OP(a, mImmediate);\
+    pablo::Var * rsltVar = getOutputStreamVar("rslt");\
+    pb.createAssign(pb.createExtract(rsltVar, pb.getInteger(0)), comparison);\
+}
+
+compare_immediate(EQ)
+compare_immediate(NEQ)
+compare_immediate(UGT)
+compare_immediate(UGE)
+compare_immediate(ULT)
+compare_immediate(ULE)
+
 }
