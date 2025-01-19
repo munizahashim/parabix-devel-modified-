@@ -1,8 +1,7 @@
 /*
- *  Copyright (c) 2022 International Characters.
- *  This software is licensed to the public under the Open Software License 3.0.
+ *  Part of the Parabix Project, under the Open Software License 3.0.
+ *  SPDX-License-Identifier: OSL-3.0
  */
-
 
 #include <cstdio>
 #include <vector>
@@ -21,6 +20,7 @@
 #include <kernel/streamutils/deletion.h>
 #include <kernel/streamutils/pdep_kernel.h>
 #include <kernel/streamutils/run_index.h>
+#include <kernel/streamutils/sorting.h>
 #include <kernel/streamutils/stream_shift.h>
 #include <kernel/streamutils/string_insert.h>
 #include <kernel/basis/s2p_kernel.h>
@@ -488,104 +488,6 @@ void CCC_Violation_Sequence::generatePabloMethod() {
     pb.createAssign(pb.createExtract(getOutputStreamVar("Violation_Seq"), pb.getInteger(0)), Violation_Seq);
 }
 
-//
-//   SwapMarks_N implements the nth step of CCC comparison for bitonic sorting.
-//   In this step, we compare CCC values that are 1<<N apart.
-//
-class SwapMarks_N : public pablo::PabloKernel {
-public:
-    SwapMarks_N(LLVMTypeSystemInterface & ts, unsigned N, StreamSet * CCC_Basis, StreamSet * CCC_PositionBixNum, StreamSet * SwapMarks);
-protected:
-    void generatePabloMethod() override;
-private:
-    unsigned mStep;
-};
-
-SwapMarks_N::SwapMarks_N (LLVMTypeSystemInterface & ts, unsigned N, StreamSet * CCC_Basis, StreamSet * CCC_PositionBixNum, StreamSet * SwapMarks)
-: PabloKernel(ts, "SwapMarks_" + std::to_string(N) + "_" + CCC_PositionBixNum->shapeString(),
-// inputs
-{Binding{"CCC_Basis", CCC_Basis}, Binding{"CCC_PositionBixNum", CCC_PositionBixNum}},
-// output
-{Binding{"SwapMarks", SwapMarks}}), mStep(N) {
-}
-
-void SwapMarks_N::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    BixNum CCC_Basis = getInputStreamSet("CCC_Basis");
-    BixNum CCC_PositionBixNum = getInputStreamSet("CCC_PositionBixNum");
-    Var * SwapVar = pb.createVar("SwapVar", pb.createZeroes());
-    //
-    // Bitonic swapping:
-    // At step N (N = 0, 1, ...):
-    // Input is divided into groups of size 1 << (N + 2) (group size 4, for N = 0).
-    // Each input group is split into 2 subgroups of size (1 << (N + 1)) (size 2 for N = 0)
-    // Within each subgroup, comparisons are made between elements distant (1 << N) apart.
-    unsigned compare_distance = 1 << mStep;
-    BixNumCompiler bnc0(pb);
-    PabloAST * DistN = bnc0.UGE(CCC_PositionBixNum, compare_distance);
-    auto nested = pb.createScope();
-    pb.createIf(DistN, nested);
-    BixNumCompiler bnc(nested);
-    BixNum CCC_Forward_N(CCC_Basis.size());
-    for (unsigned i = 0; i < CCC_Basis.size(); i++) {
-        CCC_Forward_N[i] = nested.createAdvance(CCC_Basis[i], pb.getInteger(compare_distance));
-    }
-    // Now we can identify the elements of subgroups by bit numbers.
-    unsigned bit_identifying_hi_subgroup = mStep + 1;
-    CCC_PositionBixNum = bnc.ZeroExtend(CCC_PositionBixNum, bit_identifying_hi_subgroup + 1);
-    PabloAST * hi_subgroups = CCC_PositionBixNum[bit_identifying_hi_subgroup];
-    unsigned bit_identifying_subgroup_hi_elements = mStep;
-    PabloAST * hi_elements_in_subgroups = CCC_PositionBixNum[bit_identifying_subgroup_hi_elements];
-    // Perform the comparisons
-    PabloAST * greater_fwd = bnc.UGT(CCC_Forward_N, CCC_Basis);
-    // Reverse the comparisons for hi subgroups
-    PabloAST * compare = nested.createXor(greater_fwd, hi_subgroups);
-    // Bit flipping of > compare gives <= comparison, exclude the = cases.
-    compare = nested.createAnd(compare, bnc.NEQ(CCC_Forward_N, CCC_Basis));
-    // Identify swaps at the high half of each subgroup only.
-    PabloAST * swap_mark = nested.createAnd(compare, hi_elements_in_subgroups);
-    nested.createAssign(SwapVar, swap_mark);
-    pb.createAssign(pb.createExtract(getOutputStreamVar("SwapMarks"), pb.getInteger(0)), SwapVar);
-}
-
-class SwapBack_N : public pablo::PabloKernel {
-public:
-    SwapBack_N(LLVMTypeSystemInterface & ts, unsigned n, StreamSet * SwapMarks, StreamSet * Source, StreamSet * Swapped);
-protected:
-    void generatePabloMethod() override;
-private:
-    unsigned mN;
-};
-
-SwapBack_N::SwapBack_N(LLVMTypeSystemInterface & ts, unsigned n, StreamSet * SwapMarks, StreamSet * Source, StreamSet * Swapped)
-: PabloKernel(ts, "SwapBack" + std::to_string(n) + "_" + Source->shapeString(),
-// inputs
-{Binding{"SwapMarks", SwapMarks, FixedRate(1), LookAhead(n)},
- Binding{"Source", Source, FixedRate(1), LookAhead(n)}},
-// output
-{Binding{"Swapped", Swapped}}), mN(n) {
-}
-
-void SwapBack_N::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    PabloAST * SwapMarks = getInputStreamSet("SwapMarks")[0];
-    PabloAST * PriorMark = pb.createLookahead(SwapMarks, mN);
-    std::vector<PabloAST *> SourceSet = getInputStreamSet("Source");
-    std::vector<Var *> SwappedVar(SourceSet.size());
-    for (unsigned i = 0; i < SourceSet.size(); i++) {
-        SwappedVar[i] = pb.createVar("SwapVar" + std::to_string(i), SourceSet[i]);
-    }
-    auto nested = pb.createScope();
-    pb.createIf(pb.createOr(PriorMark, SwapMarks), nested);
-    for (unsigned i = 0; i < SourceSet.size(); i++) {
-        PabloAST * compare = nested.createXor(nested.createLookahead(SourceSet[i], mN), SourceSet[i]);
-        compare = nested.createAnd(compare, PriorMark);
-        PabloAST * flip = nested.createOr(compare, nested.createAdvance(compare, pb.getInteger(mN)));
-        nested.createAssign(SwappedVar[i], nested.createXor(SourceSet[i], flip));
-    }
-    writeOutputStreamSet("Swapped", SwappedVar);
-}
-
 typedef void (*XfrmFunctionType)(uint32_t fd);
 
 XfrmFunctionType generate_pipeline(CPUDriver & driver) {
@@ -670,7 +572,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     SHOW_BIXNUM(CCC_Position_BixNum);
 
     StreamSet * SwapMarks0 = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<SwapMarks_N>(0, CCC_Basis, CCC_Position_BixNum, SwapMarks0);
+    P.CreateKernelCall<BitonicCompareStep>(0, BitonicCompareStep::Kind::BitonicSort, CCC_Basis, CCC_Position_BixNum, SwapMarks0);
     SHOW_STREAM(SwapMarks0);
 
     StreamSet * Swapped_Basis0 = P.CreateStreamSet(21, 1);
@@ -682,7 +584,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     SHOW_BIXNUM(CCC_Basis0);
 
     StreamSet * SwapMarks1 = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<SwapMarks_N>(1, CCC_Basis0, CCC_Position_BixNum, SwapMarks1);
+    P.CreateKernelCall<BitonicCompareStep>(1, BitonicCompareStep::Kind::BitonicSort, CCC_Basis0, CCC_Position_BixNum, SwapMarks1);
     SHOW_STREAM(SwapMarks1);
 
     StreamSet * Swapped_Basis1 = P.CreateStreamSet(21, 1);
@@ -694,7 +596,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     SHOW_BIXNUM(CCC_Basis1);
 
     StreamSet * SwapMarks2 = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<SwapMarks_N>(2, CCC_Basis1, CCC_Position_BixNum, SwapMarks2);
+    P.CreateKernelCall<BitonicCompareStep>(2, BitonicCompareStep::Kind::BitonicSort, CCC_Basis1, CCC_Position_BixNum, SwapMarks2);
     SHOW_STREAM(SwapMarks2);
 
     StreamSet * Swapped_Basis2 = P.CreateStreamSet(21, 1);
