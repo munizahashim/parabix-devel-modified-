@@ -567,6 +567,10 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     P.CreateKernelCall<bixnum::NEQ_immediate>(CCC_Basis, 0, CCC_NonZero);
     SHOW_STREAM(CCC_NonZero);
 
+    StreamSets ToSort = {CCC_Basis, NFD_Basis};
+    StreamSets SortResults = BitonicSortRuns(P, 8, CCC_NonZero, ToSort);
+    
+    /*
     StreamSet * CCC_Position_BixNum = P.CreateStreamSet(3, 1);
     P.CreateKernelCall<RunIndex>(CCC_NonZero, CCC_Position_BixNum);
     SHOW_BIXNUM(CCC_Position_BixNum);
@@ -602,6 +606,7 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     StreamSet * Swapped_Basis2 = P.CreateStreamSet(21, 1);
     P.CreateKernelCall<SwapBack_N>(4, SwapMarks1, Swapped_Basis1, Swapped_Basis2);
     SHOW_BIXNUM(Swapped_Basis2);
+    */
 
     StreamSet * const OutputBasis = P.CreateStreamSet(8);
     U21_to_UTF8(P, NFD_Basis, OutputBasis);
