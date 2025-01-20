@@ -92,6 +92,32 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                 bp.Flags |= BufferPortType::IsManaged;
                 cannotBePlacedIntoThreadLocalMemory = true;
             } else if (LLVM_UNLIKELY(rate.isRelative())) {
+
+                const auto refPort = getReference(kernel, port);
+
+                auto adoptRefProperties = [&](const BufferPort & src) {
+                    bp.Flags |= src.Flags;
+                    bp.Add = src.Add;
+                    bp.Delay = src.Delay;
+                };
+
+                if (refPort.Type == PortType::Input) {
+                    for (auto input : make_iterator_range(in_edges(kernel, mBufferGraph))) {
+                        const BufferPort & ref = mBufferGraph[input];
+                        if (ref.Port.Number == refPort.Number) {
+                            adoptRefProperties(ref);
+                            break;
+                        }
+                    }
+                } else {
+                    for (auto output : make_iterator_range(out_edges(kernel, mBufferGraph))) {
+                        const auto & ref = mBufferGraph[output];
+                        if (ref.Port.Number == refPort.Number) {
+                            adoptRefProperties(ref);
+                            break;
+                        }
+                    }
+                }
                 bp.Flags |= BufferPortType::IsRelative;
             }
 
@@ -99,7 +125,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
 
             for (const Attribute & attr : binding.getAttributes()) {
                 switch (attr.getKind()) {
-                    case AttrId::Add:                        
+                    case AttrId::Add:
                         bp.Add = std::max<unsigned>(bp.Add, attr.amount());
                         break;
                     case AttrId::Delayed:
@@ -134,7 +160,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
                     case AttrId::SharedManagedBuffer:
                         bp.Flags |= BufferPortType::IsShared;
                         cannotBePlacedIntoThreadLocalMemory = true;
-                        break;                        
+                        break;
                     case AttrId::ManagedBuffer:
                         bp.Flags |= BufferPortType::IsManaged;
                         cannotBePlacedIntoThreadLocalMemory = true;
@@ -230,6 +256,7 @@ void PipelineAnalysis::generateInitialBufferGraph() {
         size_t principalInputPort = 0;
         bool hasPrincipalInput = false;
         bool nonGuaranteedInputRate = false;
+
 
         for (auto e : make_iterator_range(in_edges(kernel, mStreamGraph))) {
             const RelationshipType & port = mStreamGraph[e];
