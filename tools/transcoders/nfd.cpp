@@ -428,8 +428,8 @@ void CCC_Violation_Sequence::generatePabloMethod() {
     PabloAST * ViolationStarts = getInputStreamSet("ViolationStarts")[0];
     PabloAST * CCC_SeqMarks = getInputStreamSet("CCC_SeqMarks")[0];
     PabloAST * interior = pb.createMatchStar(pb.createAdvance(ViolationStarts, 1), pb.createNot(CCC_SeqMarks));
-    PabloAST * Violation_Seq = pb.createOr(ViolationStarts, interior);
-    pb.createAssign(pb.createExtract(getOutputStreamVar("Violation_Seq"), pb.getInteger(0)), Violation_Seq);
+    //PabloAST * Violation_Seq = pb.createOr(ViolationStarts, interior);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("Violation_Seq"), pb.getInteger(0)), interior);
 }
 
 typedef void (*XfrmFunctionType)(uint32_t fd);
@@ -507,9 +507,30 @@ XfrmFunctionType generate_pipeline(CPUDriver & driver) {
     StreamSet * CCC_NonZero = P.CreateStreamSet(1, 1);
     P.CreateKernelCall<bixnum::NEQ_immediate>(CCC_Basis, 0, CCC_NonZero);
     SHOW_STREAM(CCC_NonZero);
+    
+    StreamSet * CCC_SeqMarks = P.CreateStreamSet(1, 1);
+    StreamSet * CCC_Violation = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<CCC_Check>(CCC_Basis, CCC_SeqMarks, CCC_Violation);
+    SHOW_STREAM(CCC_SeqMarks);
+    SHOW_STREAM(CCC_Violation);
+
+    StreamSet * ViolationsByMarkEnd = P.CreateStreamSet(1, 1);
+    FilterByMask(P, CCC_SeqMarks, CCC_Violation, ViolationsByMarkEnd);
+
+    StreamSet * ViolationsByMarkStart = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<ShiftBack>(ViolationsByMarkEnd, ViolationsByMarkStart, 1);
+
+    StreamSet * CCC_Violation_Start = P.CreateStreamSet(1, 1);
+    SpreadByMask(P, CCC_SeqMarks, ViolationsByMarkStart, CCC_Violation_Start);
+    SHOW_STREAM(CCC_Violation_Start);
+
+    StreamSet * Violation_Seq = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<CCC_Violation_Sequence>(CCC_Violation_Start, CCC_SeqMarks, Violation_Seq);
+    SHOW_STREAM(Violation_Seq);
 
     StreamSets ToSort = {CCC_Basis, NFD_Basis};
-    StreamSets SortResults = BitonicSortRuns(P, 8, CCC_NonZero, ToSort);
+
+    StreamSets SortResults = BitonicSortRuns(P, 8, Violation_Seq, ToSort);
     SHOW_BIXNUM(SortResults[0]);
     SHOW_BIXNUM(SortResults[1]);
 
