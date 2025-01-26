@@ -12,9 +12,12 @@
 using namespace kernel;
 //
 //   BitonicCompareStep implements one comparison step for multi-instance bitonic sorting/merging.
+//   Items are compared within sorting instances identified by sequential indexes.
+//   The instances are divided into alternating ascending and descending regions.
+//   Within regions comparisons are made between elements a fixed distance apart.
 //   Inputs:
 //     distance: the distance between compared items
-//     k:  the comparison kind, either BitonicSort or Merge
+//     region_size:  the size of ascending and descending regions
 //     SeqIndex:  a bixnum sequentially numbering items in each instance to be sorted
 //     Basis: a bixnum defining the sort order, i.e., the values to be compared.
 //   Output:
@@ -23,15 +26,14 @@ using namespace kernel;
 //
 class BitonicCompareStep : public pablo::PabloKernel {
 public:
-    enum class Kind {BitonicSort, Merge};
-    BitonicCompareStep(LLVMTypeSystemInterface & ts, unsigned distance, Kind k,
+    BitonicCompareStep(LLVMTypeSystemInterface & ts,
+                       unsigned distance, unsigned region_size,
                        StreamSet * SeqIndex, StreamSet * Basis, StreamSet * SwapMarks);
 protected:
-    std::string kindString(Kind k) {return k == Kind::BitonicSort ? "S_" : "M_";}
     void generatePabloMethod() override;
 private:
-    unsigned mDistance;
-    Kind mCompareKind;
+    unsigned mCompareDistance;
+    unsigned mRegionSize;
 };
 
 class SwapBack_N : public pablo::PabloKernel {
@@ -45,8 +47,8 @@ private:
 
 using StreamSets = std::vector<StreamSet *>;
 
-StreamSets BitonicSortRuns(PipelineBuilder & P, unsigned runlgth, StreamSet * Runs, StreamSets & ToSort);
+StreamSets BitonicSortRuns(PipelineBuilder & P, unsigned instance_size, StreamSet * Runs, StreamSets & ToSort);
 
-StreamSets BitonicSort(PipelineBuilder & P, unsigned runlgth, StreamSet * RunIndex, StreamSets & ToSort);
+StreamSets BitonicSort(PipelineBuilder & P, unsigned runlgth, StreamSet * Runs, StreamSet * RunIndex, StreamSets & ToSort);
 
-StreamSets BitonicMerge(PipelineBuilder & P, unsigned runlgth, StreamSet * RunIndex, StreamSets & ToMerge);
+StreamSets BitonicMerge(PipelineBuilder & P, unsigned region_size, unsigned instance_size, StreamSet * RunIndex, StreamSets & ToMerge);
