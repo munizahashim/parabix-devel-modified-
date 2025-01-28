@@ -19,6 +19,100 @@ using namespace pablo;
 #define SHOW_BIXNUM(name) if (codegen::EnableIllustrator) P.captureBixNum(#name, name)
 #define SHOW_BYTES(name) if (codegen::EnableIllustrator) P.captureByteData(#name, name)
 
+
+//
+//  Given a bit stream marking Runs to be sorted and a
+//  SortOrder BixNum to be used within each Run, find any
+//  violations within the Runs and mark them at the Run end
+//  position.
+//
+class Misorder_Check : public pablo::PabloKernel {
+public:
+    Misorder_Check(LLVMTypeSystemInterface & ts, StreamSet * Runs, StreamSet * SortOrder, StreamSet * Misordered);
+protected:
+    void generatePabloMethod() override;
+};
+
+Misorder_Check::Misorder_Check (LLVMTypeSystemInterface & ts, StreamSet * Runs, StreamSet * SortOrder, StreamSet * Misordered)
+: PabloKernel(ts, "Misorder_Check_" + SortOrder->shapeString(),
+// inputs
+{Binding{"Runs", Runs, FixedRate(1), LookAhead(1)}, Binding{"SortOrder", SortOrder, FixedRate(1), LookAhead(1)}},
+// output
+{Binding{"Misordered", Misordered}}) {
+}
+
+void Misorder_Check::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    BixNumCompiler bnc(pb);
+    PabloAST * Runs = getInputStreamSet("Runs")[0];
+    BixNum SortOrder = getInputStreamSet("SortOrder");
+    BixNum SortOrder_ahead(SortOrder.size());
+    for (unsigned i = 0; i < SortOrder.size(); i++) {
+        SortOrder_ahead[i] = pb.createLookahead(SortOrder[i], 1);
+    }
+    PabloAST * RunEnds = pb.createAnd(Runs, pb.createNot(pb.createLookahead(Runs, 1)));
+    PabloAST * violation = pb.createAnd(bnc.UGT(SortOrder, SortOrder_ahead), pb.createNot(RunEnds));
+    PabloAST * violationInSeq = pb.createAnd(pb.createMatchStar(violation, Runs), RunEnds);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("Misordered"), pb.getInteger(0)), violationInSeq);
+}
+
+class AdjustRunsAndIndexes : public pablo::PabloKernel {
+public:
+    AdjustRunsAndIndexes(LLVMTypeSystemInterface & ts,
+                         StreamSet * Runs, StreamSet * Misordered, StreamSet * SeqIndex,
+                         StreamSet * FilteredRuns, StreamSet * AdjustedIndex);
+protected:
+    void generatePabloMethod() override;
+    unsigned mLgth;
+};
+
+AdjustRunsAndIndexes::AdjustRunsAndIndexes (LLVMTypeSystemInterface & ts,
+                                            StreamSet * Runs, StreamSet * Misordered, StreamSet * SeqIndex,
+                                            StreamSet * FilteredRuns, StreamSet * AdjustedIndex)
+: PabloKernel(ts, "AdjustRunsAndIndexes_" + SeqIndex->shapeString(),
+// inputs
+{Binding{"Runs", Runs, FixedRate(1), LookAhead(64)}, Binding{"Misordered", Misordered, FixedRate(1), LookAhead(64)}, Binding{"SeqIndex", SeqIndex, FixedRate(1), LookAhead(64)}},
+// output
+{Binding{"FilteredRuns", FilteredRuns}, Binding{"AdjustedIndex", AdjustedIndex}}) {
+}
+
+void AdjustRunsAndIndexes::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    BixNumCompiler bnc(pb);
+    PabloAST * Runs = getInputStreamSet("Runs")[0];
+    PabloAST * RunStart = pb.createAnd(Runs, pb.createNot(pb.createAdvance(Runs, 1)));
+    PabloAST * Misordered = getInputStreamSet("Misordered")[0];
+    BixNum SeqIndex = getInputStreamSet("SeqIndex");
+    unsigned maxLgth = 1<<SeqIndex.size();
+    BixNum SeqIndexAhead(SeqIndex.size());
+    PabloAST * FilteredRuns = Runs;
+    BixNum AdjustedIndex = SeqIndex;
+    for (unsigned lgth = 3; lgth < maxLgth; lgth++) {
+        for (unsigned i = 0; i < SeqIndex.size(); i++) {
+            SeqIndexAhead[i] = pb.createLookahead(SeqIndex[i], lgth-1);
+        }
+        PabloAST * atRunStart = pb.createAnd(RunStart, pb.createNot(pb.createLookahead(Runs, lgth)));
+        atRunStart = pb.createAnd(bnc.EQ(SeqIndexAhead, lgth-1), atRunStart);
+        PabloAST * MisorderedAtStart = pb.createAnd(atRunStart, pb.createLookahead(Misordered, lgth-1), "MisorderedAtStart");
+        PabloAST * OrderedRunStart = pb.createAnd(atRunStart, pb.createNot(MisorderedAtStart));
+        PabloAST * OrderedRun = pb.createAnd(pb.createMatchStar(OrderedRunStart, Runs), Runs);
+        //FilteredRuns = pb.createAnd(FilteredRuns, pb.createNot(OrderedRun));
+        unsigned lgth_ceil = 1 << ceil_log2(lgth);
+        unsigned lgth_offset = lgth_ceil - lgth;
+        if (lgth_offset != 0) {
+            PabloAST * lgthRun = pb.createAnd(pb.createMatchStar(atRunStart, Runs), Runs);
+            AdjustedIndex = bnc.Select(lgthRun, bnc.AddModular(AdjustedIndex, lgth_offset), AdjustedIndex);
+        }
+    }
+    /*
+    for (unsigned i = 0; i < SeqIndex.size(); i++) {
+        AdjustedIndex[i] = pb.createAnd(AdjustedIndex[i], FilteredRuns);
+    }
+     */
+    writeOutputStreamSet("FilteredRuns", std::vector<PabloAST *>{FilteredRuns});
+    writeOutputStreamSet("AdjustedIndex", AdjustedIndex);
+}
+
 BitonicCompareStep::BitonicCompareStep(LLVMTypeSystemInterface & ts, unsigned distance, unsigned region_size,
                                        StreamSet * SeqIndex, StreamSet * Basis, StreamSet * SwapMarks)
 : PabloKernel(ts, "BitonicCompareStep<" + std::to_string(region_size) + "," + std::to_string(distance) + ">" +
@@ -63,6 +157,49 @@ void BitonicCompareStep::generatePabloMethod() {
     nested.createAssign(SwapVar, swap_mark);
     pb.createAssign(pb.createExtract(getOutputStreamVar("SwapMarks"), pb.getInteger(0)), SwapVar);
 }
+
+
+/*
+void BitonicCompareStep::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    BixNum SeqIndex = getInputStreamSet("SeqIndex");
+    BixNum Basis = getInputStreamSet("Basis");
+    Var * SwapVar = pb.createVar("SwapVar", pb.createZeroes());
+    //
+    // Bitonic swapping:
+    // At step N (N = 0, 1, ...):
+    // Comparison distance is mDistance = 1 << N.
+    // Input is divided into groups of size 1 << (N + 2) (group size 4, for N = 0).
+    // Each input group is split into 2 subgroups of size (1 << (N + 1)) (size 2 for N = 0)
+    unsigned step = ceil_log2(mCompareDistance);
+    BixNumCompiler bnc0(pb);
+    PabloAST * DistN = bnc0.UGE(SeqIndex, mCompareDistance);
+    auto nested = pb.createScope();
+    pb.createIf(DistN, nested);
+    BixNumCompiler bnc(nested);
+    BixNum Forward_Basis(Basis.size());
+    for (unsigned i = 0; i < Basis.size(); i++) {
+        Forward_Basis[i] = nested.createAdvance(Basis[i], pb.getInteger(mCompareDistance));
+    }
+    // Now we can identify the elements of subgroups by bit numbers.
+    unsigned bit_identifying_hi_subgroup = step + 1;
+    SeqIndex = bnc.ZeroExtend(SeqIndex, bit_identifying_hi_subgroup + 1);
+    unsigned bit_identifying_subgroup_hi_elements = step;
+    PabloAST * hi_elements_in_subgroups = SeqIndex[bit_identifying_subgroup_hi_elements];
+    // Perform the comparisons
+    PabloAST * compare = bnc.UGT(Forward_Basis, Basis);
+        PabloAST * hi_subgroups = SeqIndex[bit_identifying_hi_subgroup];
+        // Reverse the comparisons for hi subgroups
+        compare = nested.createXor(compare, hi_subgroups);
+        // Bit flipping of > compare gives <= comparison, exclude the = cases.
+        compare = nested.createAnd(compare, bnc.NEQ(Forward_Basis, Basis));
+    // Identify swaps at the high half of each subgroup only.
+    PabloAST * swap_mark = nested.createAnd(compare, hi_elements_in_subgroups);
+    nested.createAssign(SwapVar, swap_mark);
+    pb.createAssign(pb.createExtract(getOutputStreamVar("SwapMarks"), pb.getInteger(0)), SwapVar);
+}
+*/
+
 
 SwapBack_N::SwapBack_N(LLVMTypeSystemInterface & ts, unsigned n, StreamSet * SwapMarks, StreamSet * Source, StreamSet * Swapped)
 : PabloKernel(ts, "SwapBack" + std::to_string(n) + "_" + Source->shapeString(),
@@ -140,7 +277,15 @@ StreamSets  BitonicSortRuns(PipelineBuilder & P, unsigned instance_size, StreamS
     StreamSet * SeqIndex = P.CreateStreamSet(steps);
     P.CreateKernelCall<RunIndex>(Runs, SeqIndex);
     SHOW_BIXNUM(SeqIndex);
-    return BitonicSort(P, instance_size, Runs, SeqIndex, ToSort);
+    StreamSet * Misordered = P.CreateStreamSet(1);
+    P.CreateKernelCall<Misorder_Check>(Runs, ToSort[0], Misordered);
+    SHOW_STREAM(Misordered);
+    StreamSet * FilteredRuns = P.CreateStreamSet(1);
+    StreamSet * AdjustedIndex = P.CreateStreamSet(SeqIndex->getNumElements());
+    P.CreateKernelCall<AdjustRunsAndIndexes>(Runs, Misordered, SeqIndex, FilteredRuns, AdjustedIndex);
+    SHOW_STREAM(FilteredRuns);
+    SHOW_BIXNUM(AdjustedIndex);
+    return BitonicSort(P, instance_size, FilteredRuns, AdjustedIndex, ToSort);
 }
 
 StreamSets BitonicSort(PipelineBuilder & P, unsigned instance_size, StreamSet * Runs, StreamSet * SeqIndex, StreamSets & ToSort) {
@@ -165,6 +310,7 @@ StreamSets BitonicSort(PipelineBuilder & P, unsigned instance_size, StreamSet * 
         SHOW_BIXNUM(Sorted[i]);
     }
 
+    /*
     StreamSet * Tails = P.CreateStreamSet(1, 1);
     StreamSet * TailIndex = P.CreateStreamSet(ceil_log2(region_size), 1);
     P.CreateKernelCall<RunTails>(region_size, Runs, SeqIndex, Tails);
@@ -182,27 +328,28 @@ StreamSets BitonicSort(PipelineBuilder & P, unsigned instance_size, StreamSet * 
         P.CreateKernelCall<SwapBack_N>(compare_distance, TailSwapMarks, Sorted[i], FullySorted[i]);
         SHOW_BIXNUM(FullySorted[i]);
     }
+    */
 
-    if (region_size <=2 ) {
-        return FullySorted;
+    if (instance_size <=2 ) {
+        return Sorted;
     } else {
-        return BitonicMerge(P, region_size, instance_size, SeqIndex, FullySorted);
+        return BitonicMerge(P, instance_size, instance_size, SeqIndex, Sorted);
     }
 }
 
 StreamSets BitonicMerge(PipelineBuilder & P, unsigned region_size, unsigned instance_size, StreamSet * RunIndex, StreamSets & ToMerge) {
     
     StreamSet * MergeSwapMarks = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<BitonicCompareStep>(region_size, instance_size, RunIndex, ToMerge[0], MergeSwapMarks);
+    P.CreateKernelCall<BitonicCompareStep>(region_size/2, instance_size, RunIndex, ToMerge[0], MergeSwapMarks);
     SHOW_STREAM(MergeSwapMarks);
     
     StreamSets Merged(ToMerge.size());
     for (unsigned i = 0; i < ToMerge.size(); i++) {
         Merged[i] = P.CreateStreamSet(ToMerge[i]->getNumElements(), 1);
-        P.CreateKernelCall<SwapBack_N>(region_size, MergeSwapMarks, ToMerge[i], Merged[i]);
+        P.CreateKernelCall<SwapBack_N>(region_size/2, MergeSwapMarks, ToMerge[i], Merged[i]);
         SHOW_BIXNUM(Merged[i]);
     }
-    if (region_size <= 4) {
+    if (region_size <= 2) {
         return Merged;
     } else {
         return BitonicMerge(P, region_size/2, instance_size, RunIndex, Merged);
