@@ -233,7 +233,7 @@ void SwapBack_N::generatePabloMethod() {
             nested.createAssign(nested.createExtract(SwappedOut, nested.getInteger(i)), SwappedVar[i]);
         }
     } else {
-        for (unsigned i = 0; i < 16; i++) {
+        for (unsigned i = 0; i < SourceSet.size(); i++) {
             pb.createAssign(pb.createExtract(SwappedOut, pb.getInteger(i)), SwappedVar[i]);
         }
     }
