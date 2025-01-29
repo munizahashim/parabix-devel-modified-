@@ -108,7 +108,7 @@ void AdjustRunsAndIndexes::generatePabloMethod() {
     for (unsigned i = 0; i < SeqIndex.size(); i++) {
         AdjustedIndex[i] = pb.createAnd(AdjustedIndex[i], FilteredRuns);
     }
-     */
+    */
     writeOutputStreamSet("FilteredRuns", std::vector<PabloAST *>{FilteredRuns});
     writeOutputStreamSet("AdjustedIndex", AdjustedIndex);
 }
@@ -148,6 +148,8 @@ void BitonicCompareStep::generatePabloMethod() {
     PabloAST * descending_regions = RegionNum[0];
     PabloAST * compare = bnc.UGT(Forward_Basis, Basis);
     compare = nested.createXor(compare, descending_regions);
+    // Negation of > is <=, exclude the = case.
+    compare = nested.createAnd(compare, bnc.NEQ(Forward_Basis, Basis));
     // Identify the high element of each comparison for a potential swap mark.
     BixNum ComparisonGroup;
     BixNum GroupIndex;
@@ -309,26 +311,6 @@ StreamSets BitonicSort(PipelineBuilder & P, unsigned instance_size, StreamSet * 
         P.CreateKernelCall<SwapBack_N>(compare_distance, SwapMarks, PartiallySorted[i], Sorted[i]);
         SHOW_BIXNUM(Sorted[i]);
     }
-
-    /*
-    StreamSet * Tails = P.CreateStreamSet(1, 1);
-    StreamSet * TailIndex = P.CreateStreamSet(ceil_log2(region_size), 1);
-    P.CreateKernelCall<RunTails>(region_size, Runs, SeqIndex, Tails);
-    P.CreateKernelCall<RunIndex>(Tails, TailIndex);
-    SHOW_STREAM(Tails);
-    SHOW_BIXNUM(TailIndex);
-
-    StreamSet * TailSwapMarks = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<BitonicCompareStep>(compare_distance, region_size, TailIndex, Sorted[0], TailSwapMarks);
-    SHOW_STREAM(TailSwapMarks);
-
-    StreamSets FullySorted(ToSort.size());
-    for (unsigned i = 0; i < ToSort.size(); i++) {
-        FullySorted[i] = P.CreateStreamSet(ToSort[i]->getNumElements(), 1);
-        P.CreateKernelCall<SwapBack_N>(compare_distance, TailSwapMarks, Sorted[i], FullySorted[i]);
-        SHOW_BIXNUM(FullySorted[i]);
-    }
-    */
 
     if (instance_size <=2 ) {
         return Sorted;
