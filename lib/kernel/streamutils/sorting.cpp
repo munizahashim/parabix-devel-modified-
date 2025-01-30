@@ -96,7 +96,7 @@ void AdjustRunsAndIndexes::generatePabloMethod() {
         PabloAST * MisorderedAtStart = pb.createAnd(atRunStart, pb.createLookahead(Misordered, lgth-1), "MisorderedAtStart");
         PabloAST * OrderedRunStart = pb.createAnd(atRunStart, pb.createNot(MisorderedAtStart));
         PabloAST * OrderedRun = pb.createAnd(pb.createMatchStar(OrderedRunStart, Runs), Runs);
-        //FilteredRuns = pb.createAnd(FilteredRuns, pb.createNot(OrderedRun));
+        FilteredRuns = pb.createAnd(FilteredRuns, pb.createNot(OrderedRun));
         unsigned lgth_ceil = 1 << ceil_log2(lgth);
         unsigned lgth_offset = lgth_ceil - lgth;
         if (lgth_offset != 0) {
@@ -104,11 +104,9 @@ void AdjustRunsAndIndexes::generatePabloMethod() {
             AdjustedIndex = bnc.Select(lgthRun, bnc.AddModular(AdjustedIndex, lgth_offset), AdjustedIndex);
         }
     }
-    /*
     for (unsigned i = 0; i < SeqIndex.size(); i++) {
         AdjustedIndex[i] = pb.createAnd(AdjustedIndex[i], FilteredRuns);
     }
-    */
     writeOutputStreamSet("FilteredRuns", std::vector<PabloAST *>{FilteredRuns});
     writeOutputStreamSet("AdjustedIndex", AdjustedIndex);
 }
