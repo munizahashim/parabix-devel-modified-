@@ -96,7 +96,7 @@ void AdjustRunsAndIndexes::generatePabloMethod() {
         PabloAST * MisorderedAtStart = pb.createAnd(atRunStart, pb.createLookahead(Misordered, lgth-1), "MisorderedAtStart");
         PabloAST * OrderedRunStart = pb.createAnd(atRunStart, pb.createNot(MisorderedAtStart));
         PabloAST * OrderedRun = pb.createAnd(pb.createMatchStar(OrderedRunStart, Runs), Runs);
-        FilteredRuns = pb.createAnd(FilteredRuns, pb.createNot(OrderedRun));
+        //FilteredRuns = pb.createAnd(FilteredRuns, pb.createNot(OrderedRun));
         unsigned lgth_ceil = 1 << ceil_log2(lgth);
         unsigned lgth_offset = lgth_ceil - lgth;
         if (lgth_offset != 0) {
@@ -104,9 +104,11 @@ void AdjustRunsAndIndexes::generatePabloMethod() {
             AdjustedIndex = bnc.Select(lgthRun, bnc.AddModular(AdjustedIndex, lgth_offset), AdjustedIndex);
         }
     }
+    /*
     for (unsigned i = 0; i < SeqIndex.size(); i++) {
         AdjustedIndex[i] = pb.createAnd(AdjustedIndex[i], FilteredRuns);
     }
+    */
     writeOutputStreamSet("FilteredRuns", std::vector<PabloAST *>{FilteredRuns});
     writeOutputStreamSet("AdjustedIndex", AdjustedIndex);
 }
@@ -207,7 +209,7 @@ SwapBack_N::SwapBack_N(LLVMTypeSystemInterface & ts, unsigned n, StreamSet * Swa
 {Binding{"SwapMarks", SwapMarks, FixedRate(1), LookAhead(n)},
  Binding{"Source", Source, FixedRate(1), LookAhead(n)}},
 // output
-{Binding{"Swapped", Swapped, FixedRate(), InOut("Source")}}), mN(n) {
+{Binding{"Swapped", Swapped}}), mN(n) {
 }
 
 void SwapBack_N::generatePabloMethod() {
@@ -227,16 +229,7 @@ void SwapBack_N::generatePabloMethod() {
         PabloAST * flip = nested.createOr(compare, nested.createAdvance(compare, pb.getInteger(mN)));
         nested.createAssign(SwappedVar[i], nested.createXor(SourceSet[i], flip));
     }
-    Var * const SwappedOut = getOutputStreamVar("Swapped");
-    if (!codegen::DebugOptionIsSet(codegen::DisableInOutAttributes)) {
-        for (unsigned i = 0; i < SourceSet.size(); i++) {
-            nested.createAssign(nested.createExtract(SwappedOut, nested.getInteger(i)), SwappedVar[i]);
-        }
-    } else {
-        for (unsigned i = 0; i < SourceSet.size(); i++) {
-            pb.createAssign(pb.createExtract(SwappedOut, pb.getInteger(i)), SwappedVar[i]);
-        }
-    }
+    writeOutputStreamSet("Swapped", SwappedVar);
 }
 
 class RunTails : public PabloKernel {
