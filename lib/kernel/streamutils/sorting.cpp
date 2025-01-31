@@ -112,22 +112,23 @@ void AdjustRunsAndIndexes::generatePabloMethod() {
 }
 
 BitonicCompareStep::BitonicCompareStep(LLVMTypeSystemInterface & ts, unsigned distance, unsigned region_size,
-                                       StreamSet * SeqIndex, StreamSet * Basis, StreamSet * SwapMarks)
+                                       StreamSet * Runs, StreamSet * SeqIndex, StreamSet * Basis, StreamSet * SwapMarks)
 : PabloKernel(ts, "BitonicCompareStep<" + std::to_string(region_size) + "," + std::to_string(distance) + ">" +
               SeqIndex->shapeString() + "_" + Basis->shapeString(),
 // inputs
-{Binding{"SeqIndex", SeqIndex}, Binding{"Basis", Basis}},
+{Binding{"Runs", Runs}, Binding{"SeqIndex", SeqIndex}, Binding{"Basis", Basis}},
 // output
 {Binding{"SwapMarks", SwapMarks}}), mCompareDistance(distance), mRegionSize(region_size) {
 }
 
 void BitonicCompareStep::generatePabloMethod() {
     PabloBuilder pb(getEntryScope());
+    PabloAST * Runs = getInputStreamSet("Runs")[0];
     BixNum SeqIndex = getInputStreamSet("SeqIndex");
     BixNum Basis = getInputStreamSet("Basis");
     Var * SwapVar = pb.createVar("SwapVar", pb.createZeroes());
     BixNumCompiler bnc0(pb);
-    PabloAST * DistN = bnc0.UGE(SeqIndex, mCompareDistance);
+    PabloAST * DistN = bnc0.UGE(SeqIndex, mCompareDistance, "DistN");
     // If no instance has sequential index reaching the comparison distance,
     // there will be nothing to compare.
     auto nested = pb.createScope();
@@ -135,7 +136,7 @@ void BitonicCompareStep::generatePabloMethod() {
     BixNumCompiler bnc(nested);
     BixNum Forward_Basis(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
-        Forward_Basis[i] = nested.createAdvance(Basis[i], pb.getInteger(mCompareDistance));
+        Forward_Basis[i] = nested.createAdvance(Basis[i], pb.getInteger(mCompareDistance), "Fwd_basis" + std::to_string(i));
     }
     // Identify the separate regions.
     BixNum RegionNum;
@@ -144,16 +145,17 @@ void BitonicCompareStep::generatePabloMethod() {
     // Alternate between ascending and descending regions based on
     // the region number (examing the low bit of RegionNum.
     PabloAST * descending_regions = RegionNum[0];
-    PabloAST * compare = bnc.UGT(Forward_Basis, Basis);
-    compare = nested.createXor(compare, descending_regions);
+    PabloAST * compare = bnc.UGT(Forward_Basis, Basis, "compare1");
+    compare = nested.createXor(compare, descending_regions, "compare2");
     // Negation of > is <=, exclude the = case.
-    compare = nested.createAnd(compare, bnc.NEQ(Forward_Basis, Basis));
+    compare = nested.createAnd(compare, bnc.NEQ(Forward_Basis, Basis), "compare3");
     // Identify the high element of each comparison for a potential swap mark.
     BixNum ComparisonGroup;
     BixNum GroupIndex;
     bnc.Div(RegionIndex, mCompareDistance * 2, ComparisonGroup, GroupIndex);
     PabloAST * hi_elements_in_comparisons = bnc.UGE(GroupIndex, mCompareDistance);
     PabloAST * swap_mark = nested.createAnd(compare, hi_elements_in_comparisons);
+    swap_mark = nested.createAnd(swap_mark, nested.createAdvance(Runs, pb.getInteger(mCompareDistance)));
     nested.createAssign(SwapVar, swap_mark);
     pb.createAssign(pb.createExtract(getOutputStreamVar("SwapMarks"), pb.getInteger(0)), SwapVar);
 }
@@ -300,7 +302,7 @@ StreamSets BitonicSort(PipelineBuilder & P, unsigned instance_size, StreamSet * 
     }
 
     StreamSet * SwapMarks = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<BitonicCompareStep>(compare_distance, region_size, SeqIndex, PartiallySorted[0], SwapMarks);
+    P.CreateKernelCall<BitonicCompareStep>(compare_distance, region_size, Runs, SeqIndex, PartiallySorted[0], SwapMarks);
     SHOW_STREAM(SwapMarks);
 
     StreamSets Sorted(ToSort.size());
@@ -313,14 +315,14 @@ StreamSets BitonicSort(PipelineBuilder & P, unsigned instance_size, StreamSet * 
     if (instance_size <=2 ) {
         return Sorted;
     } else {
-        return BitonicMerge(P, instance_size, instance_size, SeqIndex, Sorted);
+        return BitonicMerge(P, instance_size, instance_size, Runs, SeqIndex, Sorted);
     }
 }
 
-StreamSets BitonicMerge(PipelineBuilder & P, unsigned region_size, unsigned instance_size, StreamSet * RunIndex, StreamSets & ToMerge) {
+StreamSets BitonicMerge(PipelineBuilder & P, unsigned region_size, unsigned instance_size, StreamSet * Runs, StreamSet * RunIndex, StreamSets & ToMerge) {
     
     StreamSet * MergeSwapMarks = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<BitonicCompareStep>(region_size/2, instance_size, RunIndex, ToMerge[0], MergeSwapMarks);
+    P.CreateKernelCall<BitonicCompareStep>(region_size/2, instance_size, Runs, RunIndex, ToMerge[0], MergeSwapMarks);
     SHOW_STREAM(MergeSwapMarks);
     
     StreamSets Merged(ToMerge.size());
@@ -332,6 +334,6 @@ StreamSets BitonicMerge(PipelineBuilder & P, unsigned region_size, unsigned inst
     if (region_size <= 2) {
         return Merged;
     } else {
-        return BitonicMerge(P, region_size/2, instance_size, RunIndex, Merged);
+        return BitonicMerge(P, region_size/2, instance_size, Runs, RunIndex, Merged);
     }
 }

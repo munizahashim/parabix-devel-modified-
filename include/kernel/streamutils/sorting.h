@@ -28,7 +28,7 @@ class BitonicCompareStep : public pablo::PabloKernel {
 public:
     BitonicCompareStep(LLVMTypeSystemInterface & ts,
                        unsigned distance, unsigned region_size,
-                       StreamSet * SeqIndex, StreamSet * Basis, StreamSet * SwapMarks);
+                       StreamSet * Runs, StreamSet * SeqIndex, StreamSet * Basis, StreamSet * SwapMarks);
 protected:
     void generatePabloMethod() override;
 private:
@@ -51,4 +51,4 @@ StreamSets BitonicSortRuns(PipelineBuilder & P, unsigned instance_size, StreamSe
 
 StreamSets BitonicSort(PipelineBuilder & P, unsigned runlgth, StreamSet * Runs, StreamSet * RunIndex, StreamSets & ToSort);
 
-StreamSets BitonicMerge(PipelineBuilder & P, unsigned region_size, unsigned instance_size, StreamSet * RunIndex, StreamSets & ToMerge);
+StreamSets BitonicMerge(PipelineBuilder & P, unsigned region_size, unsigned instance_size, StreamSet * Runs, StreamSet * RunIndex, StreamSets & ToMerge);
