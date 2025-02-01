@@ -112,13 +112,13 @@ void AdjustRunsAndIndexes::generatePabloMethod() {
 }
 
 BitonicCompareStep::BitonicCompareStep(LLVMTypeSystemInterface & ts, unsigned distance, unsigned region_size,
-                                       StreamSet * Runs, StreamSet * SeqIndex, StreamSet * Basis, StreamSet * SwapMarks)
+                                       StreamSet * Runs, StreamSet * SeqIndex, StreamSet * Basis, StreamSet * SwapMarks, StreamSet * Debug)
 : PabloKernel(ts, "BitonicCompareStep<" + std::to_string(region_size) + "," + std::to_string(distance) + ">" +
               SeqIndex->shapeString() + "_" + Basis->shapeString(),
 // inputs
 {Binding{"Runs", Runs}, Binding{"SeqIndex", SeqIndex}, Binding{"Basis", Basis}},
 // output
-{Binding{"SwapMarks", SwapMarks}}), mCompareDistance(distance), mRegionSize(region_size) {
+{Binding{"SwapMarks", SwapMarks}, Binding{"Debug", Debug}}), mCompareDistance(distance), mRegionSize(region_size) {
 }
 
 void BitonicCompareStep::generatePabloMethod() {
@@ -126,7 +126,13 @@ void BitonicCompareStep::generatePabloMethod() {
     PabloAST * Runs = getInputStreamSet("Runs")[0];
     BixNum SeqIndex = getInputStreamSet("SeqIndex");
     BixNum Basis = getInputStreamSet("Basis");
+    auto advance_amt = pb.getInteger(mCompareDistance);
     Var * SwapVar = pb.createVar("SwapVar", pb.createZeroes());
+    // Bitonic swapping:
+    // At step N (N = 0, 1, ...):
+    // Comparison distance is mCompareDistance = 1 << N.
+    // Input is divided into groups of size 1 << (N + 2) (group size 4, for N = 0).
+    // Each input group is split into 2 subgroups of size (1 << (N + 1)) (size 2 for N = 0)
     BixNumCompiler bnc0(pb);
     PabloAST * DistN = bnc0.UGE(SeqIndex, mCompareDistance, "DistN");
     // If no instance has sequential index reaching the comparison distance,
@@ -136,71 +142,25 @@ void BitonicCompareStep::generatePabloMethod() {
     BixNumCompiler bnc(nested);
     BixNum Forward_Basis(Basis.size());
     for (unsigned i = 0; i < Basis.size(); i++) {
-        Forward_Basis[i] = nested.createAdvance(Basis[i], pb.getInteger(mCompareDistance), "Fwd_basis" + std::to_string(i));
+        Forward_Basis[i] = nested.createAdvance(Basis[i], advance_amt, "Fwd_basis" + std::to_string(i));
     }
     // Identify the separate regions.
-    BixNum RegionNum;
-    BixNum RegionIndex;
-    bnc.Div(SeqIndex, mRegionSize, RegionNum, RegionIndex);
-    // Alternate between ascending and descending regions based on
-    // the region number (examing the low bit of RegionNum.
-    PabloAST * descending_regions = RegionNum[0];
-    PabloAST * compare = bnc.UGT(Forward_Basis, Basis, "compare1");
-    compare = nested.createXor(compare, descending_regions, "compare2");
+    unsigned bit_identifying_hi_region = ceil_log2(mRegionSize);
+    PabloAST * descending_regions = nested.createZeroes();
+    if (SeqIndex.size() > bit_identifying_hi_region) {
+        descending_regions = SeqIndex[bit_identifying_hi_region];
+    }
+    unsigned bit_identifying_subgroup_hi_elements = ceil_log2(mCompareDistance);
+    PabloAST * hi_elements_in_comparisons = SeqIndex[bit_identifying_subgroup_hi_elements];
+    PabloAST * gt_forward = bnc.UGT(Forward_Basis, Basis, "gt_forward");
+    PabloAST * compare = nested.createXor(gt_forward, descending_regions, "compare");
     // Negation of > is <=, exclude the = case.
     compare = nested.createAnd(compare, bnc.NEQ(Forward_Basis, Basis), "compare3");
-    // Identify the high element of each comparison for a potential swap mark.
-    BixNum ComparisonGroup;
-    BixNum GroupIndex;
-    bnc.Div(RegionIndex, mCompareDistance * 2, ComparisonGroup, GroupIndex);
-    PabloAST * hi_elements_in_comparisons = bnc.UGE(GroupIndex, mCompareDistance);
     PabloAST * swap_mark = nested.createAnd(compare, hi_elements_in_comparisons);
-    swap_mark = nested.createAnd(swap_mark, nested.createAdvance(Runs, pb.getInteger(mCompareDistance)));
+    swap_mark = nested.createAnd(swap_mark, nested.createAdvance(Runs, advance_amt));
     nested.createAssign(SwapVar, swap_mark);
     pb.createAssign(pb.createExtract(getOutputStreamVar("SwapMarks"), pb.getInteger(0)), SwapVar);
 }
-
-
-/*
-void BitonicCompareStep::generatePabloMethod() {
-    PabloBuilder pb(getEntryScope());
-    BixNum SeqIndex = getInputStreamSet("SeqIndex");
-    BixNum Basis = getInputStreamSet("Basis");
-    Var * SwapVar = pb.createVar("SwapVar", pb.createZeroes());
-    //
-    // Bitonic swapping:
-    // At step N (N = 0, 1, ...):
-    // Comparison distance is mDistance = 1 << N.
-    // Input is divided into groups of size 1 << (N + 2) (group size 4, for N = 0).
-    // Each input group is split into 2 subgroups of size (1 << (N + 1)) (size 2 for N = 0)
-    unsigned step = ceil_log2(mCompareDistance);
-    BixNumCompiler bnc0(pb);
-    PabloAST * DistN = bnc0.UGE(SeqIndex, mCompareDistance);
-    auto nested = pb.createScope();
-    pb.createIf(DistN, nested);
-    BixNumCompiler bnc(nested);
-    BixNum Forward_Basis(Basis.size());
-    for (unsigned i = 0; i < Basis.size(); i++) {
-        Forward_Basis[i] = nested.createAdvance(Basis[i], pb.getInteger(mCompareDistance));
-    }
-    // Now we can identify the elements of subgroups by bit numbers.
-    unsigned bit_identifying_hi_subgroup = step + 1;
-    SeqIndex = bnc.ZeroExtend(SeqIndex, bit_identifying_hi_subgroup + 1);
-    unsigned bit_identifying_subgroup_hi_elements = step;
-    PabloAST * hi_elements_in_subgroups = SeqIndex[bit_identifying_subgroup_hi_elements];
-    // Perform the comparisons
-    PabloAST * compare = bnc.UGT(Forward_Basis, Basis);
-        PabloAST * hi_subgroups = SeqIndex[bit_identifying_hi_subgroup];
-        // Reverse the comparisons for hi subgroups
-        compare = nested.createXor(compare, hi_subgroups);
-        // Bit flipping of > compare gives <= comparison, exclude the = cases.
-        compare = nested.createAnd(compare, bnc.NEQ(Forward_Basis, Basis));
-    // Identify swaps at the high half of each subgroup only.
-    PabloAST * swap_mark = nested.createAnd(compare, hi_elements_in_subgroups);
-    nested.createAssign(SwapVar, swap_mark);
-    pb.createAssign(pb.createExtract(getOutputStreamVar("SwapMarks"), pb.getInteger(0)), SwapVar);
-}
-*/
 
 
 SwapBack_N::SwapBack_N(LLVMTypeSystemInterface & ts, unsigned n, StreamSet * SwapMarks, StreamSet * Source, StreamSet * Swapped)
@@ -230,6 +190,35 @@ void SwapBack_N::generatePabloMethod() {
         nested.createAssign(SwappedVar[i], nested.createXor(SourceSet[i], flip));
     }
     writeOutputStreamSet("Swapped", SwappedVar);
+}
+
+class AppendStreamSets : public PabloKernel {
+public:
+    AppendStreamSets(LLVMTypeSystemInterface & ts, StreamSet * A, StreamSet * B, StreamSet * Combined);
+protected:
+    void generatePabloMethod() override;
+};
+
+AppendStreamSets::AppendStreamSets(LLVMTypeSystemInterface & ts, StreamSet * A, StreamSet * B, StreamSet * Combined)
+: PabloKernel(ts, "AppendStreamSets_" + A->shapeString() + "_" + B->shapeString(),
+// inputs
+{Binding{"A", A}, Binding{"B", B}},
+// output
+{Binding{"Combined", Combined}}) {
+}
+
+void AppendStreamSets::generatePabloMethod() {
+    PabloBuilder pb(getEntryScope());
+    std::vector<PabloAST *> A = getInputStreamSet("A");
+    std::vector<PabloAST *> B = getInputStreamSet("B");
+    std::vector<PabloAST *> Combined(A.size() + B.size());
+    for (unsigned i = 0; i < A.size(); i++) {
+        Combined[i + B.size()] = A[i];
+    }
+    for (unsigned i = 0; i < B.size(); i++) {
+        Combined[i] = B[i];
+    }
+    writeOutputStreamSet("Combined", Combined);
 }
 
 class RunTails : public PabloKernel {
@@ -287,6 +276,9 @@ StreamSets  BitonicSortRuns(PipelineBuilder & P, unsigned instance_size, StreamS
     P.CreateKernelCall<AdjustRunsAndIndexes>(Runs, Misordered, SeqIndex, FilteredRuns, AdjustedIndex);
     SHOW_STREAM(FilteredRuns);
     SHOW_BIXNUM(AdjustedIndex);
+    StreamSet * SortOrder = P.CreateStreamSet(SeqIndex->getNumElements() + ToSort[0]->getNumElements());
+    P.CreateKernelCall<AppendStreamSets>(ToSort[0], AdjustedIndex, SortOrder);
+    ToSort[0] = SortOrder;
     return BitonicSort(P, instance_size, FilteredRuns, AdjustedIndex, ToSort);
 }
 
@@ -301,8 +293,10 @@ StreamSets BitonicSort(PipelineBuilder & P, unsigned instance_size, StreamSet * 
         PartiallySorted = ToSort;
     }
 
+    StreamSet * Debug = P.CreateStreamSet(1, 1);
     StreamSet * SwapMarks = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<BitonicCompareStep>(compare_distance, region_size, Runs, SeqIndex, PartiallySorted[0], SwapMarks);
+    P.CreateKernelCall<BitonicCompareStep>(compare_distance, region_size, Runs, SeqIndex, PartiallySorted[0], SwapMarks, Debug);
+    SHOW_STREAM(Debug);
     SHOW_STREAM(SwapMarks);
 
     StreamSets Sorted(ToSort.size());
@@ -322,9 +316,11 @@ StreamSets BitonicSort(PipelineBuilder & P, unsigned instance_size, StreamSet * 
 StreamSets BitonicMerge(PipelineBuilder & P, unsigned region_size, unsigned instance_size, StreamSet * Runs, StreamSet * RunIndex, StreamSets & ToMerge) {
     
     StreamSet * MergeSwapMarks = P.CreateStreamSet(1, 1);
-    P.CreateKernelCall<BitonicCompareStep>(region_size/2, instance_size, Runs, RunIndex, ToMerge[0], MergeSwapMarks);
+    StreamSet * Debug = P.CreateStreamSet(1, 1);
+    P.CreateKernelCall<BitonicCompareStep>(region_size/2, instance_size, Runs, RunIndex, ToMerge[0], MergeSwapMarks, Debug);
     SHOW_STREAM(MergeSwapMarks);
-    
+    SHOW_STREAM(Debug);
+
     StreamSets Merged(ToMerge.size());
     for (unsigned i = 0; i < ToMerge.size(); i++) {
         Merged[i] = P.CreateStreamSet(ToMerge[i]->getNumElements(), 1);

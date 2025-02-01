@@ -28,7 +28,7 @@ class BitonicCompareStep : public pablo::PabloKernel {
 public:
     BitonicCompareStep(LLVMTypeSystemInterface & ts,
                        unsigned distance, unsigned region_size,
-                       StreamSet * Runs, StreamSet * SeqIndex, StreamSet * Basis, StreamSet * SwapMarks);
+                       StreamSet * Runs, StreamSet * SeqIndex, StreamSet * Basis, StreamSet * SwapMarks, StreamSet * Debug = nullptr);
 protected:
     void generatePabloMethod() override;
 private:
