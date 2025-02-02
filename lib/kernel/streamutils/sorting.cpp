@@ -157,7 +157,11 @@ void BitonicCompareStep::generatePabloMethod() {
     // Negation of > is <=, exclude the = case.
     compare = nested.createAnd(compare, bnc.NEQ(Forward_Basis, Basis), "compare3");
     PabloAST * swap_mark = nested.createAnd(compare, hi_elements_in_comparisons);
-    swap_mark = nested.createAnd(swap_mark, nested.createAdvance(Runs, advance_amt));
+    PabloAST * consecutiveRuns = Runs;
+    for (unsigned i = 1; i < mCompareDistance; i*=2) {
+        consecutiveRuns = nested.createAnd(consecutiveRuns, nested.createAdvance(consecutiveRuns, i));
+    }
+    swap_mark = nested.createAnd(swap_mark, consecutiveRuns);
     nested.createAssign(SwapVar, swap_mark);
     pb.createAssign(pb.createExtract(getOutputStreamVar("SwapMarks"), pb.getInteger(0)), SwapVar);
 }
