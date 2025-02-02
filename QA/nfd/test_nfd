@@ -7,8 +7,10 @@
 test_dir=`echo "$0" | sed "s/[^\/]*$//"`
 
 test_program=$1
+normalization_directory=../Normalization
 input_directory=TestFiles
 output_directory=nfd_output
+expected_directory=ExpectedOutput
 
 
 [ -x "$output_directory.bak" ] && rm -rf $output_directory.bak
@@ -16,7 +18,23 @@ output_directory=nfd_output
 
 mkdir $output_directory
 
-$test_program ../All_good >$output_directory/All_good.nfd
+for f in $normalization_directory/NFK*
+do
+   fbase=`echo $f | sed "s#$normalization_directory/##"`
+   cp $normalization_directory/NFKD $expected_directory/$fbase.nfd
+done
+
+for f in $normalization_directory/NF[^K]*
+do
+   fbase=`echo $f | sed "s#$normalization_directory/##"`
+   cp $normalization_directory/NFD $expected_directory/$fbase.nfd
+done
+
+for f in $normalization_directory/*
+do
+   fbase=`echo $f | sed "s#$normalization_directory/##"`
+   $test_program  $normalization_directory/$fbase >$output_directory/$fbase.nfd
+done
 
 for f in $input_directory/*
 do
@@ -24,5 +42,5 @@ do
    $test_program  $input_directory/$fbase >$output_directory/$fbase.nfd
 done
 
-echo "diff -q ExpectedOutput TestOutput"
+echo "diff -q ExpectedOutput nfd_output"
 diff -q ExpectedOutput nfd_output
