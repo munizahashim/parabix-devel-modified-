@@ -113,17 +113,17 @@ extern "C" void finalize_match_wrapper(MatchAccumulator * accum_addr, char * buf
     accum_addr->finalize_match(buffer_end);
 }
 
-extern "C" unsigned get_file_count_wrapper(MatchAccumulator * accum_addr) {
+extern "C" size_t get_file_count_wrapper(MatchAccumulator * accum_addr) {
     assert ("passed a null accumulator" && accum_addr);
     return accum_addr->getFileCount();
 }
 
-extern "C" size_t get_file_start_pos_wrapper(MatchAccumulator *accum_addr, unsigned fileNo) {
+extern "C" size_t get_file_start_pos_wrapper(MatchAccumulator *accum_addr, size_t fileNo) {
     assert ("passed a null accumulator" && accum_addr);
     return accum_addr->getFileStartPos(fileNo);
 }
 
-extern "C" void set_batch_line_number_wrapper(MatchAccumulator *accum_addr, unsigned fileNo, size_t batchLine) {
+extern "C" void set_batch_line_number_wrapper(MatchAccumulator *accum_addr, size_t fileNo, size_t batchLine) {
     assert ("passed a null accumulator" && accum_addr);
     accum_addr->setBatchLineNumber(fileNo, batchLine);
 }
@@ -755,13 +755,13 @@ void EmitMatch::setStringStream(std::ostringstream * s) {
     mResultStr = s;
 }
 
-unsigned EmitMatch::getFileCount() {
+size_t EmitMatch::getFileCount() {
     mCurrentFile = 0;
     if (mFileNames.size() == 0) return 1;
     return mFileNames.size();
 }
 
-size_t EmitMatch::getFileStartPos(unsigned fileNo) {
+size_t EmitMatch::getFileStartPos(size_t fileNo) {
     if (mFileStartPositions.size() == 0) return 0;
     assert(fileNo < mFileStartPositions.size());
     //llvm::errs() << "getFileStartPos(" << fileNo << ") = ";
@@ -770,7 +770,7 @@ size_t EmitMatch::getFileStartPos(unsigned fileNo) {
     return mFileStartPositions[fileNo];
 }
 
-void EmitMatch::setBatchLineNumber(unsigned fileNo, size_t batchLine) {
+void EmitMatch::setBatchLineNumber(size_t fileNo, size_t batchLine) {
     //llvm::errs() << "setBatchLineNumber(" << fileNo << ", " << batchLine << ")  file = " << mFileNames[fileNo] << "\n";
     mFileStartLineNumbers[fileNo+1] = batchLine;
     if (!mTerminated) *mResultStr << "\n";
