@@ -1125,16 +1125,27 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
     accum.mFileStartPositions.reserve(filesOpened);
     AlignedAllocator<char, batch_alignment> alloc;
     size_t current_start_position = 0;
-    bool singleFileMMapMode = (filesOpened == 1) && canMMap(fileNames[lastOpened]);
-    if (singleFileMMapMode) {
+
+    auto tryMMapOpen = [&]() -> bool {
+        if (filesOpened != 1) return false;
+        if (!canMMap(fileNames[lastOpened])) return false;
         auto mmap_ptr = mmap(NULL, fileSize[lastOpened], PROT_READ, MAP_PRIVATE, fileDescriptor[lastOpened], 0);
+        if (LLVM_UNLIKELY(mmap_ptr == MAP_FAILED)) {
+            return false;
+        }
         accum.mBatchBuffer = reinterpret_cast<char *>(mmap_ptr);
         accum.mFileNames.push_back(fileNames[lastOpened]);
         accum.mFileStartPositions.push_back(static_cast<size_t>(0));
+        return true;
+    };
+
+    bool usingMMap = false;
+    if (tryMMapOpen()) {
+        usingMMap = true;
     } else {
+
         cumulativeSize += filesOpened;  // Add an extra byte per file for possible '\n'.
         size_t aligned_size = (cumulativeSize + batch_alignment - 1) & -batch_alignment;
-
         accum.mBatchBuffer = alloc.allocate(aligned_size, 0);
         if (accum.mBatchBuffer == nullptr) {
             llvm::report_fatal_error(llvm::StringRef("Unable to allocate batch buffer of size: ") + std::to_string(aligned_size));
@@ -1177,7 +1188,7 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
         }
         f(accum.mBatchBuffer, cumulativeSize, accum, mMaxCount);
     }
-    if (singleFileMMapMode) {
+    if (usingMMap) {
         munmap(reinterpret_cast<void *>(accum.mBatchBuffer), fileSize[lastOpened]);
     } else {
         alloc.deallocate(accum.mBatchBuffer, 0);
