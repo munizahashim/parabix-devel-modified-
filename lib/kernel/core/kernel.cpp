@@ -365,16 +365,23 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
             const auto sharedGroupCount = sharedGroups.size();
             const auto threadLocalGroupCount = threadLocalGroups.size();
 
-            std::vector<std::vector<Type *>> shared(sharedGroupCount + 2);
-            std::vector<std::vector<Type *>> threadLocal(threadLocalGroupCount);
+            using VecOfTypes = std::vector<std::vector<Type *>>;
+
+            VecOfTypes shared(sharedGroupCount + 2);
+            VecOfTypes threadLocal(threadLocalGroupCount);
+
+            Type * const emptyTy = StructType::get(b.getContext());
+
+            auto addScalar = [&emptyTy](VecOfTypes & S, const unsigned group, Type * type) {
+                auto & V = S[group];
+                V.push_back(type); assert (type);
+                V.push_back(emptyTy);
+            };
 
             for (const auto & scalar : mInputScalars) {
-                assert (scalar.getType());
-                shared[0].push_back(scalar.getType());
+                addScalar(shared, 0, scalar.getType());
             }
 
-            // TODO: make "grouped" internal scalars that are automatically packed into cache-aligned structs
-            // within the kernel state to hide the complexity from the user?
             for (const auto & scalar : mInternalScalars) {
                 assert (scalar.getValueType());
 
@@ -386,10 +393,10 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
 
                 switch (scalar.getScalarType()) {
                     case ScalarType::Internal:
-                        shared[getGroupIndex(sharedGroups) + 1].push_back(scalar.getValueType());
+                        addScalar(shared, getGroupIndex(sharedGroups) + 1, scalar.getValueType());
                         break;
                     case ScalarType::ThreadLocal:
-                        threadLocal[getGroupIndex(threadLocalGroups)].push_back(scalar.getValueType());
+                        addScalar(threadLocal, getGroupIndex(threadLocalGroups), scalar.getValueType());
                         break;
                     default: break;
                 }
@@ -397,8 +404,7 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
 
             assert (shared[sharedGroupCount + 1].empty());
             for (const auto & scalar : mOutputScalars) {
-                assert (scalar.getType());
-                shared[sharedGroupCount + 1].push_back(scalar.getType());
+                addScalar(shared, sharedGroupCount + 1, scalar.getType());
             }
 
             IntegerType * const int8Ty = b.getInt8Ty();
@@ -407,16 +413,18 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
 
             DataLayout dl(m);
 
-            auto makeStructType = [&](StructType * st,
-                                      const std::vector<std::vector<Type *>> & structTypeVec,
+            auto makeStructType = [&](StructType * st, VecOfTypes & structTypeVec,
                                       StringRef name, const bool addGroupCacheLinePadding) -> StructType * {
 
                 const auto n = structTypeVec.size();
                 for (unsigned i = 0; i < n; ++i) {
-                    const auto & V = structTypeVec[i];
-                    for (unsigned j = 0; j < V.size(); ++j) {
-                        assert (isa<StructType>(V[j]) ? !cast<StructType>(V[j])->isOpaque() : true);
-                        if (LLVM_LIKELY(!V[j]->isEmptyTy())) {
+                    const auto & S = structTypeVec[i];
+                    const auto m = S.size();
+                    assert ((m % 2) == 0);
+                    for (unsigned j = 0; j < m; j += 2) {
+                        assert (isa<StructType>(S[j]) ? !cast<StructType>(S[j])->isOpaque() : true);
+                        assert (S[j + 1] == emptyTy);
+                        if (LLVM_LIKELY(!S[j]->isEmptyTy())) {
                             goto found_non_empty_type;
                         }
                     }
@@ -424,23 +432,67 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
 
                 return nullptr;
     found_non_empty_type:
-                std::vector<Type *> structTypes(n * 2);
+                std::vector<Type *> structTypes(n);
 
-                const auto align = addGroupCacheLinePadding ? cacheAlignment : 1UL;
+                auto getAlignOf = [&](Type * ty) {
+                    return dl.getABITypeAlign(ty).value();
+                };
 
                 size_t byteOffset = 0;
                 for (unsigned i = 0; i < n; ++i) {
-                    StructType * const sty = StructType::create(b.getContext(), structTypeVec[i]);
-                    assert (sty->isSized());
-                    const auto typeSize = CBuilder::getTypeSize(dl, sty);
-                    byteOffset += typeSize;
-                    const auto offset = (byteOffset % align);
-                    const auto padding = i < (n - 1) ? ((align - offset) % align) : 0UL;
-                    structTypes[i * 2] = sty;
-                    ArrayType * const paddingTy = ArrayType::get(int8Ty, padding);
-                    assert (paddingTy->isSized());
-                    structTypes[i * 2 + 1] = paddingTy;
-                    byteOffset += padding;
+                    auto & S = structTypeVec[i];
+                    const auto m = S.size();
+                    assert ((m % 2) == 0);
+                    if (LLVM_UNLIKELY(m == 0)) {
+                        structTypes[i] = emptyTy;
+                    } else {
+                        const auto firstTypeSize = CBuilder::getTypeSize(dl, S[0]);
+
+                        // the first type of each group struct must always be aligned correctly
+                        assert ((byteOffset % getAlignOf(S[0])) == 0);
+
+                        byteOffset += firstTypeSize;
+
+                        auto setPaddingForNextElement = [&](const unsigned j, const uint64_t align) {
+                            const auto offset = (byteOffset % align);
+                            assert ((j % 2) == 1);
+                            assert (S[j] == emptyTy);
+                            if (offset) {
+                                const auto padding = align - offset;
+                                assert (padding > 0);
+                                S[j] = ArrayType::get(int8Ty, padding);
+                                byteOffset += padding;
+                                assert ((byteOffset % align) == 0);
+                            }
+                        };
+
+                        for (unsigned j = 0; j < (m - 2); j += 2) {
+                            const auto align = getAlignOf(S[j + 2]);
+                            setPaddingForNextElement(j + 1, align);
+                            // add in the typesize of the next type (that we offset the prior entry
+                            // for to ensure it's correctly aligned.)
+                            byteOffset += CBuilder::getTypeSize(dl, S[j + 2]);
+                        }
+
+                        uint64_t nextReqAlign = addGroupCacheLinePadding ? cacheAlignment : 1UL;
+
+                        // find next non empty struct to see if we need to add any cache line
+                        for (unsigned k = i + 1; k < n; ++k) {
+                            const auto & N = structTypeVec[k];
+                            if (N.size() > 0) {
+                                const auto nextFirstAlign = getAlignOf(N[0]);
+                                nextReqAlign = std::max(nextReqAlign, nextFirstAlign);
+                                break;
+                            }
+                        }
+
+                        setPaddingForNextElement(m - 1, nextReqAlign);
+
+                        StructType * const sty = StructType::create(b.getContext(), structTypeVec[i]);
+                        assert (sty->isSized());
+                        structTypes[i] = sty;
+
+                    }
                 }
 
                 if (st == nullptr) {
@@ -462,7 +514,7 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
                 assert ("expected stuct size does not match type size?" && sl->getSizeInBytes() >= byteOffset);
                 if (addGroupCacheLinePadding) {
                     for (unsigned i = 0; i < n; ++i) {
-                        const auto offset = sl->getElementOffset(i * 2);
+                        const auto offset = sl->getElementOffset(i);
                         assert ("cache line group alignment failed." && (offset % cacheAlignment) == 0);
                     }
                 }
@@ -474,7 +526,7 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
             // NOTE: StructType::create always creates a new type even if an identical one exists.
             const auto allowStructPadding = !codegen::DebugOptionIsSet(codegen::DisableCacheAlignedKernelStructs);
             if (mSharedStateType == nullptr || mSharedStateType->isOpaque()) {
-                mSharedStateType = makeStructType(mSharedStateType, shared, strShared, sharedGroupCount > 1 && allowStructPadding);
+                mSharedStateType = makeStructType(mSharedStateType, shared, strShared, allowStructPadding);
                 assert (nullIfEmpty(mSharedStateType) == mSharedStateType);
             }
             if (mThreadLocalStateType == nullptr || mThreadLocalStateType->isOpaque()) {
