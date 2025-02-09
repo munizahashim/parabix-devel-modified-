@@ -77,7 +77,7 @@ void PipelineCompiler::recordDynamicThreadingState(KernelBuilder & b, Value * se
 
     assert (TraceDynamicMultithreading);
     Value * dataPtr = b.getScalarFieldPtr(STATISTICS_DYNAMIC_MULTITHREADING_STATE_CURRENT).first;
-    Value * data = b.CreateLoad(DMEntryGroupTy->getPointerTo(), dataPtr);
+    Value * data = b.CreateAlignedLoad(DMEntryGroupTy->getPointerTo(), dataPtr, PtrTyABIAlignment);
     Constant * const i32_ZERO = b.getInt32(0);
     Constant * const i32_ONE = b.getInt32(1);
     Constant * const i32_TWO = b.getInt32(2);
@@ -85,7 +85,7 @@ void PipelineCompiler::recordDynamicThreadingState(KernelBuilder & b, Value * se
     groupIndices[0] = i32_ZERO;
     groupIndices[1] = i32_ONE;
     Value * currentCountPtr = b.CreateGEP(DMEntryGroupTy, data, groupIndices);
-    Value * const currentCount = b.CreateLoad(i64Ty, currentCountPtr);
+    Value * const currentCount = b.CreateAlignedLoad(i64Ty, currentCountPtr, Int64TyABIAlignment);
     Value * const outOfSpace = b.CreateICmpEQ(currentCount, b.getSize(MAX_ENTRY_GROUP_SIZE));
     BasicBlock * const mallocNewChunk = b.CreateBasicBlock("mallocNewDynamicThreadingBlock");
     BasicBlock * const updateDynamicThreading = b.CreateBasicBlock("updateDynamicThreadingTrace");

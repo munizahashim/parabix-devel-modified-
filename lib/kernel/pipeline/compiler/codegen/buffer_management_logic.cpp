@@ -305,7 +305,7 @@ void PipelineCompiler::updateExternalProducedItemCounts(KernelBuilder & b) {
             assert (isFromCurrentFunction(b, mProducedOutputItemPtr[k], false));
 
             assert (mProducedOutputItemPtr[k]->getType()->isPointerTy());
-            b.CreateStore(itemCount, mProducedOutputItemPtr[k]);
+            b.CreateAlignedStore(itemCount, mProducedOutputItemPtr[k], SizeTyABIAlignment);
         }
     }
 }
@@ -508,12 +508,12 @@ void PipelineCompiler::readProcessedItemCounts(KernelBuilder & b) {
 
             auto prodRef = b.getScalarFieldPtr(prefix + suffix);
             mProcessedItemCountPtr[inputPort] = prodRef.first;
-            Value * itemCount = b.CreateLoad(prodRef.second, prodRef.first);
+            Value * itemCount = b.CreateAlignedLoad(prodRef.second, prodRef.first, SizeTyABIAlignment);
             mInitiallyProcessedItemCount[inputPort] = itemCount;
             if (br.isDeferred()) {
                 auto defRef = b.getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
                 mProcessedDeferredItemCountPtr[inputPort] = defRef.first;
-                itemCount = b.CreateLoad(defRef.second, defRef.first);
+                itemCount = b.CreateAlignedLoad(defRef.second, defRef.first, SizeTyABIAlignment);
                 mInitiallyProcessedDeferredItemCount[inputPort] = itemCount;
             }
         }
@@ -566,7 +566,7 @@ void PipelineCompiler::readProducedItemCounts(KernelBuilder & b) {
 
             auto prodRef = b.getScalarFieldPtr(prefix + suffix);
             Value * itemCountPtr = prodRef.first;
-            Value * itemCount = b.CreateLoad(prodRef.second, itemCountPtr);
+            Value * itemCount = b.CreateAlignedLoad(prodRef.second, itemCountPtr, SizeTyABIAlignment);
 
             mProducedItemCountPtr[outputPort] = itemCountPtr;
             mInitiallyProducedItemCount[streamSet] = itemCount;
@@ -574,7 +574,7 @@ void PipelineCompiler::readProducedItemCounts(KernelBuilder & b) {
             if (br.isDeferred()) {
                 auto defRef = b.getScalarFieldPtr(prefix + DEFERRED_ITEM_COUNT_SUFFIX);
                 Value * itemCountPtr = defRef.first;
-                Value * itemCount = b.CreateLoad(defRef.second, itemCountPtr);
+                Value * itemCount = b.CreateAlignedLoad(defRef.second, itemCountPtr, SizeTyABIAlignment);
                 mProducedDeferredItemCountPtr[outputPort] = itemCountPtr;
                 mInitiallyProducedDeferredItemCount[streamSet] = itemCount;
             }
@@ -604,14 +604,14 @@ void PipelineCompiler::writeUpdatedItemCounts(KernelBuilder & b) {
         } else {
             ptr = mProcessedItemCountPtr[inputPort];
         }
-        b.CreateStore(mUpdatedProcessedPhi[inputPort], ptr);
+        b.CreateAlignedStore(mUpdatedProcessedPhi[inputPort], ptr, SizeTyABIAlignment);
         #ifdef PRINT_DEBUG_MESSAGES
         const auto prefix = makeBufferName(mKernelId, inputPort);
         debugPrint(b, " @ writing " + prefix + "_processed = %" PRIu64, mUpdatedProcessedPhi[inputPort]);
         #endif
         if (br.isDeferred()) {
             assert (!mCurrentKernelIsStateFree);
-            b.CreateStore(mUpdatedProcessedDeferredPhi[inputPort], mProcessedDeferredItemCountPtr[inputPort]);
+            b.CreateAlignedStore(mUpdatedProcessedDeferredPhi[inputPort], mProcessedDeferredItemCountPtr[inputPort], SizeTyABIAlignment);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, " @ writing " + prefix + "_processed(deferred) = %" PRIu64, mUpdatedProcessedDeferredPhi[inputPort]);
             #endif
@@ -631,14 +631,14 @@ void PipelineCompiler::writeUpdatedItemCounts(KernelBuilder & b) {
         } else {
             ptr = mProducedItemCountPtr[outputPort];
         }
-        b.CreateStore(mUpdatedProducedPhi[outputPort], ptr);
+        b.CreateAlignedStore(mUpdatedProducedPhi[outputPort], ptr, SizeTyABIAlignment);
         #ifdef PRINT_DEBUG_MESSAGES
         const auto prefix = makeBufferName(mKernelId, outputPort);
         debugPrint(b, " @ writing " + prefix + "_produced = %" PRIu64, mUpdatedProducedPhi[outputPort]);
         #endif
         if (br.isDeferred()) {
             assert (!mCurrentKernelIsStateFree);
-            b.CreateStore(mUpdatedProducedDeferredPhi[outputPort], mProducedDeferredItemCountPtr[outputPort]);
+            b.CreateAlignedStore(mUpdatedProducedDeferredPhi[outputPort], mProducedDeferredItemCountPtr[outputPort], SizeTyABIAlignment);
             #ifdef PRINT_DEBUG_MESSAGES
             debugPrint(b, " @ writing " + prefix + "_produced(deferred) = %" PRIu64, mUpdatedProducedDeferredPhi[outputPort]);
             #endif
@@ -661,7 +661,7 @@ void PipelineCompiler::writeCrossThreadedProducedItemCountAfterTermination(Kerne
             const BufferPort & br = mBufferGraph[e];
             const auto outputPort = br.Port;
             Value * const produced = mProducedAtTermination[outputPort];
-            b.CreateStore(produced, mProducedItemCountPtr[outputPort]);
+            b.CreateAlignedStore(produced, mProducedItemCountPtr[outputPort], SizeTyABIAlignment);
         }
     }
 }
@@ -695,7 +695,7 @@ void PipelineCompiler::recordFinalProducedItemCounts(KernelBuilder & b) {
             for (const auto f : make_iterator_range(out_edges(streamSet, mBufferGraph))) {
                 const BufferPort & external = mBufferGraph[f];
                 Value * const ptr = getProducedOutputItemsPtr(external.Port.Number);
-                b.CreateStore(mLocallyAvailableItems[streamSet], ptr);
+                b.CreateAlignedStore(mLocallyAvailableItems[streamSet], ptr, SizeTyABIAlignment);
             }
         }
 
@@ -721,7 +721,7 @@ void PipelineCompiler::readReturnedOutputVirtualBaseAddresses(KernelBuilder & b)
             assert (bn.isNonThreadLocal());
             Value * const ptr = mReturnedOutputVirtualBaseAddressPtr[port]; assert (ptr);
             StreamSetBuffer * const buffer = bn.Buffer;
-            Value * vba = b.CreateLoad(buffer->getPointerType(), ptr);
+            Value * vba = b.CreateAlignedLoad(buffer->getPointerType(), ptr, PtrTyABIAlignment);
             buffer->setBaseAddress(b, vba);
 //            if (CheckAssertions) {
 //                b.CreateAssert(vba, "%s.%s returned virtual base addresss cannot be null",

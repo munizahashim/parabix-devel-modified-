@@ -840,12 +840,13 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
         // delete any old buffer if one exists
         Type * bufTy;
         std::tie(priorBufferPtr, bufTy) = getScalarFieldPtr(b, prefix + PENDING_FREEABLE_BUFFER_ADDRESS);
-        Value * const priorBuffer = b.CreateLoad(bufTy, priorBufferPtr); // <- threadlocal
+        Value * const priorBuffer = b.CreateAlignedLoad(bufTy, priorBufferPtr, PtrTyABIAlignment); // <- threadlocal
         Type * intTy;
         std::tie(priorCapacityPtr, intTy) = getScalarFieldPtr(b, prefix + PENDING_FREEABLE_BUFFER_CAPACITY);
-        Value * const priorCapacity = b.CreateLoad(intTy, priorCapacityPtr);
+        assert (intTy == b.getSizeTy());
+        Value * const priorCapacity = b.CreateAlignedLoad(intTy, priorCapacityPtr, SizeTyABIAlignment);
         buffer->destroyBuffer(b, priorBuffer, priorCapacity);
-        b.CreateStore(ConstantPointerNull::get(cast<PointerType>(bufTy)), priorBufferPtr);
+        b.CreateAlignedStore(ConstantPointerNull::get(cast<PointerType>(bufTy)), priorBufferPtr, PtrTyABIAlignment);
     }
 
     // If this kernel is statefree, we have a potential problem here. Another thread may be actively
@@ -914,8 +915,8 @@ void PipelineCompiler::ensureSufficientOutputSpace(KernelBuilder & b, const Buff
             recordBufferExpansionHistory(b, streamSet, bn, port, buffer);
         }
         if (isMultithreaded()) {
-            b.CreateStore(priorBuffer, priorBufferPtr);
-            b.CreateStore(priorCapacity, priorCapacityPtr);
+            b.CreateAlignedStore(priorBuffer, priorBufferPtr, PtrTyABIAlignment);
+            b.CreateAlignedStore(priorCapacity, priorCapacityPtr, SizeTyABIAlignment);
         } else {
             buffer->destroyBuffer(b, priorBuffer, priorCapacity);
         }
@@ -1416,7 +1417,7 @@ Value * PipelineCompiler::getPartialSumItemCount(KernelBuilder & b, const Buffer
     }
 
     Value * const currentPtr = buffer->getRawItemPointer(b, sz_ZERO, position);
-    Value * current = b.CreateLoad(b.getSizeTy(), currentPtr);
+    Value * current = b.CreateAlignedLoad(b.getSizeTy(), currentPtr, SizeTyABIAlignment);
 
     #if defined(PRINT_DEBUG_MESSAGES) && defined(WRITE_POPCOUNT_VALUES_TO_STDERR)
     debugPrint(b, "  < pos[%" PRIu64 "] = %" PRIu64 " (0x%" PRIx64 ")\n",
@@ -1530,7 +1531,7 @@ Value * PipelineCompiler::getMaximumNumOfPartialSumStrides(KernelBuilder & b,
 
     Value * const pos = b.CreateAdd(mCurrentProcessedItemCountPhi[ref], offset);
     Value * const ptr = popCountBuffer->getRawItemPointer(b, sz_ZERO, pos);
-    Value * const requiredItems = b.CreateLoad(b.getSizeTy(), ptr);
+    Value * const requiredItems = b.CreateAlignedLoad(b.getSizeTy(), ptr, SizeTyABIAlignment);
     Value * const notEnough = b.CreateICmpUGT(requiredItems, sourceItemCount);
 
     Value * const notDone = b.CreateICmpNE(strideIndex, sz_ZERO);
