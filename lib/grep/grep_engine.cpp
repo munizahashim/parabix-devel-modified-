@@ -1220,7 +1220,7 @@ int32_t GrepEngine::openFile(const std::string & fileName, std::ostringstream & 
                     msgstrm << "icgrep: " << fileName << ": No such file.\n";
                 }
                 else {
-                    msgstrm << "icgrep: " << fileName << ": Failed.\n";
+                    msgstrm << "icgrep: " << fileName << ": Failed; errno = " << errno << ".\n";
                 }
             }
             return fileDescriptor;
