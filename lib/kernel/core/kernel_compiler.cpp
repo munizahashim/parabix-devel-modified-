@@ -141,6 +141,8 @@ void KernelCompiler::generateKernel(KernelBuilder & b) {
     // NOTE: make sure to keep and reset the original compiler here. A kernel could generate new kernels and
     // reuse the same KernelBuilder to do so; this could result in unexpected behaviour if the this function
     // exits without restoring the original compiler state.
+    assert (mTarget->getCompilationStatus() == Kernel::CompilationStatus::FullyInitialized);
+    assert (mTarget->getModule() == b.getModule());
     auto const oc = b.getCompiler();
     b.setCompiler(this);
     b.linkAllNecessaryExternalFunctions();
@@ -157,6 +159,7 @@ void KernelCompiler::generateKernel(KernelBuilder & b) {
     addBaseInternalProperties(b);
     mTarget->addInternalProperties(b);
     mTarget->constructStateTypes(b);
+    assert (mTarget->getCompilationStatus() == Kernel::CompilationStatus::StateConstructed);
     mTarget->addKernelDeclarations(b);
     callGenerateInitializeMethod(b);
     if (LLVM_UNLIKELY(mStreamSetInputBuffers.empty())) {

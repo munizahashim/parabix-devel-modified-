@@ -200,14 +200,14 @@ void Kernel::makeModule(KernelBuilder & b) {
  * @brief generateKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::generateKernel(KernelBuilder & b) {
-    assert (!mGenerated);
-    mGenerated = true;
+    assert (mCompilationStatus < CompilationStatus::StateConstructed);
     if (LLVM_UNLIKELY(mModule == nullptr)) {
         report_fatal_error(StringRef(getName()) + " does not have a module");
     }
     b.setModule(mModule);
     assert (mSharedStateType == nullptr && mThreadLocalStateType == nullptr);
     instantiateKernelCompiler(b)->generateKernel(b);
+    mCompilationStatus = CompilationStatus::LoadedOrCompiled;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -239,9 +239,6 @@ inline StructType * getTypeByName(Module * const m, StringRef name) {
  * @brief ensureLoaded
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::ensureLoaded() {
-    if (LLVM_LIKELY(mGenerated)) {
-        return;
-    }
     assert (mModule);
     assert (mModule->getOrInsertNamedMetadata(getName() + STATE_TYPE_METADATA_SUFFIX)->getNumOperands() == 1);
     SmallVector<char, 256> tmp;
@@ -253,7 +250,7 @@ void Kernel::ensureLoaded() {
  * @brief loadCachedKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::loadCachedKernel(KernelBuilder & b) {
-    assert (!mGenerated);
+    assert (mCompilationStatus < CompilationStatus::StateConstructed || mCompilationStatus == CompilationStatus::UnownedModule);
     assert ("loadCachedKernel was called after associating kernel with module" && !mModule);
     mModule = b.getModule(); assert (mModule);
     assert (mModule->getOrInsertNamedMetadata(getName() + STATE_TYPE_METADATA_SUFFIX)->getNumOperands() == 1);
@@ -261,7 +258,7 @@ void Kernel::loadCachedKernel(KernelBuilder & b) {
     mSharedStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), SHARED_SUFFIX, tmp)));
     mThreadLocalStateType = nullIfEmpty(getTypeByName(mModule, concat(getName(), THREAD_LOCAL_SUFFIX, tmp)));
     linkExternalMethods(b);
-    mGenerated = true;
+    mCompilationStatus = CompilationStatus::LoadedOrCompiled;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
@@ -327,6 +324,8 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
     NamedMDNode * const structTypeMetadata = m->getOrInsertNamedMetadata(strMeta);
 
     assert (structTypeMetadata);
+
+    assert (getCompilationStatus() == CompilationStatus::FullyInitialized);
 
     if (structTypeMetadata->getNumOperands() == 0) {
 
@@ -566,14 +565,14 @@ void Kernel::constructStateTypes(KernelBuilder & b) {
         mThreadLocalStateType = nullIfEmpty(cast<StructType>(tlType));
         assert (mThreadLocalStateType == nullptr || !mThreadLocalStateType->isOpaque());
     }
-
+    mCompilationStatus = CompilationStatus::StateConstructed;
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
  * @brief generateOrLoadKernel
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::generateOrLoadKernel(KernelBuilder & b) {
-    if (LLVM_LIKELY(isGenerated())) {
+    if (LLVM_LIKELY(mModule != nullptr)) {
         /* do nothing */
     } else if (getInitializeFunction(b, false)) {
         loadCachedKernel(b);
@@ -587,6 +586,11 @@ void Kernel::generateOrLoadKernel(KernelBuilder & b) {
  * @brief addKernelDeclarations
  ** ------------------------------------------------------------------------------------------------------------- */
 void Kernel::addKernelDeclarations(KernelBuilder & b) {
+    assert (mCompilationStatus >= CompilationStatus::StateConstructed);
+    if (mCompilationStatus == CompilationStatus::UnownedModule) {
+        assert (mModule);
+        ensureLoaded();
+    }
     addInitializeDeclaration(b);
     if (LLVM_UNLIKELY(mInputStreamSets.empty())) {
         addExpectedOutputSizeDeclaration(b);
@@ -715,6 +719,7 @@ void Kernel::addAdditionalInitializationArgTypes(KernelBuilder & /* b */, InitAr
  * @brief getInitializeThreadLocalFunction
  ** ------------------------------------------------------------------------------------------------------------- */
 Function * Kernel::getInitializeThreadLocalFunction(KernelBuilder & b, const bool alwayReturnDeclaration) const {
+    assert (mCompilationStatus >= CompilationStatus::StateConstructed);
     assert (hasThreadLocal());
     const Module * const module = b.getModule();
     SmallVector<char, 256> tmp;
@@ -729,6 +734,7 @@ Function * Kernel::getInitializeThreadLocalFunction(KernelBuilder & b, const boo
  * @brief addInitializeThreadLocalDeclaration
  ** ------------------------------------------------------------------------------------------------------------- */
 Function * Kernel::addInitializeThreadLocalDeclaration(KernelBuilder & b) const {
+    assert (mCompilationStatus >= CompilationStatus::StateConstructed);
     Function * func = nullptr;
     if (hasThreadLocal()) {
         SmallVector<char, 256> tmp;
@@ -1511,6 +1517,19 @@ void SegmentOrientedKernel::generateKernelMethod(KernelBuilder & b) {
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *
+ * @brief hasInternalScalars
+ ** ------------------------------------------------------------------------------------------------------------- */
+bool Kernel::hasInternalScalars(const ScalarType type) const {
+    for (const InternalScalar & s : mInternalScalars) {
+        errs() << " --- " << getName() << ':' << s.getName() << ' ' << (int)s.getScalarType() << "\n";
+        if (s.getScalarType() == type) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/** ------------------------------------------------------------------------------------------------------------- *
  * @brief getFamilyName
  ** ------------------------------------------------------------------------------------------------------------- */
 std::string Kernel::getFamilyName() const {
@@ -1591,9 +1610,11 @@ Kernel::Kernel(LLVMTypeSystemInterface & ts,
                Bindings && stream_outputs,
                Bindings && scalar_inputs,
                Bindings && scalar_outputs,
-               InternalScalars && internal_scalars)
+               InternalScalars && internal_scalars,
+               CompilationStatus status)
 : mTypeId(typeId)
 , mStride(ts.getBitBlockWidth())
+, mCompilationStatus(status)
 , mInputStreamSets(std::move(stream_inputs))
 , mOutputStreamSets(std::move(stream_outputs))
 , mInputScalars(std::move(scalar_inputs))
@@ -1609,10 +1630,12 @@ Kernel::Kernel(LLVMTypeSystemInterface & ts,
                Bindings && stream_inputs,
                Bindings && stream_outputs,
                Bindings && scalar_inputs,
-               Bindings && scalar_outputs)
+               Bindings && scalar_outputs,
+               CompilationStatus status)
 : AttributeSet(std::move(attributes))
 , mTypeId(typeId)
 , mStride(ts.getBitBlockWidth())
+, mCompilationStatus(status)
 , mInputStreamSets(std::move(stream_inputs))
 , mOutputStreamSets(std::move(stream_outputs))
 , mInputScalars(std::move(scalar_inputs))

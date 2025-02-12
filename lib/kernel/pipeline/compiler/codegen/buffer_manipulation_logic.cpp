@@ -366,7 +366,7 @@ void PipelineCompiler::zeroInputAfterFinalItemCount(KernelBuilder & b, const Vec
             Value * const allocedBytes = b.CreateRoundUpRational(mallocBytes, getPageSize());
             b.CreateFree(existingBuffer);
             Value * const newBuffer = b.CreateAlignedMalloc(allocedBytes, blockSize);
-            b.CreateStore(newBuffer, mallocedPtr);
+            b.CreateAlignedStore(newBuffer, mallocedPtr, PtrTyABIAlignment);
             b.CreateAlignedStore(allocedBytes, mallocedSizePtr, SizeTyABIAlignment);
 
             b.CreateBr(allocateNewBufferExit);

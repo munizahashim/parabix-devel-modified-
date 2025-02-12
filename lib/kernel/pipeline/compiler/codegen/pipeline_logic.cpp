@@ -26,8 +26,9 @@ void PipelineCompiler::generateImplicitKernels(KernelBuilder & b) {
 void PipelineCompiler::getABIAlignments(KernelBuilder & b) {
     auto & DL = b.getModule()->getDataLayout();
     SizeTyABIAlignment = DL.getABITypeAlign(b.getSizeTy()).value();
-    Int64TyABIAlignment = DL.getABITypeAlign(b.getSizeTy()).value();
+    Int64TyABIAlignment = DL.getABITypeAlign(b.getInt64Ty()).value();
     PtrTyABIAlignment = DL.getABITypeAlign(b.getVoidPtrTy()).value();
+    Int32TyABIAlignment = DL.getABITypeAlign(b.getInt32Ty()).value();
 }
 
 /** ------------------------------------------------------------------------------------------------------------- *

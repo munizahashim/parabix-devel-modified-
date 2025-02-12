@@ -194,7 +194,7 @@ Value * PipelineCompiler::callKernelInitializeFunction(KernelBuilder & b, const 
     }
     Value * const retVal = b.CreateCall(fty, func, args);
     if (isKernelFamilyCall(mKernelId)) {
-        b.CreateStore(b.CreatePointerCast(retVal, b.getVoidPtrTy()), threadLocal);
+        b.CreateAlignedStore(b.CreatePointerCast(retVal, b.getVoidPtrTy()), threadLocal, PtrTyABIAlignment);
     }
 }
 

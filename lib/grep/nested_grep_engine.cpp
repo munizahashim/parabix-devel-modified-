@@ -125,20 +125,10 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
         raw_string_ostream name(tmp);
         name << "gitignore";
 
-        auto addKernelCode = [&](Kernel * const K) {
-            assert (K);
-            char flags = '0';
-            if (LLVM_LIKELY(K->isStateful())) {
-                flags |= 1;
-            }
-            if (LLVM_UNLIKELY(K->hasThreadLocal())) {
-                flags |= 2;
-            }
-            if (LLVM_UNLIKELY(K->allocatesInternalStreamSets())) {
-                flags |= 4;
-            }
-            name << flags;
-        };
+        const auto n = patterns.size();
+        assert (n > 0);
+        SmallVector<Kernel *, 32> pipeline;
+        pipeline.reserve(n + 1);
 
         Kernel * const outerKernel = mNested.back();
         StreamSet * resultSoFar = breaks;
@@ -148,13 +138,11 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
             chained->setInputStreamSetAt(0, basisBits);
             chained->setInputStreamSetAt(1, U8index);
             chained->setInputStreamSetAt(2, breaks);
-            addKernelCode(chained);
+            pipeline.push_back(chained);
             assert (chained->getNumOfStreamOutputs() > 0);
             resultSoFar = chained->getOutputStreamSet(0); assert (resultSoFar);
         }
 
-        const auto n = patterns.size();
-        assert (n > 0);
         for (unsigned i = 0; i != n; ++i) {
             StreamSet * MatchResults = nullptr;
             if (LLVM_UNLIKELY(i == (n - 1UL))) {
@@ -182,12 +170,29 @@ void NestedInternalSearchEngine::push(const re::PatternVector & patterns) {
                 options->setCombiningStream(exclude ? GrepCombiningType::Exclude : GrepCombiningType::Include, resultSoFar);
             }
             options->addExternal("UTF8_index", U8index);
-            addKernelCode(E.CreateKernelFamilyCall<ICGrepKernel>(std::move(options)));
+            Kernel * K = E.CreateKernelFamilyCall<ICGrepKernel>(std::move(options));
+            pipeline.push_back(K);
             resultSoFar = MatchResults;
 
         }
         assert (resultSoFar == E.getOutputStreamSet(0));
 
+        mGrepDriver.generateUncachedKernels();
+
+        for (Kernel * K : pipeline) {
+            assert (K->getCompilationStatus() >= Kernel::CompilationStatus::StateConstructed);
+            char flags = '0';
+            if (LLVM_LIKELY(K->isStateful())) {
+                flags |= 1;
+            }
+            if (LLVM_UNLIKELY(K->hasThreadLocal())) {
+                flags |= 2;
+            }
+            if (LLVM_UNLIKELY(K->allocatesInternalStreamSets())) {
+                flags |= 4;
+            }
+            name << flags;
+        }
         name.flush();
 
         E.setUniqueName(name.str());

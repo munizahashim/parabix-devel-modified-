@@ -450,12 +450,12 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(KernelBuilder & b)
             Value * const size = b.getTypeSize(listTy);
             Value * const newEntry = b.CreatePointerCast(b.CreateAlignedMalloc(size, sizeof(uint64_t)), listPtrTy);
             offset[1] = i32_ZERO;
-            b.CreateStore(itemCount, b.CreateGEP(listTy, newEntry, offset));
+            b.CreateAlignedStore(itemCount, b.CreateGEP(listTy, newEntry, offset), SizeTyABIAlignment);
             offset[1] = i32_ONE;
-            b.CreateStore(i64_ONE, b.CreateGEP(listTy, newEntry, offset));
+            b.CreateAlignedStore(i64_ONE, b.CreateGEP(listTy, newEntry, offset), Int64TyABIAlignment);
             offset[1] = i32_TWO;
-            b.CreateStore(b.CreatePointerCast(currentEntry, voidPtrTy), b.CreateGEP(listTy, newEntry, offset));
-            b.CreateStore(b.CreatePointerCast(newEntry, voidPtrTy), b.CreateGEP(listTy, lastEntry, offset));
+            b.CreateAlignedStore(b.CreatePointerCast(currentEntry, voidPtrTy), b.CreateGEP(listTy, newEntry, offset), PtrTyABIAlignment);
+            b.CreateAlignedStore(b.CreatePointerCast(newEntry, voidPtrTy), b.CreateGEP(listTy, lastEntry, offset), PtrTyABIAlignment);
             b.CreateRetVoid();
 
             b.SetInsertPoint(updateEntry);
@@ -465,7 +465,7 @@ void PipelineCompiler::updateTransferredItemsForHistogramData(KernelBuilder & b)
             offset[1] = i32_ONE;
             Value * const ptr = b.CreateGEP(listTy, entryToUpdate, offset);
             Value * const val = b.CreateAdd(b.CreateAlignedLoad(i64Ty, ptr, Int64TyABIAlignment), i64_ONE);
-            b.CreateStore(val, ptr);
+            b.CreateAlignedStore(val, ptr, Int64TyABIAlignment);
             b.CreateRetVoid();
 
             b.restoreIP(ip);
@@ -691,14 +691,14 @@ void PipelineCompiler::printHistogramReport(KernelBuilder & b, HistogramReportTy
         FixedArray<Value *, 2> offset;
         offset[0] = b.getInt32(index++);
         offset[1] = i32_ZERO;
-        b.CreateStore(b.getInt32(kernelId), b.CreateGEP(hkdTy, kernelData, offset));
+        b.CreateAlignedStore(b.getInt32(kernelId), b.CreateGEP(hkdTy, kernelData, offset), Int32TyABIAlignment);
         offset[1] = i32_ONE;
-        b.CreateStore(b.getInt32(numOfPorts), b.CreateGEP(hkdTy, kernelData, offset));
+        b.CreateAlignedStore(b.getInt32(numOfPorts), b.CreateGEP(hkdTy, kernelData, offset), Int32TyABIAlignment);
         offset[1] = i32_TWO;
-        b.CreateStore(b.GetString(getKernel(kernelId)->getName()), b.CreateGEP(hkdTy, kernelData, offset));
+        b.CreateAlignedStore(b.GetString(getKernel(kernelId)->getName()), b.CreateGEP(hkdTy, kernelData, offset), PtrTyABIAlignment);
         Value * const portData = b.CreateAlignedMalloc(hpdTy, b.getSize(numOfPorts), 0, b.getCacheAlignment());
         offset[1] = i32_THREE;
-        b.CreateStore(portData, b.CreateGEP(hkdTy, kernelData, offset));
+        b.CreateAlignedStore(portData, b.CreateGEP(hkdTy, kernelData, offset), PtrTyABIAlignment);
 
         unsigned portIndex = 0;
 
@@ -720,11 +720,11 @@ void PipelineCompiler::printHistogramReport(KernelBuilder & b, HistogramReportTy
 
             offset[0] = b.getInt32(portIndex++);
             offset[1] = i32_ZERO;
-            b.CreateStore(b.getInt32((unsigned)br.Port.Type), b.CreateGEP(hpdTy, portData, offset));
+            b.CreateAlignedStore(b.getInt32((unsigned)br.Port.Type), b.CreateGEP(hpdTy, portData, offset), Int32TyABIAlignment);
             offset[1] = i32_ONE;
-            b.CreateStore(b.getInt32(br.Port.Number), b.CreateGEP(hpdTy, portData, offset));
+            b.CreateAlignedStore(b.getInt32(br.Port.Number), b.CreateGEP(hpdTy, portData, offset), Int32TyABIAlignment);
             offset[1] = i32_TWO;
-            b.CreateStore(b.GetString(bind.getName()), b.CreateGEP(hpdTy, portData, offset));
+            b.CreateAlignedStore(b.GetString(bind.getName()), b.CreateGEP(hpdTy, portData, offset), PtrTyABIAlignment);
 
             const auto prefix = makeBufferName(kernelId, br.Port);
 
@@ -741,10 +741,10 @@ void PipelineCompiler::printHistogramReport(KernelBuilder & b, HistogramReportTy
             }
 
             offset[1] = i32_THREE;
-            b.CreateStore(b.getInt64(maxSize), b.CreateGEP(hpdTy, portData, offset));
+            b.CreateAlignedStore(b.getInt64(maxSize), b.CreateGEP(hpdTy, portData, offset), Int64TyABIAlignment);
 
             offset[1] = i32_FOUR;
-            b.CreateStore(b.CreatePointerCast(data, voidPtrTy), b.CreateGEP(hpdTy, portData, offset));
+            b.CreateAlignedStore(b.CreatePointerCast(data, voidPtrTy), b.CreateGEP(hpdTy, portData, offset), PtrTyABIAlignment);
 
         };
 

@@ -63,9 +63,15 @@ void PipelineCompiler::recordDynamicThreadingState(KernelBuilder & b, Value * se
 
     IntegerType * i64Ty = b.getInt64Ty();
 
+    Type * const floatTy = TypeBuilder<float, false>::get(C);
+
+    auto & dl = b.getModule()->getDataLayout();
+    const auto FloatTyABIAlignment = dl.getABITypeAlign(floatTy).value();
+    const auto Int32TyABIAlignment = dl.getABITypeAlign(b.getInt32Ty()).value();
+
     FixedArray<Type *, 3> DMEntryFields;
     DMEntryFields[0] = i64Ty;
-    DMEntryFields[1] = TypeBuilder<float, false>::get(C);
+    DMEntryFields[1] = floatTy;
     DMEntryFields[2] = b.getInt32Ty();
     StructType * const DMEntryTy = StructType::get(C, DMEntryFields, true);
 
@@ -99,9 +105,9 @@ void PipelineCompiler::recordDynamicThreadingState(KernelBuilder & b, Value * se
     groupIndices[1] = i32_TWO;
     Value * currentNextPtr = b.CreateGEP(DMEntryGroupTy, data, groupIndices);
     assert (newChunk->getType() == b.getVoidPtrTy());
-    b.CreateStore(newChunk, currentNextPtr);
+    b.CreateAlignedStore(newChunk, currentNextPtr, PtrTyABIAlignment);
     newChunk = b.CreatePointerCast(newChunk, cast<PointerType>(data->getType()));
-    b.CreateStore(newChunk, dataPtr);
+    b.CreateAlignedStore(newChunk, dataPtr, PtrTyABIAlignment);
     BasicBlock * const mallocExit = b.GetInsertBlock();
     b.CreateBr(updateDynamicThreading);
 
@@ -112,22 +118,20 @@ void PipelineCompiler::recordDynamicThreadingState(KernelBuilder & b, Value * se
     PHINode * const count = b.CreatePHI(currentCount->getType(), 2);
     count->addIncoming(currentCount, entry);
     count->addIncoming(b.getSize(0), mallocExit);
-
     groupIndices[1] = i32_ONE;
     Value * const nextCount = b.CreateAdd(count, b.getSize(1));
-    b.CreateStore(nextCount, b.CreateGEP(DMEntryGroupTy, statePhi, groupIndices));
-
+    b.CreateAlignedStore(nextCount, b.CreateGEP(DMEntryGroupTy, statePhi, groupIndices), Int64TyABIAlignment);
     FixedArray<Value *, 4> entryIndices;
     entryIndices[0] = i32_ZERO;
     entryIndices[1] = i32_ZERO;
     entryIndices[2] = currentCount;
     entryIndices[3] = i32_ZERO;
-    b.CreateStore(segNo, b.CreateGEP(DMEntryGroupTy, statePhi, entryIndices));
+    b.CreateAlignedStore(segNo, b.CreateGEP(DMEntryGroupTy, statePhi, entryIndices), Int64TyABIAlignment);
     entryIndices[3] = i32_ONE;
-    b.CreateStore(currentSyncOverhead, b.CreateGEP(DMEntryGroupTy, statePhi, entryIndices));
+    b.CreateAlignedStore(currentSyncOverhead, b.CreateGEP(DMEntryGroupTy, statePhi, entryIndices), FloatTyABIAlignment);
     entryIndices[3] = i32_TWO;
     Value * const numThreads = b.CreateTrunc(currentNumOfThreads, b.getInt32Ty());
-    b.CreateStore(numThreads, b.CreateGEP(DMEntryGroupTy, statePhi, entryIndices));
+    b.CreateAlignedStore(numThreads, b.CreateGEP(DMEntryGroupTy, statePhi, entryIndices), Int32TyABIAlignment);
 
 }
 

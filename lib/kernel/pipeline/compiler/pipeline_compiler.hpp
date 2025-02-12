@@ -616,6 +616,7 @@ protected:
     unsigned                                    SizeTyABIAlignment = 0;
     unsigned                                    Int64TyABIAlignment = 0;
     unsigned                                    PtrTyABIAlignment = 0;
+    unsigned                                    Int32TyABIAlignment = 0;
 
     // analysis state
     static constexpr unsigned                   PipelineInput = 0;

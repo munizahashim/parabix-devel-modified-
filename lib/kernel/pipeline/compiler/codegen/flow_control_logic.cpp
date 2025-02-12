@@ -128,7 +128,7 @@ void PipelineCompiler::detemineMaximumNumberOfStrides(KernelBuilder & b) {
                 expanded = b.CreateMul(expanded, b.getSize(THREADLOCAL_BUFFER_CAPACITY_MULTIPLIER));
                 #endif
                 Value * const base = b.CreatePageAlignedMalloc(expanded);
-                b.CreateStore(base, threadLocalPtr);
+                b.CreateAlignedStore(base, threadLocalPtr, PtrTyABIAlignment);
                 b.CreateBr(afterExpansion);
 
                 b.SetInsertPoint(afterExpansion);

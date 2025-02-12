@@ -942,7 +942,7 @@ void PipelineCompiler::generateMultiThreadKernelMethod(KernelBuilder & b) {
     restoreDoSegmentState(storedState);
     if (PipelineHasTerminationSignal) {
         assert (initialTerminationSignalPtr);
-        b.CreateStore(finalTerminationSignalPhi, initialTerminationSignalPtr);
+        b.CreateAlignedStore(finalTerminationSignalPhi, initialTerminationSignalPtr, SizeTyABIAlignment);
     }
 
     assert (getHandle() == initialSharedState);
@@ -1082,20 +1082,24 @@ void PipelineCompiler::writeThreadStructObject(KernelBuilder & b,
     indices2[0] = b.getInt32(0);
     if (LLVM_LIKELY(mTarget->isStateful())) {
         indices2[1] = b.getInt32(SHARED_STATE_PARAM);
-        b.CreateStore(shared, b.CreateInBoundsGEP(threadStateTy, threadState, indices2));
+        b.CreateAlignedStore(shared, b.CreateInBoundsGEP(threadStateTy, threadState, indices2), PtrTyABIAlignment);
     }
     if (LLVM_LIKELY(mTarget->hasThreadLocal())) {
         indices2[1] = b.getInt32(THREAD_LOCAL_PARAM);
-        b.CreateStore(threadLocal, b.CreateInBoundsGEP(threadStateTy, threadState, indices2));
+        b.CreateAlignedStore(threadLocal, b.CreateInBoundsGEP(threadStateTy, threadState, indices2), PtrTyABIAlignment);
     }
     const auto n = props.size();
     assert (threadStateTy->getStructElementType(PIPELINE_PARAMS)->getStructNumElements() == n);
     FixedArray<Value *, 3> indices3;
     indices3[0] = indices2[0];
     indices3[1] = b.getInt32(PIPELINE_PARAMS);
+
+    Type * const paramStructTy = threadStateTy->getStructElementType(PIPELINE_PARAMS);
+    const DataLayout & DL = b.getModule()->getDataLayout();
     for (unsigned i = 0; i < n; ++i) {
         indices3[2] = b.getInt32(i);
-        b.CreateStore(props[i], b.CreateInBoundsGEP(threadStateTy, threadState, indices3));
+        const auto align = DL.getABITypeAlign(paramStructTy->getStructElementType(i)).value();
+        b.CreateAlignedStore(props[i], b.CreateInBoundsGEP(threadStateTy, threadState, indices3), align);
     }
 
     if (mUseDynamicMultithreading) {
@@ -1106,10 +1110,9 @@ void PipelineCompiler::writeThreadStructObject(KernelBuilder & b,
         b.CreateAlignedStore(sz_ZERO, b.CreateInBoundsGEP(threadStateTy, threadState, indices2), SizeTyABIAlignment);
     } else {
         indices2[1] = b.getInt32(INITIAL_SEG_NUMBER);
-        b.CreateStore(threadNum, b.CreateInBoundsGEP(threadStateTy, threadState, indices2));
+        b.CreateAlignedStore(threadNum, b.CreateInBoundsGEP(threadStateTy, threadState, indices2), SizeTyABIAlignment);
         indices2[1] = b.getInt32(FIXED_NUMBER_OF_THREADS);
-
-        b.CreateStore(numOfThreads, b.CreateInBoundsGEP(threadStateTy, threadState, indices2));
+        b.CreateAlignedStore(numOfThreads, b.CreateInBoundsGEP(threadStateTy, threadState, indices2), SizeTyABIAlignment);
     }
 }
 
@@ -1348,7 +1351,7 @@ void PipelineCompiler::writeTerminationSignalToLocalState(KernelBuilder & b, Str
     FixedArray<Value *, 2> indices;
     indices[0] = b.getInt32(0);
     indices[1] = b.getInt32(TERMINATION_SIGNAL);
-    b.CreateStore(b.CreateZExt(terminated, b.getSizeTy()), b.CreateInBoundsGEP(threadStateTy, threadState, indices));
+    b.CreateAlignedStore(b.CreateZExt(terminated, b.getSizeTy()), b.CreateInBoundsGEP(threadStateTy, threadState, indices), SizeTyABIAlignment);
 }
 
 
