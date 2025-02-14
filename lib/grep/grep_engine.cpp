@@ -148,6 +148,7 @@ GrepEngine::GrepEngine(BaseDriver &driver) :
     mNullMode(NullCharMode::Data),
     mGrepDriver(driver),
     mMainMethod(nullptr),
+    mBatchSize(FileBatchSegments * codegen::SegmentSize),
     mBatchMethod(nullptr),
     mNextFileToGrep(0),
     mNextFileToPrint(0),
@@ -202,9 +203,8 @@ void GrepEngine::setRecordBreak(GrepRecordBreakKind b) {
 
 namespace fs = boost::filesystem;
 
-std::vector<std::vector<std::string>> formFileGroups(std::vector<fs::path> paths) {
+std::vector<std::vector<std::string>> formFileGroups(std::vector<fs::path> paths, size_t max_batch_size) {
     const unsigned maxFilesPerGroup = 32;
-    const uintmax_t FileBatchThreshold = 4 * codegen::SegmentSize;
     std::vector<std::vector<std::string>> groups;
     // The total size of files in the current group, or 0 if the
     // the next file should start a new group.
@@ -212,14 +212,15 @@ std::vector<std::vector<std::string>> formFileGroups(std::vector<fs::path> paths
     for (auto p : paths) {
         boost::system::error_code errc;
         auto s = fs::file_size(p, errc);
-        if ((s > 0) && (s < FileBatchThreshold)) {
+        if ((s > 0) && (s + 1 + groupTotalSize < max_batch_size)) {
+            s += 1;  // +1 for an extra "\n"
             if (groupTotalSize == 0) {
                 groups.push_back({p.string()});
                 groupTotalSize = s;
             } else {
                 groups.back().push_back(p.string());
                 groupTotalSize += s;
-                if ((groupTotalSize > FileBatchThreshold) || (groups.back().size() == maxFilesPerGroup)) {
+                if (groups.back().size() == maxFilesPerGroup) {
                     // Signal to start a new group
                     groupTotalSize = 0;
                 }
@@ -240,7 +241,7 @@ void GrepEngine::initFileResult(const std::vector<boost::filesystem::path> & pat
     mResultStrs.resize(n);
     mFileStatus.resize(n, FileStatus::Pending);
     mInputPaths = paths;
-    mFileGroups = formFileGroups(paths);
+    mFileGroups = formFileGroups(paths, mBatchSize);
     const unsigned numOfThreads = std::min(static_cast<unsigned>(codegen::TaskThreads),
                                            std::max(static_cast<unsigned>(mFileGroups.size()), 1u));
     codegen::setTaskThreads(numOfThreads);
@@ -743,8 +744,6 @@ void GrepEngine::grepCodeGen() {
 //  Default Report Match:  lines are emitted with whatever line terminators are found in the
 //  input.  However, if the final line is not terminated, a new line is appended.
 //
-constexpr size_t batch_alignment = 64;
-
 void EmitMatch::setFileLabel(std::string fileLabel) {
     if (mShowFileNames) {
         mLinePrefix = fileLabel + (mInitialTab ? "\t:" : ":");
@@ -1059,7 +1058,7 @@ uint64_t GrepEngine::doGrep(const std::vector<std::string> & fileNames, std::ost
 
     for (auto fileName : fileNames) {
         GrepCallBackObject handler;
-        bool useMMap = mPreferMMap && canMMap(fileName);
+        bool useMMap = mPreferMMap && canMMap(fileName) && (fileNames.size() == 1);
         int32_t fileDescriptor = openFile(fileName, strm);
         if (fileDescriptor == -1) return 0;
         uint64_t grepResult = f(useMMap, fileDescriptor, handler, mMaxCount);
@@ -1101,79 +1100,107 @@ void MatchOnlyEngine::showResult(uint64_t grepResult, const std::string & fileNa
     }
 }
 
+constexpr size_t batch_alignment = 64;
+
 uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm) {
     auto f = mBatchMethod;
     EmitMatch accum(mShowFileNames, mShowLineNumbers, ((mBeforeContext > 0) || (mAfterContext > 0)), mInitialTab);
     accum.setStringStream(&strm);
-    std::vector<int32_t> fileDescriptor(fileNames.size());
-    std::vector<size_t> fileSize(fileNames.size(), 0);
-    size_t cumulativeSize = 0;
-    unsigned filesOpened = 0;
-    unsigned lastOpened = 0;
-    for (unsigned i = 0; i < fileNames.size(); i++) {
-        fileDescriptor[i] = openFile(fileNames[i], strm);
-        if (fileDescriptor[i] == -1) continue;  // File error; skip.
-        struct stat st;
-        if (fstat(fileDescriptor[i], &st) != 0) continue;
-        fileSize[i] = st.st_size;
-        cumulativeSize += st.st_size;
-        filesOpened++;
-        lastOpened = i;
-    }
-    if (filesOpened == 0) return 0;
-    accum.mFileNames.reserve(filesOpened);
-    accum.mFileStartPositions.reserve(filesOpened);
     AlignedAllocator<char, batch_alignment> alloc;
-    size_t current_start_position = 0;
-
-    auto tryMMapOpen = [&]() -> bool {
-        if (filesOpened != 1) return false;
-        if (!canMMap(fileNames[lastOpened])) return false;
-        auto mmap_ptr = mmap(NULL, fileSize[lastOpened], PROT_READ, MAP_PRIVATE, fileDescriptor[lastOpened], 0);
-        if (LLVM_UNLIKELY(mmap_ptr == MAP_FAILED)) {
-            return false;
-        }
-        accum.mBatchBuffer = reinterpret_cast<char *>(mmap_ptr);
-        accum.mFileNames.push_back(fileNames[lastOpened]);
+    if (fileNames.size() == 1) {
+        int32_t fd = openFile(fileNames[0], strm);
+        if (fd == -1) return 0;   // File error; skip.
+        struct stat st;
+        if (fstat(fd, &st) != 0)  return 0;
+        accum.mFileNames.push_back(fileNames[0]);
         accum.mFileStartPositions.push_back(static_cast<size_t>(0));
-        return true;
-    };
-
-    bool usingMMap = false;
-    if (tryMMapOpen()) {
-        usingMMap = true;
-    } else {
-
-        cumulativeSize += filesOpened;  // Add an extra byte per file for possible '\n'.
-        size_t aligned_size = (cumulativeSize + batch_alignment - 1) & -batch_alignment;
-        accum.mBatchBuffer = alloc.allocate(aligned_size, 0);
-        if (accum.mBatchBuffer == nullptr) {
-            llvm::report_fatal_error(llvm::StringRef("Unable to allocate batch buffer of size: ") + std::to_string(aligned_size));
+        accum.setFileLabel(accum.mFileNames[0]);
+        accum.mFileStartLineNumbers.push_back(~static_cast<size_t>(0));
+        // Only try mmap for file groups consisting of a single file.
+        ssize_t bytes_read = 0;
+        bool useMMap = mPreferMMap && canMMap(fileNames[0]);
+        if (useMMap) {
+            auto mmap_ptr = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+            if (LLVM_UNLIKELY(mmap_ptr == MAP_FAILED)) return 0;
+            accum.mBatchBuffer = reinterpret_cast<char *>(mmap_ptr);
+            bytes_read = st.st_size;
+        } else {
+            size_t aligned_size = (st.st_size + batch_alignment - 1) & -batch_alignment;
+            accum.mBatchBuffer = alloc.allocate(aligned_size, 0);
+            if (accum.mBatchBuffer == nullptr) {
+                llvm::report_fatal_error(llvm::StringRef("Unable to allocate batch buffer of size: ") + std::to_string(aligned_size));
+            }
+            bytes_read = read(fd, accum.mBatchBuffer, st.st_size);
+            if (bytes_read <= 0) return 0;
         }
-        char * current_base = accum.mBatchBuffer;
-
-        for (unsigned i = 0; i < fileNames.size(); i++) {
-            if (fileDescriptor[i] == -1) continue;  // Error opening file; skip.
-            ssize_t bytes_read = read(fileDescriptor[i], current_base, fileSize[i]);
-            close(fileDescriptor[i]);
-            if (bytes_read <= 0) continue; // No data or error reading the file; skip.
-            if ((mBinaryFilesMode == argv::WithoutMatch) || (mBinaryFilesMode == argv::Binary)) {
-                auto null_byte_ptr = memchr(current_base, char (0), bytes_read);
-                if (null_byte_ptr != nullptr) { // Binary file;
-                    // Silently skip in the WithoutMatch mode
-                    if (mBinaryFilesMode == argv::WithoutMatch) continue;
-                    strm << "Binary file: " << fileNames[i] << " skipped.\n";
+        bool skip_binary_file = false;
+        if ((mBinaryFilesMode == argv::WithoutMatch) || (mBinaryFilesMode == argv::Binary)) {
+            auto null_byte_ptr = memchr(accum.mBatchBuffer, char (0), bytes_read);
+            if (null_byte_ptr != nullptr) { // Binary file;
+                skip_binary_file = true;
+                if (mBinaryFilesMode != argv::WithoutMatch) {
+                    strm << "Binary file: " << fileNames[0] << " skipped.\n";
                 }
             }
-            accum.mFileNames.push_back(fileNames[i]);
-            accum.mFileStartPositions.push_back(current_start_position);
-            current_base += bytes_read;
-            current_start_position += bytes_read;
-            if (*(current_base - 1) != '\n') {
-                *current_base = '\n';
-                current_base++;
-                current_start_position++;
+        }
+        if (!skip_binary_file) {
+            f(accum.mBatchBuffer, st.st_size, accum, mMaxCount);
+        }
+        if (useMMap) {
+            munmap(reinterpret_cast<void *>(accum.mBatchBuffer), st.st_size);
+        } else {
+            alloc.deallocate(accum.mBatchBuffer, 0);
+        }
+        if (accum.mLineCount > 0) grepMatchFound = true;
+        return accum.mLineCount;
+    }
+    std::vector<size_t> fileSize(fileNames.size(), 0);
+    size_t cumulativeSize = 0;
+    unsigned filesExamined = 0;
+    accum.mFileNames.reserve(fileNames.size());
+    accum.mFileStartPositions.reserve(fileNames.size());
+    accum.mBatchBuffer = alloc.allocate(mBatchSize, 0);
+    size_t current_start_position = 0;
+    if (accum.mBatchBuffer == nullptr) {
+        llvm::report_fatal_error(llvm::StringRef("Unable to allocate batch buffer of size: ") + std::to_string(mBatchSize));
+    }
+    char * current_base = accum.mBatchBuffer;
+    for (unsigned i = 0; i < fileNames.size(); i++) {
+        int32_t fd = openFile(fileNames[i], strm);
+        filesExamined++;
+        if (fd == -1) continue;  // File error; skip.
+        struct stat st;
+        if (fstat(fd, &st) != 0) {
+            close(fd);
+            continue;
+        }
+        fileSize[i] = st.st_size;
+        if (cumulativeSize + fileSize[i] > mBatchSize) {
+            close(fd);
+            //llvm::errs() << "Exceeding mBatchSize: " << cumulativeSize << " + " << fileSize[i] << "\n";
+            break;
+        }
+        ssize_t bytes_read = read(fd, current_base, fileSize[i]);
+        close(fd);
+        if (bytes_read <= 0) continue; // No data or error reading the file; skip.
+        if ((mBinaryFilesMode == argv::WithoutMatch) || (mBinaryFilesMode == argv::Binary)) {
+            auto null_byte_ptr = memchr(current_base, char (0), bytes_read);
+            if (null_byte_ptr != nullptr) { // Binary file;
+                // Silently skip in the WithoutMatch mode
+                if (mBinaryFilesMode != argv::WithoutMatch) {
+                    strm << "Binary file: " << fileNames[i] << " skipped.\n";
+                }
+                continue;
             }
+        }
+        accum.mFileNames.push_back(fileNames[i]);
+        accum.mFileStartPositions.push_back(current_start_position);
+        current_base += bytes_read;
+        current_start_position += bytes_read;
+        if (*(current_base - 1) != '\n') {
+            *current_base = '\n';
+            current_base++;
+            current_start_position++;
         }
         cumulativeSize = current_start_position;
     }
@@ -1188,10 +1215,15 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
         }
         f(accum.mBatchBuffer, cumulativeSize, accum, mMaxCount);
     }
-    if (usingMMap) {
-        munmap(reinterpret_cast<void *>(accum.mBatchBuffer), fileSize[lastOpened]);
-    } else {
-        alloc.deallocate(accum.mBatchBuffer, 0);
+    alloc.deallocate(accum.mBatchBuffer, 0);
+    if (filesExamined < fileNames.size()) {
+        //llvm::errs() << "filesExamined " << filesExamined << "\n";
+        std::vector<std::string> remainingFileNames(fileNames.size() - filesExamined);
+        for (unsigned i = 0; i < remainingFileNames.size(); i++) {
+            remainingFileNames[i] = fileNames[i + filesExamined];
+            //llvm::errs() << "remainingFileNames[i]: " << remainingFileNames[i] << "\n";
+        }
+        accum.mLineCount += doGrep(remainingFileNames, strm);
     }
     if (accum.mLineCount > 0) grepMatchFound = true;
     return accum.mLineCount;
@@ -1213,14 +1245,15 @@ int32_t GrepEngine::openFile(const std::string & fileName, std::ostringstream & 
         int32_t fileDescriptor = open(fileName.c_str(), flags);
         if (LLVM_UNLIKELY(fileDescriptor == -1)) {
             if (!mSuppressFileMessages) {
+                msgstrm << "icgrep: \"" << fileName << "\": ";
                 if (errno == EACCES) {
-                    msgstrm << "icgrep: " << fileName << ": Permission denied.\n";
+                    msgstrm << "Permission denied.\n";
                 }
                 else if (errno == ENOENT) {
-                    msgstrm << "icgrep: " << fileName << ": No such file.\n";
+                    msgstrm << "No such file.\n";
                 }
                 else {
-                    msgstrm << "icgrep: " << fileName << ": Failed; errno = " << errno << ".\n";
+                    msgstrm << "Failed; errno = " << errno << ".\n";
                 }
             }
             return fileDescriptor;

@@ -169,6 +169,7 @@ protected:
     NullCharMode mNullMode;
     BaseDriver & mGrepDriver;
     GrepFunctionType mMainMethod;
+    size_t mBatchSize;
     GrepBatchFunctionType mBatchMethod;
 
     std::atomic<unsigned> mNextFileToGrep;
