@@ -1112,6 +1112,7 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
         if (fd == -1) return 0;   // File error; skip.
         struct stat st;
         if (fstat(fd, &st) != 0)  return 0;
+        if (st.st_size == 0) return 0;
         accum.mFileNames.push_back(fileNames[0]);
         accum.mFileStartPositions.push_back(static_cast<size_t>(0));
         accum.setFileLabel(accum.mFileNames[0]);
