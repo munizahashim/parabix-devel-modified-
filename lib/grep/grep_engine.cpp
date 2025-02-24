@@ -1109,22 +1109,12 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
         accum.setFileLabel(accum.mFileNames[0]);
         accum.mFileStartLineNumbers.push_back(~static_cast<size_t>(0));
         // Only try mmap for file groups consisting of a single file.
-        ssize_t bytes_read = 0;
         bool useMMap = mPreferMMap && canMMap(fileNames[0]);
-        if (useMMap) {
-            auto mmap_ptr = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-            if (LLVM_UNLIKELY(mmap_ptr == MAP_FAILED)) return 0;
-            accum.mBatchBuffer = reinterpret_cast<char *>(mmap_ptr);
-            bytes_read = st.st_size;
-        } else {
-            size_t aligned_size = (st.st_size + batch_alignment - 1) & -batch_alignment;
-            accum.mBatchBuffer = alloc.allocate(aligned_size, 0);
-            if (accum.mBatchBuffer == nullptr) {
-                llvm::report_fatal_error(llvm::StringRef("Unable to allocate batch buffer of size: ") + std::to_string(aligned_size));
-            }
-            bytes_read = read(fd, accum.mBatchBuffer, st.st_size);
-            if (bytes_read <= 0) return 0;
-        }
+        AlignedFileBuffer buf;
+        buf.load(fileNames[0], useMMap);
+        size_t bytes_read = buf.getBufSize();
+        if (bytes_read <= 0) return 0;
+        accum.mBatchBuffer = buf.getBuf();
         bool skip_binary_file = false;
         if ((mBinaryFilesMode == argv::WithoutMatch) || (mBinaryFilesMode == argv::Binary)) {
             auto null_byte_ptr = memchr(accum.mBatchBuffer, char (0), bytes_read);
@@ -1136,13 +1126,9 @@ uint64_t EmitMatchesEngine::doGrep(const std::vector<std::string> & fileNames, s
             }
         }
         if (!skip_binary_file) {
-            f(accum.mBatchBuffer, st.st_size, accum, mMaxCount);
+            f(accum.mBatchBuffer, bytes_read, accum, mMaxCount);
         }
-        if (useMMap) {
-            munmap(reinterpret_cast<void *>(accum.mBatchBuffer), st.st_size);
-        } else {
-            alloc.deallocate(accum.mBatchBuffer, 0);
-        }
+        buf.release();
         if (accum.mLineCount > 0) grepMatchFound = true;
         return accum.mLineCount;
     }
