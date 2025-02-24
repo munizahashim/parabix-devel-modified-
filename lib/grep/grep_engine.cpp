@@ -12,6 +12,7 @@
 #include <sched.h>
 #include <boost/filesystem.hpp>
 #include <toolchain/toolchain.h>
+#include <toolchain/fileutil.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/raw_ostream.h>
@@ -1041,16 +1042,6 @@ void EmitMatchesEngine::grepCodeGen() {
     P.setOutputScalar("countResult", P.CreateConstant(mGrepDriver.getInt64(0)));
     mBatchMethod = P.compile();
 }
-
-bool canMMap(const std::string & fileName) {
-    if (fileName == "-") return false;
-    namespace fs = boost::filesystem;
-    fs::path p(fileName);
-    boost::system::error_code errc;
-    fs::file_status s = fs::status(p, errc);
-    return !errc && is_regular_file(s);
-}
-
 
 uint64_t GrepEngine::doGrep(const std::vector<std::string> & fileNames, std::ostringstream & strm) {
     auto f = mMainMethod;
